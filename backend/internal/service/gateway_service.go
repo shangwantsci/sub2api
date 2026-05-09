@@ -567,6 +567,7 @@ type GatewayService struct {
 	debugClaudeMimic      atomic.Bool
 	channelService        *ChannelService
 	resolver              *ModelPricingResolver
+	claudePoolStatus      *ClaudePoolStatusService
 	debugGatewayBodyFile  atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
@@ -599,6 +600,7 @@ func NewGatewayService(
 	tlsFPProfileService *TLSFingerprintProfileService,
 	channelService *ChannelService,
 	resolver *ModelPricingResolver,
+	claudePoolStatus *ClaudePoolStatusService,
 	balanceNotifyService *BalanceNotifyService,
 ) *GatewayService {
 	userGroupRateTTL := resolveUserGroupRateCacheTTL(cfg)
@@ -634,6 +636,7 @@ func NewGatewayService(
 		tlsFPProfileService:  tlsFPProfileService,
 		channelService:       channelService,
 		resolver:             resolver,
+		claudePoolStatus:     claudePoolStatus,
 		balanceNotifyService: balanceNotifyService,
 	}
 	svc.userGroupRateResolver = newUserGroupRateResolver(
@@ -7845,6 +7848,13 @@ func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID,
 	return resolver.Resolve(ctx, userID, groupID, groupDefaultMultiplier)
 }
 
+func (s *GatewayService) applyClaudePoolDynamicMultiplier(baseMultiplier float64, groupName string, modelNames ...string) float64 {
+	if s == nil || s.claudePoolStatus == nil {
+		return baseMultiplier
+	}
+	return s.claudePoolStatus.ApplyDynamicMultiplierForModels(baseMultiplier, groupName, modelNames...)
+}
+
 // RecordUsageInput 记录使用量的输入参数
 type RecordUsageInput struct {
 	Result             *ForwardResult
@@ -8372,6 +8382,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if apiKey.GroupID != nil && apiKey.Group != nil {
 		groupDefault := apiKey.Group.RateMultiplier
 		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
+		multiplier = s.applyClaudePoolDynamicMultiplier(
+			multiplier,
+			apiKey.Group.Name,
+			result.Model,
+			result.UpstreamModel,
+			input.OriginalModel,
+			input.ChannelMappedModel,
+		)
 	}
 	imageMultiplier := resolveImageRateMultiplier(apiKey, multiplier)
 

@@ -603,6 +603,16 @@ type ImageConcurrencyConfig struct {
 	MaxWaitingRequests int `mapstructure:"max_waiting_requests"`
 }
 
+// ClaudePoolPricingConfig controls the custom Derouter Claude pool multiplier overlay.
+type ClaudePoolPricingConfig struct {
+	Enabled                bool    `mapstructure:"enabled"`
+	GroupName              string  `mapstructure:"group_name"`
+	SourceURL              string  `mapstructure:"source_url"`
+	BaseCoefficient        float64 `mapstructure:"base_coefficient"`
+	RefreshIntervalSeconds int     `mapstructure:"refresh_interval_seconds"`
+	StaleAfterSeconds      int     `mapstructure:"stale_after_seconds"`
+}
+
 const (
 	ImageConcurrencyOverflowModeReject = "reject"
 	ImageConcurrencyOverflowModeWait   = "wait"
@@ -642,6 +652,8 @@ type GatewayConfig struct {
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
 	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
+	// ClaudePoolPricing: Derouter Claude 号池动态倍率覆盖配置
+	ClaudePoolPricing ClaudePoolPricingConfig `mapstructure:"claude_pool_pricing"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -1327,6 +1339,17 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Log.Environment = strings.TrimSpace(cfg.Log.Environment)
 	cfg.Log.StacktraceLevel = strings.ToLower(strings.TrimSpace(cfg.Log.StacktraceLevel))
 	cfg.Log.Output.FilePath = strings.TrimSpace(cfg.Log.Output.FilePath)
+	cfg.Gateway.ClaudePoolPricing.GroupName = strings.TrimSpace(cfg.Gateway.ClaudePoolPricing.GroupName)
+	cfg.Gateway.ClaudePoolPricing.SourceURL = strings.TrimSpace(cfg.Gateway.ClaudePoolPricing.SourceURL)
+	if cfg.Gateway.ClaudePoolPricing.BaseCoefficient <= 0 {
+		cfg.Gateway.ClaudePoolPricing.BaseCoefficient = 0.8
+	}
+	if cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds <= 0 {
+		cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds = 300
+	}
+	if cfg.Gateway.ClaudePoolPricing.StaleAfterSeconds <= 0 {
+		cfg.Gateway.ClaudePoolPricing.StaleAfterSeconds = 1800
+	}
 	cfg.Gateway.ForcedCodexInstructionsTemplateFile = strings.TrimSpace(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
 	if cfg.Gateway.ForcedCodexInstructionsTemplateFile != "" {
 		content, err := os.ReadFile(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
@@ -1720,6 +1743,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)
 	viper.SetDefault("gateway.image_concurrency.wait_timeout_seconds", 30)
 	viper.SetDefault("gateway.image_concurrency.max_waiting_requests", 100)
+	viper.SetDefault("gateway.claude_pool_pricing.enabled", true)
+	viper.SetDefault("gateway.claude_pool_pricing.group_name", "claude满血默认")
+	viper.SetDefault("gateway.claude_pool_pricing.source_url", "https://derouter.ai/pricing")
+	viper.SetDefault("gateway.claude_pool_pricing.base_coefficient", 0.8)
+	viper.SetDefault("gateway.claude_pool_pricing.refresh_interval_seconds", 300)
+	viper.SetDefault("gateway.claude_pool_pricing.stale_after_seconds", 1800)
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
@@ -1924,6 +1953,23 @@ func (c *Config) Validate() error {
 	}
 	if c.Security.CSP.Enabled && strings.TrimSpace(c.Security.CSP.Policy) == "" {
 		return fmt.Errorf("security.csp.policy is required when CSP is enabled")
+	}
+	if c.Gateway.ClaudePoolPricing.Enabled {
+		if strings.TrimSpace(c.Gateway.ClaudePoolPricing.GroupName) == "" {
+			return fmt.Errorf("gateway.claude_pool_pricing.group_name is required when enabled")
+		}
+		if c.Gateway.ClaudePoolPricing.BaseCoefficient <= 0 {
+			return fmt.Errorf("gateway.claude_pool_pricing.base_coefficient must be positive")
+		}
+		if c.Gateway.ClaudePoolPricing.RefreshIntervalSeconds <= 0 {
+			return fmt.Errorf("gateway.claude_pool_pricing.refresh_interval_seconds must be positive")
+		}
+		if c.Gateway.ClaudePoolPricing.StaleAfterSeconds <= 0 {
+			return fmt.Errorf("gateway.claude_pool_pricing.stale_after_seconds must be positive")
+		}
+		if err := ValidateAbsoluteHTTPURL(c.Gateway.ClaudePoolPricing.SourceURL); err != nil {
+			return fmt.Errorf("gateway.claude_pool_pricing.source_url invalid: %w", err)
+		}
 	}
 	if c.LinuxDo.Enabled {
 		if strings.TrimSpace(c.LinuxDo.ClientID) == "" {

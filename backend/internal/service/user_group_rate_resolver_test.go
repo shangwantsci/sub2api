@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
 )
@@ -80,4 +81,29 @@ func TestGatewayServiceGetUserGroupRateMultiplier_FallbacksAndUsesExistingResolv
 	got := svc.getUserGroupRateMultiplier(context.Background(), 101, 202, 1.2)
 	require.Equal(t, rate, got)
 	require.Equal(t, 1, repo.calls)
+}
+
+func TestGatewayServiceApplyClaudePoolDynamicMultiplier(t *testing.T) {
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	claudePoolStatus := NewClaudePoolStatusService(&config.Config{
+		Gateway: config.GatewayConfig{
+			ClaudePoolPricing: config.ClaudePoolPricingConfig{
+				Enabled:           true,
+				GroupName:         "claude满血默认",
+				BaseCoefficient:   0.8,
+				StaleAfterSeconds: 1800,
+			},
+		},
+	})
+	claudePoolStatus.now = func() time.Time { return now }
+	claudePoolStatus.snapshot = ClaudePoolSnapshot{
+		Status:      ClaudePoolStatusFresh,
+		Coefficient: 1.5,
+		UpdatedAt:   now,
+	}
+	svc := &GatewayService{claudePoolStatus: claudePoolStatus}
+
+	require.Equal(t, 3.0, svc.applyClaudePoolDynamicMultiplier(1.6, "claude满血默认", "claude-opus-4-1"))
+	require.Equal(t, 1.6, svc.applyClaudePoolDynamicMultiplier(1.6, "ordinary", "claude-opus-4-1"))
+	require.Equal(t, 1.6, svc.applyClaudePoolDynamicMultiplier(1.6, "claude满血默认", "gpt-5.2"))
 }

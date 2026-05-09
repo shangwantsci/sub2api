@@ -78,6 +78,20 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultClaudePoolPricingConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	require.True(t, cfg.Gateway.ClaudePoolPricing.Enabled)
+	require.Equal(t, "claude满血默认", cfg.Gateway.ClaudePoolPricing.GroupName)
+	require.Equal(t, "https://derouter.ai/pricing", cfg.Gateway.ClaudePoolPricing.SourceURL)
+	require.Equal(t, 0.8, cfg.Gateway.ClaudePoolPricing.BaseCoefficient)
+	require.Equal(t, 300, cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds)
+	require.Equal(t, 1800, cfg.Gateway.ClaudePoolPricing.StaleAfterSeconds)
+}
+
 func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

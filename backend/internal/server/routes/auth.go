@@ -190,6 +190,11 @@ func RegisterAuthRoutes(
 		settings.GET("/public", h.Setting.GetPublicSettings)
 	}
 
+	claudePool := v1.Group("/claude-pool")
+	{
+		claudePool.GET("/status", h.ClaudePool.GetStatus)
+	}
+
 	// 需要认证的当前用户信息
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))

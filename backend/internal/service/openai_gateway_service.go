@@ -336,6 +336,7 @@ type OpenAIGatewayService struct {
 	channelService        *ChannelService
 	balanceNotifyService  *BalanceNotifyService
 	settingService        *SettingService
+	claudePoolStatus      *ClaudePoolStatusService
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -377,6 +378,7 @@ func NewOpenAIGatewayService(
 	channelService *ChannelService,
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
+	claudePoolStatus *ClaudePoolStatusService,
 ) *OpenAIGatewayService {
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,
@@ -408,11 +410,19 @@ func NewOpenAIGatewayService(
 		channelService:        channelService,
 		balanceNotifyService:  balanceNotifyService,
 		settingService:        settingService,
+		claudePoolStatus:      claudePoolStatus,
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
+}
+
+func (s *OpenAIGatewayService) applyClaudePoolDynamicMultiplier(baseMultiplier float64, groupName string, modelNames ...string) float64 {
+	if s == nil || s.claudePoolStatus == nil {
+		return baseMultiplier
+	}
+	return s.claudePoolStatus.ApplyDynamicMultiplierForModels(baseMultiplier, groupName, modelNames...)
 }
 
 // ResolveChannelMapping 解析渠道级模型映射（代理到 ChannelService）
@@ -5244,6 +5254,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
 		}
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
+		multiplier = s.applyClaudePoolDynamicMultiplier(
+			multiplier,
+			apiKey.Group.Name,
+			result.Model,
+			result.UpstreamModel,
+			result.BillingModel,
+			input.OriginalModel,
+			input.ChannelMappedModel,
+		)
 	}
 	imageMultiplier := resolveImageRateMultiplier(apiKey, multiplier)
 
