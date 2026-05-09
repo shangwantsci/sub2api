@@ -12,9 +12,7 @@
     <!-- Right side label -->
     <span v-if="showLabel" :class="labelClass">
       <template v-if="hasCustomRate">
-        <!-- 原倍率删除线 + 专属倍率高亮 -->
-        <span class="line-through opacity-50 mr-0.5">{{ rateMultiplier }}x</span>
-        <span class="font-bold">{{ userRateMultiplier }}x</span>
+        {{ effectiveRateLabel }}
       </template>
       <template v-else>
         {{ labelText }}
@@ -65,6 +63,11 @@ const hasCustomRate = computed(() => {
     props.rateMultiplier !== undefined &&
     props.userRateMultiplier !== props.rateMultiplier
   )
+})
+
+const effectiveRateLabel = computed(() => {
+  const rate = hasCustomRate.value ? props.userRateMultiplier : props.rateMultiplier
+  return rate !== undefined && rate !== null ? `${rate}x` : ''
 })
 
 // 是否显示右侧标签
