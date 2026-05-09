@@ -36,8 +36,8 @@ var (
 
 type ClaudePoolModelStatus struct {
 	Name           string  `json:"name"`
-	InputPriceUSD  float64 `json:"input_price_usd"`
-	OutputPriceUSD float64 `json:"output_price_usd"`
+	InputPriceUSD  float64 `json:"-"`
+	OutputPriceUSD float64 `json:"-"`
 	LoadPercent    float64 `json:"load_percent"`
 	IdlePercent    float64 `json:"idle_percent"`
 	Coefficient    float64 `json:"coefficient"`
@@ -51,7 +51,7 @@ type ClaudePoolPricingRule struct {
 
 type ClaudePoolSnapshot struct {
 	Status        string                  `json:"status"`
-	SourceURL     string                  `json:"source_url"`
+	SourceURL     string                  `json:"-"`
 	UpdatedAt     time.Time               `json:"updated_at,omitempty"`
 	AgeSeconds    int64                   `json:"age_seconds"`
 	Stale         bool                    `json:"stale"`
@@ -61,7 +61,7 @@ type ClaudePoolSnapshot struct {
 	SelectedModel string                  `json:"selected_model,omitempty"`
 	StateLabel    string                  `json:"state_label"`
 	Models        []ClaudePoolModelStatus `json:"models"`
-	PricingRules  []ClaudePoolPricingRule `json:"pricing_rules"`
+	PricingRules  []ClaudePoolPricingRule `json:"-"`
 }
 
 type ClaudePoolStatusService struct {
@@ -226,7 +226,7 @@ func (s *ClaudePoolStatusService) RefreshOnce(ctx context.Context) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("derouter status HTTP %d", resp.StatusCode)
+		err := fmt.Errorf("claude pool status HTTP %d", resp.StatusCode)
 		s.markRefreshFailed(err)
 		return err
 	}
@@ -352,7 +352,7 @@ func (s *ClaudePoolStatusService) isSnapshotStale(snapshot ClaudePoolSnapshot) b
 }
 
 func ParseDerouterClaudePoolStatusHTML(raw string, now time.Time) (ClaudePoolSnapshot, error) {
-	tokens := tokenizeDerouterHTML(raw)
+	tokens := tokenizeDerouterHTML(extractDerouterLivePricingSection(raw))
 	models := make([]ClaudePoolModelStatus, 0, 8)
 	for i := 0; i < len(tokens); i++ {
 		if !strings.EqualFold(tokens[i], "Claude") {
@@ -408,17 +408,44 @@ func ParseDerouterClaudePoolStatusHTML(raw string, now time.Time) (ClaudePoolSna
 	}, nil
 }
 
+func extractDerouterLivePricingSection(raw string) string {
+	text := derouterPlainText(raw)
+	lower := strings.ToLower(text)
+	start := strings.Index(lower, "current live prices")
+	if start < 0 {
+		start = strings.Index(lower, "network load")
+	}
+	if start < 0 {
+		return raw
+	}
+	text = text[start:]
+	lower = strings.ToLower(text)
+	end := len(text)
+	for _, marker := range []string{"get started for free", "why derouter", "why ", "sign up"} {
+		if idx := strings.Index(lower, marker); idx >= 0 && idx < end {
+			end = idx
+		}
+	}
+	return text[:end]
+}
+
 func tokenizeDerouterHTML(raw string) []string {
-	text := strings.ReplaceAll(raw, "&nbsp;", " ")
-	text = derouterHTMLTagPattern.ReplaceAllString(text, " ")
-	text = htmlpkg.UnescapeString(text)
-	text = strings.ReplaceAll(text, "×", " × ")
-	text = strings.ReplaceAll(text, "%", " % ")
-	text = derouterSpacePattern.ReplaceAllString(text, " ")
+	text := derouterPlainText(raw)
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
 	return strings.Fields(text)
+}
+
+func derouterPlainText(raw string) string {
+	text := strings.ReplaceAll(raw, "&nbsp;", " ")
+	text = derouterHTMLTagPattern.ReplaceAllString(text, " ")
+	text = htmlpkg.UnescapeString(text)
+	text = strings.ReplaceAll(text, "$", " $")
+	text = strings.ReplaceAll(text, "×", " × ")
+	text = strings.ReplaceAll(text, "%", " % ")
+	text = derouterSpacePattern.ReplaceAllString(text, " ")
+	return text
 }
 
 func collectClaudeModelName(tokens []string, start int) (string, int) {
@@ -452,19 +479,20 @@ func parseNextTwoMoneyTokens(tokens []string, start int) (float64, float64, int,
 }
 
 func parseLoadAndCoefficient(tokens []string, start int) (float64, float64, bool) {
-	var loadPercent float64
+	var idlePercent float64
 	var coefficient float64
-	hasLoad := false
+	hasIdle := false
 	hasCoefficient := false
 	limit := start + 14
 	if limit > len(tokens) {
 		limit = len(tokens)
 	}
 	for i := start; i < limit; i++ {
-		if !hasLoad {
+		if !hasIdle {
 			if value, ok := parsePercentTokenAt(tokens, i); ok {
-				loadPercent = clampPercent(value)
-				hasLoad = true
+				// The live pricing page shows available capacity, so convert it to load internally.
+				idlePercent = clampPercent(value)
+				hasIdle = true
 				continue
 			}
 		}
@@ -476,11 +504,11 @@ func parseLoadAndCoefficient(tokens []string, start int) (float64, float64, bool
 			}
 		}
 	}
-	if hasLoad && !hasCoefficient {
-		coefficient = coefficientForIdlePercent(100 - loadPercent)
+	if hasIdle && !hasCoefficient {
+		coefficient = coefficientForIdlePercent(idlePercent)
 		hasCoefficient = coefficient > 0
 	}
-	return loadPercent, coefficient, hasLoad && hasCoefficient
+	return clampPercent(100 - idlePercent), coefficient, hasIdle && hasCoefficient
 }
 
 func isMoneyToken(token string) bool {

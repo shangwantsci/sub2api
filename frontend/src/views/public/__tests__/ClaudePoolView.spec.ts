@@ -26,7 +26,6 @@ describe('ClaudePoolView', () => {
     getStatus.mockResolvedValue({
       data: {
         status: 'fresh',
-        source_url: 'https://derouter.ai/pricing',
         updated_at: '2026-05-09T12:00:00Z',
         age_seconds: 12,
         stale: false,
@@ -38,15 +37,10 @@ describe('ClaudePoolView', () => {
         models: [
           {
             name: 'Claude Sonnet 4.6',
-            input_price_usd: 0.8,
-            output_price_usd: 4,
             load_percent: 4,
             idle_percent: 96,
             coefficient: 0.8,
           },
-        ],
-        pricing_rules: [
-          { idle_range: '>80%', coefficient: 0.8, label: '八折' },
         ],
       },
     })
@@ -63,9 +57,11 @@ describe('ClaudePoolView', () => {
     await flushPromises()
 
     expect(getStatus).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Claude 号池状态')
+    expect(wrapper.text()).toContain('网络负载')
     expect(wrapper.text()).toContain('0.80x')
-    expect(wrapper.text()).toContain('4%')
-    expect(wrapper.text()).toContain('Claude Sonnet 4.6')
+    expect(wrapper.text()).toContain('96%')
+    expect(wrapper.text()).toContain('claude-sonnet-4-6')
+    expect(wrapper.text()).not.toContain('Derouter')
+    expect(wrapper.text()).not.toContain('$')
   })
 })

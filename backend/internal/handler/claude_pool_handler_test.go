@@ -26,11 +26,13 @@ func TestClaudePoolHandlerGetStatus_PublicEnvelope(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var resp struct {
 		Code int `json:"code"`
-		Data struct {
-			Status string `json:"status"`
-		} `json:"data"`
+		Data map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Code)
-	require.Equal(t, service.ClaudePoolStatusUnavailable, resp.Data.Status)
+	require.Equal(t, service.ClaudePoolStatusUnavailable, resp.Data["status"])
+	require.NotContains(t, resp.Data, "source_url")
+	require.NotContains(t, recorder.Body.String(), "input_price_usd")
+	require.NotContains(t, recorder.Body.String(), "output_price_usd")
+	require.NotContains(t, recorder.Body.String(), "pricing_rules")
 }
