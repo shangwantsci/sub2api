@@ -1345,7 +1345,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.ClaudePoolPricing.BaseCoefficient = 0.8
 	}
 	if cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds <= 0 {
-		cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds = 300
+		cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds = 60
 	}
 	if cfg.Gateway.ClaudePoolPricing.StaleAfterSeconds <= 0 {
 		cfg.Gateway.ClaudePoolPricing.StaleAfterSeconds = 1800
@@ -1747,7 +1747,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.claude_pool_pricing.group_name", "claude满血默认")
 	viper.SetDefault("gateway.claude_pool_pricing.source_url", "https://derouter.ai/pricing")
 	viper.SetDefault("gateway.claude_pool_pricing.base_coefficient", 0.8)
-	viper.SetDefault("gateway.claude_pool_pricing.refresh_interval_seconds", 300)
+	viper.SetDefault("gateway.claude_pool_pricing.refresh_interval_seconds", 60)
 	viper.SetDefault("gateway.claude_pool_pricing.stale_after_seconds", 1800)
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)

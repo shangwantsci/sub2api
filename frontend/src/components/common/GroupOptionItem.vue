@@ -26,7 +26,17 @@
     <div class="flex shrink-0 items-center gap-2 pt-0.5">
       <!-- Rate pill (platform color) -->
       <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
-        {{ effectiveRateLabel }} 倍率
+        <template v-if="dynamicRateInfo.showDynamicRate">
+          <span class="inline-flex items-center gap-1">
+            <span class="line-through opacity-60">{{ dynamicRateInfo.baseLabel }}</span>
+            <span>{{ dynamicRateInfo.actualLabel }}</span>
+            <span class="rounded bg-white/60 px-1 text-[10px] font-semibold dark:bg-black/20">当前</span>
+          </span>
+        </template>
+        <template v-else>
+          {{ effectiveRateLabel }}
+        </template>
+        倍率
       </span>
       <!-- Checkmark -->
       <svg
@@ -47,6 +57,7 @@
 import { computed } from 'vue'
 import GroupBadge from './GroupBadge.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
+import { resolveClaudePoolDynamicRate, useClaudePoolDynamicRate } from '@/composables/useClaudePoolDynamicRate'
 
 interface Props {
   name: string
@@ -66,20 +77,22 @@ const props = withDefaults(defineProps<Props>(), {
   userRateMultiplier: null
 })
 
-// Whether user has a custom rate different from default
-const hasCustomRate = computed(() => {
-  return (
-    props.userRateMultiplier !== null &&
-    props.userRateMultiplier !== undefined &&
-    props.rateMultiplier !== undefined &&
-    props.userRateMultiplier !== props.rateMultiplier
-  )
-})
+const { claudePoolStatus } = useClaudePoolDynamicRate()
 
 const effectiveRateLabel = computed(() => {
-  const rate = hasCustomRate.value ? props.userRateMultiplier : props.rateMultiplier
-  return rate !== undefined && rate !== null ? `${rate}x` : ''
+  return dynamicRateInfo.value.baseLabel
 })
+
+const dynamicRateInfo = computed(() =>
+  resolveClaudePoolDynamicRate(
+    {
+      name: props.name,
+      rateMultiplier: props.rateMultiplier,
+      userRateMultiplier: props.userRateMultiplier,
+    },
+    claudePoolStatus.value
+  )
+)
 
 // Rate pill color matches platform badge color
 const ratePillClass = computed(() => {

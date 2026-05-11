@@ -77,7 +77,7 @@
               CLAUDE
             </span>
             <span class="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold tabular-nums text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
-              空闲 {{ percentText(status.idle_percent) }}
+              压力 {{ percentText(status.load_percent) }}
             </span>
           </div>
 
@@ -88,11 +88,11 @@
                   {{ displayModelName(model.name) }}
                 </span>
                 <span class="w-14 flex-shrink-0 text-right text-sm tabular-nums text-stone-400 dark:text-dark-400">
-                  {{ percentText(model.idle_percent) }}
+                  {{ percentText(model.load_percent) }}
                 </span>
               </div>
               <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-stone-100 dark:bg-dark-800">
-                <div class="h-full rounded-full bg-emerald-400" :style="{ width: idleBarWidth(model.idle_percent) }"></div>
+                <div class="h-full rounded-full bg-emerald-400" :style="{ width: loadBarWidth(model.load_percent) }"></div>
               </div>
             </div>
           </div>
@@ -193,8 +193,8 @@ function displayModelName(name: string): string {
     .replace(/\s+/g, '-')
 }
 
-function idleBarWidth(idlePercent: number): string {
-  return `${clampPercent(idlePercent)}%`
+function loadBarWidth(loadPercent: number): string {
+  return `${clampPercent(loadPercent)}%`
 }
 
 const updatedAtText = computed(() => {

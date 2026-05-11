@@ -11,7 +11,14 @@
     <span class="truncate">{{ name }}</span>
     <!-- Right side label -->
     <span v-if="showLabel" :class="labelClass">
-      <template v-if="hasCustomRate">
+      <template v-if="showDynamicRate">
+        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+          <span class="line-through opacity-60">{{ dynamicRateInfo.baseLabel }}</span>
+          <span>{{ dynamicRateInfo.actualLabel }}</span>
+          <span class="rounded bg-black/10 px-1 text-[9px] font-semibold dark:bg-white/10">当前</span>
+        </span>
+      </template>
+      <template v-else-if="hasCustomRate">
         {{ effectiveRateLabel }}
       </template>
       <template v-else>
@@ -25,6 +32,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubscriptionType, GroupPlatform } from '@/types'
+import { resolveClaudePoolDynamicRate, useClaudePoolDynamicRate } from '@/composables/useClaudePoolDynamicRate'
 import PlatformIcon from './PlatformIcon.vue'
 
 interface Props {
@@ -52,6 +60,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const { t } = useI18n()
+const { claudePoolStatus } = useClaudePoolDynamicRate()
 
 const isSubscription = computed(() => props.subscriptionType === 'subscription')
 
@@ -66,8 +75,22 @@ const hasCustomRate = computed(() => {
 })
 
 const effectiveRateLabel = computed(() => {
-  const rate = hasCustomRate.value ? props.userRateMultiplier : props.rateMultiplier
-  return rate !== undefined && rate !== null ? `${rate}x` : ''
+  return dynamicRateInfo.value.baseLabel
+})
+
+const dynamicRateInfo = computed(() =>
+  resolveClaudePoolDynamicRate(
+    {
+      name: props.name,
+      rateMultiplier: props.rateMultiplier,
+      userRateMultiplier: props.userRateMultiplier,
+    },
+    claudePoolStatus.value
+  )
+)
+
+const showDynamicRate = computed(() => {
+  return dynamicRateInfo.value.showDynamicRate && (!isSubscription.value || props.alwaysShowRate || hasCustomRate.value)
 })
 
 // 是否显示右侧标签
@@ -81,7 +104,7 @@ const showLabel = computed(() => {
 
 // Label text
 const labelText = computed(() => {
-  const rateLabel = props.rateMultiplier !== undefined ? `${props.rateMultiplier}x` : ''
+  const rateLabel = dynamicRateInfo.value.baseLabel
   if (isSubscription.value && !props.alwaysShowRate) {
     // 如果有剩余天数，显示天数
     if (props.daysRemaining !== null && props.daysRemaining !== undefined) {

@@ -123,7 +123,7 @@ func normalizeClaudePoolPricingConfig(cfg *config.Config) config.ClaudePoolPrici
 		GroupName:              "claude满血默认",
 		SourceURL:              "https://derouter.ai/pricing",
 		BaseCoefficient:        0.8,
-		RefreshIntervalSeconds: 300,
+		RefreshIntervalSeconds: 60,
 		StaleAfterSeconds:      1800,
 	}
 	if cfg != nil {
@@ -141,7 +141,7 @@ func normalizeClaudePoolPricingConfig(cfg *config.Config) config.ClaudePoolPrici
 		out.BaseCoefficient = 0.8
 	}
 	if out.RefreshIntervalSeconds <= 0 {
-		out.RefreshIntervalSeconds = 300
+		out.RefreshIntervalSeconds = 60
 	}
 	if out.StaleAfterSeconds <= 0 {
 		out.StaleAfterSeconds = 1800
@@ -479,20 +479,19 @@ func parseNextTwoMoneyTokens(tokens []string, start int) (float64, float64, int,
 }
 
 func parseLoadAndCoefficient(tokens []string, start int) (float64, float64, bool) {
-	var idlePercent float64
+	var loadPercent float64
 	var coefficient float64
-	hasIdle := false
+	hasLoad := false
 	hasCoefficient := false
 	limit := start + 14
 	if limit > len(tokens) {
 		limit = len(tokens)
 	}
 	for i := start; i < limit; i++ {
-		if !hasIdle {
+		if !hasLoad {
 			if value, ok := parsePercentTokenAt(tokens, i); ok {
-				// The live pricing page shows available capacity, so convert it to load internally.
-				idlePercent = clampPercent(value)
-				hasIdle = true
+				loadPercent = clampPercent(value)
+				hasLoad = true
 				continue
 			}
 		}
@@ -504,11 +503,11 @@ func parseLoadAndCoefficient(tokens []string, start int) (float64, float64, bool
 			}
 		}
 	}
-	if hasIdle && !hasCoefficient {
-		coefficient = coefficientForIdlePercent(idlePercent)
+	if hasLoad && !hasCoefficient {
+		coefficient = coefficientForIdlePercent(clampPercent(100 - loadPercent))
 		hasCoefficient = coefficient > 0
 	}
-	return clampPercent(100 - idlePercent), coefficient, hasIdle && hasCoefficient
+	return loadPercent, coefficient, hasLoad && hasCoefficient
 }
 
 func isMoneyToken(token string) bool {

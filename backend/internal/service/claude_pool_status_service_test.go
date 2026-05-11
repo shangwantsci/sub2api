@@ -26,8 +26,8 @@ func TestParseDerouterClaudePoolStatusHTML_SelectsMaxClaudeCoefficient(t *testin
 	require.NoError(t, err)
 	require.Equal(t, 3, len(snapshot.Models))
 	require.Equal(t, 1.20, snapshot.Coefficient)
-	require.Equal(t, 32.0, snapshot.LoadPercent)
-	require.Equal(t, 68.0, snapshot.IdlePercent)
+	require.Equal(t, 68.0, snapshot.LoadPercent)
+	require.Equal(t, 32.0, snapshot.IdlePercent)
 	require.Equal(t, "Claude Sonnet 4.6", snapshot.SelectedModel)
 	require.Equal(t, now, snapshot.UpdatedAt)
 }
@@ -55,10 +55,10 @@ func TestParseDerouterClaudePoolStatusHTML_UsesLivePricingSection(t *testing.T) 
 
 	require.NoError(t, err)
 	require.Equal(t, 2, len(snapshot.Models))
-	require.Equal(t, 2.0, snapshot.LoadPercent)
-	require.Equal(t, 98.0, snapshot.IdlePercent)
+	require.Equal(t, 99.0, snapshot.LoadPercent)
+	require.Equal(t, 1.0, snapshot.IdlePercent)
 	require.Equal(t, 0.80, snapshot.Coefficient)
-	require.Equal(t, "Claude Haiku 4.5", snapshot.SelectedModel)
+	require.Equal(t, "Claude Opus 4.7", snapshot.SelectedModel)
 }
 
 func TestParseDerouterClaudePoolStatusHTML_RejectsMissingClaudeRows(t *testing.T) {

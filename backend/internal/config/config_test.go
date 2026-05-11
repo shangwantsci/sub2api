@@ -88,7 +88,7 @@ func TestLoadDefaultClaudePoolPricingConfig(t *testing.T) {
 	require.Equal(t, "claude满血默认", cfg.Gateway.ClaudePoolPricing.GroupName)
 	require.Equal(t, "https://derouter.ai/pricing", cfg.Gateway.ClaudePoolPricing.SourceURL)
 	require.Equal(t, 0.8, cfg.Gateway.ClaudePoolPricing.BaseCoefficient)
-	require.Equal(t, 300, cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds)
+	require.Equal(t, 60, cfg.Gateway.ClaudePoolPricing.RefreshIntervalSeconds)
 	require.Equal(t, 1800, cfg.Gateway.ClaudePoolPricing.StaleAfterSeconds)
 }
 
