@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { useAppStore } from '@/stores'
 
 const getStatus = vi.hoisted(() => vi.fn())
 
@@ -22,7 +24,15 @@ vi.mock('@/api/claudePool', () => ({
 import ClaudePoolView from '../ClaudePoolView.vue'
 
 describe('ClaudePoolView', () => {
+  beforeEach(() => {
+    getStatus.mockReset()
+  })
+
   it('renders the public pool status summary without requiring auth', async () => {
+    const pinia = createPinia()
+    const appStore = useAppStore(pinia)
+    appStore.siteName = 'Alyuxin'
+
     getStatus.mockResolvedValue({
       data: {
         status: 'fresh',
@@ -47,6 +57,7 @@ describe('ClaudePoolView', () => {
 
     const wrapper = mount(ClaudePoolView, {
       global: {
+        plugins: [pinia],
         stubs: {
           RouterLink: {
             template: '<a><slot /></a>',
@@ -57,10 +68,12 @@ describe('ClaudePoolView', () => {
     await flushPromises()
 
     expect(getStatus).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Alyuxin')
     expect(wrapper.text()).toContain('网络负载')
-    expect(wrapper.text()).toContain('0.80x')
     expect(wrapper.text()).toContain('96%')
     expect(wrapper.text()).toContain('claude-sonnet-4-6')
+    expect(wrapper.text()).not.toContain('0.80x')
+    expect(wrapper.text()).not.toContain('?')
     expect(wrapper.text()).not.toContain('Derouter')
     expect(wrapper.text()).not.toContain('$')
   })

@@ -4,10 +4,10 @@
       <div class="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <RouterLink to="/home" class="flex min-w-0 items-center gap-3">
           <span class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-stone-200 dark:bg-dark-800 dark:ring-dark-700">
-            <img src="/logo.png" alt="Logo" class="h-full w-full object-contain" />
+            <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
           </span>
           <span class="truncate text-base font-semibold tracking-normal text-stone-950 dark:text-white">
-            Sub2API
+            {{ siteName }}
           </span>
         </RouterLink>
         <div class="flex items-center gap-2">
@@ -36,12 +36,6 @@
           <h1 class="text-2xl font-semibold tracking-normal text-stone-950 dark:text-white">
             网络负载与定价
           </h1>
-          <span
-            class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-stone-200 text-xs font-semibold text-stone-500 dark:bg-dark-800 dark:text-dark-300"
-            title="空闲率越高，当前号池压力越低"
-          >
-            ?
-          </span>
         </div>
         <div class="flex items-center gap-3">
           <div class="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium" :class="statusBadgeClass">
@@ -93,14 +87,9 @@
                 <span class="min-w-0 truncate font-mono text-sm font-semibold text-stone-500 dark:text-dark-300">
                   {{ displayModelName(model.name) }}
                 </span>
-                <div class="flex flex-shrink-0 items-center gap-3">
-                  <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-sm font-semibold tabular-nums text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
-                    {{ coefficientLabel(model.coefficient) }}
-                  </span>
-                  <span class="w-12 text-right text-sm tabular-nums text-stone-400 dark:text-dark-400">
-                    {{ percentText(model.idle_percent) }}
-                  </span>
-                </div>
+                <span class="w-14 flex-shrink-0 text-right text-sm tabular-nums text-stone-400 dark:text-dark-400">
+                  {{ percentText(model.idle_percent) }}
+                </span>
               </div>
               <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-stone-100 dark:bg-dark-800">
                 <div class="h-full rounded-full bg-emerald-400" :style="{ width: idleBarWidth(model.idle_percent) }"></div>
@@ -127,11 +116,16 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
 import { claudePoolAPI, type ClaudePoolStatus } from '@/api/claudePool'
+import { useAppStore } from '@/stores'
 
+const appStore = useAppStore()
 const status = ref<ClaudePoolStatus | null>(null)
 const loading = ref(false)
 const loadError = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'Sub2API')
+const siteLogo = computed(() => appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '')
 
 const statusText = computed(() => {
   switch (status.value?.status) {
@@ -215,13 +209,6 @@ const updatedAtText = computed(() => {
     minute: '2-digit',
   })
 })
-
-function coefficientLabel(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '-'
-  }
-  return `${value.toFixed(2)}x`
-}
 
 function percentText(value: number): string {
   if (!Number.isFinite(value)) {
