@@ -7,7 +7,7 @@
             <Icon name="chartBar" size="sm" :stroke-width="2" />
           </div>
           <div class="min-w-0">
-            <h1 class="truncate text-base font-semibold text-slate-950 dark:text-white">可用额度监控</h1>
+            <h1 class="truncate text-base font-semibold text-slate-950 dark:text-white">号池可用性监控</h1>
             <p class="text-xs text-slate-500 dark:text-dark-400">{{ groupName }} · Setup Token</p>
           </div>
           <div class="ml-1 flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5 text-xs dark:border-dark-700 dark:bg-dark-900">
@@ -36,24 +36,24 @@
       <div class="grid gap-3 lg:grid-cols-12">
         <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-dark-800 dark:bg-dark-900 lg:col-span-3">
           <div class="mb-2 flex items-center justify-between text-xs text-slate-500 dark:text-dark-400">
-            <span>账号数（有效/总）</span>
-            <span v-if="snapshot" class="text-slate-400">{{ snapshot.accounts.available }} 可调度</span>
+            <span>账号数（可调度/总）</span>
+            <span v-if="snapshot" class="text-slate-400">{{ snapshot.accounts.effective }} 有效</span>
           </div>
           <div class="mb-2 text-2xl font-bold tabular-nums text-slate-950 dark:text-white">
-            <span v-if="snapshot">{{ snapshot.accounts.effective }}</span>
+            <span v-if="snapshot">{{ snapshot.accounts.available }}</span>
             <span v-else>--</span>
             <span class="text-base font-semibold text-slate-400"> / {{ snapshot?.accounts.total ?? '--' }}</span>
           </div>
           <p class="text-xs leading-5 text-slate-500 dark:text-dark-400">
-            使用中 {{ snapshot?.accounts.in_use ?? 0 }} · 闲置 {{ snapshot?.accounts.idle ?? 0 }} · 已打满 {{ snapshot?.accounts.exhausted ?? 0 }}
+            使用中 {{ snapshot?.accounts.in_use ?? 0 }} · 空闲可用 {{ snapshot?.accounts.idle ?? 0 }} · 限流/打满 {{ snapshot?.accounts.exhausted ?? 0 }}
           </p>
           <p class="mt-1 text-xs leading-5 text-rose-500">
-            异常除不可用账号 {{ snapshot?.accounts.unavailable ?? 0 }} 个<span v-if="breakdownText">（{{ breakdownText }}）</span>
+            当前不可调度 {{ snapshot?.accounts.unavailable ?? 0 }} 个<span v-if="breakdownText">（{{ breakdownText }}）</span>
           </p>
         </div>
 
         <div class="rounded-lg border border-indigo-200 bg-indigo-50/70 p-4 shadow-sm dark:border-indigo-900/60 dark:bg-indigo-950/30 lg:col-span-3">
-          <div class="mb-2 text-xs font-medium text-indigo-700 dark:text-indigo-300">剩余容量</div>
+          <div class="mb-2 text-xs font-medium text-indigo-700 dark:text-indigo-300">可用容量</div>
           <div class="mb-3 text-3xl font-bold tabular-nums text-orange-500">
             {{ formatPercent(snapshot?.capacity.remaining_percent) }}
           </div>
@@ -63,18 +63,21 @@
               :style="{ width: `${progressWidth(snapshot?.capacity.remaining_percent)}%` }"
             ></div>
           </div>
+          <p class="mt-2 text-xs leading-5 text-indigo-700 dark:text-indigo-300">
+            空闲槽位 {{ snapshot?.capacity.free_slots ?? 0 }} / 总槽位 {{ snapshot?.capacity.total_slots ?? 0 }}
+          </p>
         </div>
 
         <div class="rounded-lg border border-amber-200 bg-amber-50/70 p-4 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/25 lg:col-span-3">
           <div class="mb-2 flex items-center justify-between text-xs text-amber-700 dark:text-amber-300">
             <span class="font-medium">池子负载</span>
-            <span>基于 {{ snapshot?.accounts.measured ?? 0 }} 个账号实测</span>
+            <span>{{ snapshot?.capacity.schedulable_slots ?? 0 }} 可调度槽位</span>
           </div>
           <div class="mb-2 text-3xl font-bold tabular-nums text-orange-500">
             {{ formatPercent(snapshot?.capacity.pool_load_percent) }}
           </div>
           <p class="text-xs leading-5 text-orange-600 dark:text-orange-300">
-            等待队列 {{ snapshot?.capacity.waiting ?? 0 }} · 当前压力{{ loadHint }}
+            占用/等待 {{ snapshot?.capacity.busy_slots ?? 0 }} · 等待队列 {{ snapshot?.capacity.waiting ?? 0 }} · 当前压力{{ loadHint }}
           </p>
         </div>
 

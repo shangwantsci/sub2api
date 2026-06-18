@@ -30,13 +30,14 @@ func TestBuildPublicPoolHealthSnapshotAggregatesRecoveryAndRedacts(t *testing.T)
 			Groups: []*Group{group},
 		},
 		{
-			ID:          2,
-			Name:        "bob@example.com",
-			Platform:    PlatformAnthropic,
-			Type:        AccountTypeSetupToken,
-			Status:      StatusActive,
-			Schedulable: true,
-			Concurrency: 5,
+			ID:               2,
+			Name:             "bob@example.com",
+			Platform:         PlatformAnthropic,
+			Type:             AccountTypeSetupToken,
+			Status:           StatusActive,
+			Schedulable:      true,
+			Concurrency:      5,
+			RateLimitResetAt: &reset1m,
 			Extra: map[string]any{
 				"codex_5h_used_percent": 100.0,
 				"codex_5h_reset_at":     reset1m.Format(time.RFC3339),
@@ -131,6 +132,9 @@ func TestBuildPublicPoolHealthSnapshotAggregatesRecoveryAndRedacts(t *testing.T)
 	if snapshot.Accounts.Available != 2 {
 		t.Fatalf("available accounts = %d, want 2", snapshot.Accounts.Available)
 	}
+	if snapshot.Accounts.Blocked != 2 {
+		t.Fatalf("blocked accounts = %d, want 2", snapshot.Accounts.Blocked)
+	}
 	if snapshot.Accounts.InUse != 8 {
 		t.Fatalf("in-use slots = %d, want 8", snapshot.Accounts.InUse)
 	}
@@ -140,14 +144,29 @@ func TestBuildPublicPoolHealthSnapshotAggregatesRecoveryAndRedacts(t *testing.T)
 	if snapshot.Accounts.Exhausted != 1 {
 		t.Fatalf("exhausted accounts = %d, want 1", snapshot.Accounts.Exhausted)
 	}
-	if snapshot.Accounts.Unavailable != 2 {
-		t.Fatalf("unavailable accounts = %d, want 2", snapshot.Accounts.Unavailable)
+	if snapshot.Accounts.Unavailable != 4 {
+		t.Fatalf("unavailable accounts = %d, want 4", snapshot.Accounts.Unavailable)
 	}
 	if snapshot.Accounts.Measured != 4 {
 		t.Fatalf("measured accounts = %d, want 4", snapshot.Accounts.Measured)
 	}
-	if snapshot.Capacity.RemainingPercent != 32.5 {
-		t.Fatalf("remaining percent = %.1f, want 32.5", snapshot.Capacity.RemainingPercent)
+	if snapshot.Capacity.TotalSlots != 14 {
+		t.Fatalf("total slots = %d, want 14", snapshot.Capacity.TotalSlots)
+	}
+	if snapshot.Capacity.SchedulableSlots != 6 {
+		t.Fatalf("schedulable slots = %d, want 6", snapshot.Capacity.SchedulableSlots)
+	}
+	if snapshot.Capacity.BusySlots != 3 {
+		t.Fatalf("busy slots = %d, want 3", snapshot.Capacity.BusySlots)
+	}
+	if snapshot.Capacity.FreeSlots != 3 {
+		t.Fatalf("free slots = %d, want 3", snapshot.Capacity.FreeSlots)
+	}
+	if snapshot.Capacity.RemainingPercent != 21.4 {
+		t.Fatalf("remaining percent = %.1f, want 21.4", snapshot.Capacity.RemainingPercent)
+	}
+	if snapshot.Capacity.PoolLoadPercent != 50 {
+		t.Fatalf("pool load percent = %.1f, want 50.0", snapshot.Capacity.PoolLoadPercent)
 	}
 
 	if len(snapshot.RecoveryBuckets) != 2 {
@@ -182,6 +201,62 @@ func TestBuildPublicPoolHealthSnapshotAggregatesRecoveryAndRedacts(t *testing.T)
 		if strings.Contains(leaked, sensitive) {
 			t.Fatalf("public snapshot leaked sensitive text %q in %s", sensitive, leaked)
 		}
+	}
+}
+
+func TestBuildPublicPoolHealthSnapshotUsesSchedulableCapacityWhenUsageUnknown(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	group := &Group{ID: 7, Name: "ccmax", Platform: PlatformAnthropic}
+
+	accounts := []Account{
+		{
+			ID:          1,
+			Platform:    PlatformAnthropic,
+			Type:        AccountTypeSetupToken,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 3,
+			Groups:      []*Group{group},
+		},
+		{
+			ID:          2,
+			Platform:    PlatformAnthropic,
+			Type:        AccountTypeSetupToken,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Groups:      []*Group{group},
+		},
+	}
+
+	loadMap := map[int64]*AccountLoadInfo{
+		1: {AccountID: 1, CurrentConcurrency: 1},
+	}
+
+	snapshot := buildPublicPoolHealthSnapshot(accounts, loadMap, now, publicPoolHealthOptions{
+		Platform:    PlatformAnthropic,
+		GroupName:   "ccmax",
+		AccountType: AccountTypeSetupToken,
+		Horizon:     4 * time.Hour,
+	})
+
+	if snapshot.Accounts.Measured != 0 {
+		t.Fatalf("measured accounts = %d, want 0", snapshot.Accounts.Measured)
+	}
+	if snapshot.Accounts.Available != 2 {
+		t.Fatalf("available accounts = %d, want 2", snapshot.Accounts.Available)
+	}
+	if snapshot.Capacity.TotalSlots != 4 {
+		t.Fatalf("total slots = %d, want 4", snapshot.Capacity.TotalSlots)
+	}
+	if snapshot.Capacity.FreeSlots != 3 {
+		t.Fatalf("free slots = %d, want 3", snapshot.Capacity.FreeSlots)
+	}
+	if snapshot.Capacity.RemainingPercent != 75 {
+		t.Fatalf("remaining percent = %.1f, want 75.0", snapshot.Capacity.RemainingPercent)
+	}
+	if snapshot.Capacity.PoolLoadPercent != 25 {
+		t.Fatalf("pool load percent = %.1f, want 25.0", snapshot.Capacity.PoolLoadPercent)
 	}
 }
 

@@ -4,6 +4,7 @@ export interface PublicPoolHealthAccounts {
   total: number
   effective: number
   available: number
+  blocked: number
   measured: number
   in_use: number
   idle: number
@@ -15,6 +16,11 @@ export interface PublicPoolHealthCapacity {
   remaining_percent: number
   pool_load_percent: number
   waiting: number
+  total_slots: number
+  schedulable_slots: number
+  busy_slots: number
+  free_slots: number
+  overcommitted_slots: number
 }
 
 export interface PublicPoolHealthStatus {

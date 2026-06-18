@@ -42,6 +42,7 @@ type PublicPoolHealthAccounts struct {
 	Total       int `json:"total"`
 	Effective   int `json:"effective"`
 	Available   int `json:"available"`
+	Blocked     int `json:"blocked"`
 	Measured    int `json:"measured"`
 	InUse       int `json:"in_use"`
 	Idle        int `json:"idle"`
@@ -50,9 +51,14 @@ type PublicPoolHealthAccounts struct {
 }
 
 type PublicPoolHealthCapacity struct {
-	RemainingPercent float64 `json:"remaining_percent"`
-	PoolLoadPercent  float64 `json:"pool_load_percent"`
-	Waiting          int     `json:"waiting"`
+	RemainingPercent   float64 `json:"remaining_percent"`
+	PoolLoadPercent    float64 `json:"pool_load_percent"`
+	Waiting            int     `json:"waiting"`
+	TotalSlots         int     `json:"total_slots"`
+	SchedulableSlots   int     `json:"schedulable_slots"`
+	BusySlots          int     `json:"busy_slots"`
+	FreeSlots          int     `json:"free_slots"`
+	OvercommittedSlots int     `json:"overcommitted_slots"`
 }
 
 type PublicPoolHealthStatus struct {
@@ -125,29 +131,16 @@ func buildPublicPoolHealthSnapshot(accounts []Account, loadMap map[int64]*Accoun
 	recoveryDrafts := map[int64]*poolHealthRecoveryDraft{}
 	recoveryDeadline := now.Add(opts.Horizon)
 
-	var (
-		remainingSum  float64
-		capacitySlots int
-	)
-
 	for _, account := range accounts {
 		if !poolHealthAccountMatches(account, opts) {
 			continue
 		}
 
 		snapshot.Accounts.Total++
-
-		effective, unavailableReason := poolHealthEffectiveState(account, now)
-		if !effective {
-			snapshot.Accounts.Unavailable++
-			breakdown[unavailableReason]++
-			continue
-		}
-
-		snapshot.Accounts.Effective++
 		loadFactor := account.EffectiveLoadFactor()
-		capacitySlots += loadFactor
+		snapshot.Capacity.TotalSlots += loadFactor
 
+		effective, _ := poolHealthEffectiveState(account, now)
 		if load := loadMap[account.ID]; load != nil {
 			if load.CurrentConcurrency > 0 {
 				snapshot.Accounts.InUse += load.CurrentConcurrency
@@ -160,36 +153,63 @@ func buildPublicPoolHealthSnapshot(accounts []Account, loadMap map[int64]*Accoun
 		usedPercent, measured := poolHealthAccountUsagePercent(account)
 		if measured {
 			snapshot.Accounts.Measured++
-			remainingSum += clampFloat64(100-usedPercent, 0, 100)
+		}
+
+		if effective {
+			snapshot.Accounts.Effective++
+		}
+
+		unavailableReason := poolHealthUnavailableReason(account, usedPercent, measured, now)
+		if unavailableReason != "" {
+			snapshot.Accounts.Unavailable++
+			breakdown[unavailableReason]++
+			if poolHealthRuntimeBlockedReason(unavailableReason) {
+				snapshot.Accounts.Blocked++
+			}
 		}
 
 		blockers := poolHealthAccountBlockers(account, usedPercent, measured, now)
-		if measured && usedPercent >= 99.5 {
+		if unavailableReason == "rate_limited" || unavailableReason == "quota_exhausted" || (measured && usedPercent >= 99.5) {
 			snapshot.Accounts.Exhausted++
 		}
 
-		if len(blockers) == 0 {
-			snapshot.Accounts.Available++
-			if load := loadMap[account.ID]; load == nil || load.CurrentConcurrency <= 0 {
-				snapshot.Accounts.Idle++
+		if len(blockers) > 0 {
+			if recoveryAt, ok := poolHealthRecoveryAt(blockers); ok && recoveryAt.After(now) && !recoveryAt.After(recoveryDeadline) {
+				afterSeconds := ceilDurationSeconds(recoveryAt.Sub(now), time.Minute)
+				addPoolHealthRecoveryDraft(recoveryDrafts, afterSeconds, loadFactor)
 			}
+		}
+
+		if unavailableReason != "" {
 			continue
 		}
 
-		if recoveryAt, ok := poolHealthRecoveryAt(blockers); ok && recoveryAt.After(now) && !recoveryAt.After(recoveryDeadline) {
-			afterSeconds := ceilDurationSeconds(recoveryAt.Sub(now), time.Minute)
-			addPoolHealthRecoveryDraft(recoveryDrafts, afterSeconds, loadFactor)
+		snapshot.Accounts.Available++
+		snapshot.Capacity.SchedulableSlots += loadFactor
+
+		currentBusy := 0
+		if load := loadMap[account.ID]; load != nil {
+			currentBusy = load.CurrentConcurrency + load.WaitingCount
+		}
+		snapshot.Capacity.BusySlots += currentBusy
+		if free := loadFactor - currentBusy; free > 0 {
+			snapshot.Capacity.FreeSlots += free
+		} else if free < 0 {
+			snapshot.Capacity.OvercommittedSlots += -free
+		}
+
+		if load := loadMap[account.ID]; load == nil || load.CurrentConcurrency <= 0 {
+			snapshot.Accounts.Idle++
 		}
 	}
 
-	if snapshot.Accounts.Measured > 0 {
-		snapshot.Capacity.RemainingPercent = roundTo1Decimal(remainingSum / float64(snapshot.Accounts.Measured))
+	if snapshot.Capacity.TotalSlots > 0 {
+		snapshot.Capacity.RemainingPercent = roundTo1Decimal(float64(snapshot.Capacity.FreeSlots) / float64(snapshot.Capacity.TotalSlots) * 100)
 	}
-	if capacitySlots > 0 {
-		pressure := float64(snapshot.Accounts.InUse+snapshot.Capacity.Waiting) / float64(capacitySlots) * 100
+	if snapshot.Capacity.SchedulableSlots > 0 {
+		pressure := float64(snapshot.Capacity.BusySlots) / float64(snapshot.Capacity.SchedulableSlots) * 100
 		snapshot.Capacity.PoolLoadPercent = roundTo1Decimal(pressure)
 	}
-
 	snapshot.UnavailableBreakdown = buildPoolHealthBreakdown(breakdown)
 	snapshot.RecoveryBuckets = buildPoolHealthRecoveryBuckets(recoveryDrafts)
 	snapshot.Health = buildPoolHealthStatus(snapshot.Capacity.RemainingPercent, snapshot.Capacity.PoolLoadPercent, snapshot.RecoveryBuckets, snapshot.Accounts.Total)
@@ -253,13 +273,82 @@ func poolHealthEffectiveState(account Account, now time.Time) (bool, string) {
 	return true, ""
 }
 
+func poolHealthUnavailableReason(account Account, usedPercent float64, measured bool, now time.Time) string {
+	if account.Status == StatusError {
+		return "error"
+	}
+	if account.Status != StatusActive {
+		return "inactive"
+	}
+	if !account.Schedulable {
+		return "manual_disabled"
+	}
+	if account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt) {
+		return "expired"
+	}
+	if account.RateLimitResetAt != nil && now.Before(*account.RateLimitResetAt) {
+		return "rate_limited"
+	}
+	if account.OverloadUntil != nil && now.Before(*account.OverloadUntil) {
+		return "overloaded"
+	}
+	if account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil) {
+		return "temp_unschedulable"
+	}
+	if measured && usedPercent >= 99.5 && account.SessionWindowStatus == "rejected" {
+		return "quota_exhausted"
+	}
+	return ""
+}
+
+func poolHealthRuntimeBlockedReason(reason string) bool {
+	switch reason {
+	case "rate_limited", "overloaded", "temp_unschedulable", "quota_exhausted":
+		return true
+	default:
+		return false
+	}
+}
+
 func poolHealthAccountUsagePercent(account Account) (float64, bool) {
 	used5h, ok5h := poolHealthExtraFloat(account.Extra, "codex_5h_used_percent")
 	used7d, ok7d := poolHealthExtraFloat(account.Extra, "codex_7d_used_percent")
-	if !ok5h && !ok7d {
-		return 0, false
+	sessionWindow, okSession := poolHealthExtraFloat(account.Extra, "session_window_utilization")
+	passive7d, okPassive7d := poolHealthExtraFloat(account.Extra, "passive_usage_7d_utilization")
+	if okSession && sessionWindow <= 1 {
+		sessionWindow *= 100
 	}
-	return clampFloat64(math.Max(used5h, used7d), 0, 100), true
+	if okPassive7d && passive7d <= 1 {
+		passive7d *= 100
+	}
+	if !ok5h && !ok7d && !okSession && !okPassive7d {
+		switch account.SessionWindowStatus {
+		case "rejected":
+			return 100, true
+		case "allowed_warning":
+			return 80, true
+		default:
+			return 0, false
+		}
+	}
+	usedPercent := math.Max(used5h, used7d)
+	if okSession {
+		usedPercent = math.Max(usedPercent, sessionWindow)
+	}
+	if okPassive7d {
+		usedPercent = math.Max(usedPercent, passive7d)
+	}
+	return clampFloat64(usedPercent, 0, 100), true
+}
+
+func poolHealthQuotaResetAt(account Account, window string, now time.Time) (time.Time, bool) {
+	if window == "session" && account.SessionWindowEnd != nil && account.SessionWindowEnd.After(now) {
+		return account.SessionWindowEnd.UTC(), true
+	}
+	if resetAt, ok := poolHealthExtraTime(account.Extra, "session_window_end"); ok && resetAt.After(now) {
+		return resetAt.UTC(), true
+	}
+	return time.Time{}, false
 }
 
 func poolHealthAccountBlockers(account Account, usedPercent float64, measured bool, now time.Time) []time.Time {
@@ -276,6 +365,8 @@ func poolHealthAccountBlockers(account Account, usedPercent float64, measured bo
 
 	if measured && usedPercent >= 99.5 {
 		if resetAt, ok := poolHealthUsageResetAt(account, now); ok {
+			blockers = append(blockers, resetAt.UTC())
+		} else if resetAt, ok := poolHealthQuotaResetAt(account, "session", now); ok {
 			blockers = append(blockers, resetAt.UTC())
 		}
 	}
@@ -445,6 +536,14 @@ func poolHealthReasonLabel(reason string) string {
 		return "未启用"
 	case "manual_disabled":
 		return "手动停调度"
+	case "rate_limited":
+		return "限流/打满"
+	case "overloaded":
+		return "过载"
+	case "temp_unschedulable":
+		return "临时不可调度"
+	case "quota_exhausted":
+		return "额度打满"
 	default:
 		return reason
 	}
