@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -361,6 +362,49 @@ func TestHandleFailoverError_SameAccountRetry(t *testing.T) {
 		action = fs.HandleFailoverError(context.Background(), mock, 100, "openai", err)
 		require.Equal(t, FailoverContinue, action)
 		require.Len(t, mock.calls, 2, "第二次耗尽也应调用 TempUnschedule")
+	})
+}
+
+func TestShouldClearStickySessionAfterFailover(t *testing.T) {
+	t.Run("429账号已进入失败列表时清除粘连", func(t *testing.T) {
+		failed := map[int64]struct{}{100: {}}
+		err := newTestFailoverErr(http.StatusTooManyRequests, false, false)
+
+		require.True(t, shouldClearStickySessionAfterFailover("session-a", 100, err, FailoverContinue, failed))
+	})
+
+	t.Run("429切换次数耗尽也清除粘连", func(t *testing.T) {
+		failed := map[int64]struct{}{100: {}}
+		err := newTestFailoverErr(http.StatusTooManyRequests, false, false)
+
+		require.True(t, shouldClearStickySessionAfterFailover("session-a", 100, err, FailoverExhausted, failed))
+	})
+
+	t.Run("429同账号重试尚未切号时不清除", func(t *testing.T) {
+		err := newTestFailoverErr(http.StatusTooManyRequests, true, false)
+
+		require.False(t, shouldClearStickySessionAfterFailover("session-a", 100, err, FailoverContinue, nil))
+	})
+
+	t.Run("非429不清除", func(t *testing.T) {
+		failed := map[int64]struct{}{100: {}}
+		err := newTestFailoverErr(http.StatusBadGateway, false, false)
+
+		require.False(t, shouldClearStickySessionAfterFailover("session-a", 100, err, FailoverContinue, failed))
+	})
+
+	t.Run("空会话不清除", func(t *testing.T) {
+		failed := map[int64]struct{}{100: {}}
+		err := newTestFailoverErr(http.StatusTooManyRequests, false, false)
+
+		require.False(t, shouldClearStickySessionAfterFailover("", 100, err, FailoverContinue, failed))
+	})
+
+	t.Run("context取消路径不清除", func(t *testing.T) {
+		failed := map[int64]struct{}{100: {}}
+		err := newTestFailoverErr(http.StatusTooManyRequests, false, false)
+
+		require.False(t, shouldClearStickySessionAfterFailover("session-a", 100, err, FailoverCanceled, failed))
 	})
 }
 

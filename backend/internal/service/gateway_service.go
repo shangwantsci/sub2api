@@ -808,6 +808,14 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
 }
 
+// ClearStickySession removes a session -> account binding.
+func (s *GatewayService) ClearStickySession(ctx context.Context, groupID *int64, sessionHash string) error {
+	if sessionHash == "" || s.cache == nil {
+		return nil
+	}
+	return s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+}
+
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.
 // Returns 0 if no binding exists or on error.
 func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
@@ -4346,14 +4354,16 @@ func defaultClaudeOAuthSystemPromptBlockConfig() []claudeOAuthSystemPromptBlockC
 			Text:    "{claude_code_system_prompt}",
 		},
 		{
-			Enabled: &enabled,
-			Type:    "text",
-			Text:    "{claude_code_expansion_prompt}",
-			CacheControl: json.RawMessage(
-				fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, claude.DefaultCacheControlTTL),
-			),
+			Enabled:      &enabled,
+			Type:         "text",
+			Text:         "{claude_code_expansion_prompt}",
+			CacheControl: json.RawMessage("true"),
 		},
 	}
+}
+
+func isClaudeOAuthSystemPromptAutoCacheControl(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("true"))
 }
 
 func cacheControlTTLForAutoInjectedBreakpoints(body []byte) string {
@@ -4410,11 +4420,14 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		if err != nil {
 			return nil, fmt.Errorf("system block %d cache_control: %w", i, err)
 		}
+		autoCacheControl := isClaudeOAuthSystemPromptAutoCacheControl(block.CacheControl)
 		raw, err := marshalAnthropicSystemTextBlockWithCacheControl(text, cacheControl)
 		if err != nil {
 			return nil, err
 		}
-		raw = alignEphemeralCacheControlTTL(raw, autoCacheTTL)
+		if autoCacheControl {
+			raw = alignEphemeralCacheControlTTL(raw, autoCacheTTL)
+		}
 		items = append(items, raw)
 	}
 	return items, nil

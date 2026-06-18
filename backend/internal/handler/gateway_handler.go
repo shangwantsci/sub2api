@@ -440,6 +440,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					h.clearStickySessionAfterFailover(c.Request.Context(), reqLog, apiKey.GroupID, sessionKey, account.ID, failoverErr, action, fs.FailedAccountIDs)
 					switch action {
 					case FailoverContinue:
 						continue
@@ -852,6 +853,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					h.clearStickySessionAfterFailover(c.Request.Context(), reqLog, currentAPIKey.GroupID, sessionKey, account.ID, failoverErr, action, fs.FailedAccountIDs)
 					switch action {
 					case FailoverContinue:
 						continue
@@ -1614,6 +1616,40 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true
+}
+
+func (h *GatewayHandler) clearStickySessionAfterFailover(
+	ctx context.Context,
+	reqLog *zap.Logger,
+	groupID *int64,
+	sessionKey string,
+	accountID int64,
+	failoverErr *service.UpstreamFailoverError,
+	action FailoverAction,
+	failedAccountIDs map[int64]struct{},
+) {
+	if !shouldClearStickySessionAfterFailover(sessionKey, accountID, failoverErr, action, failedAccountIDs) {
+		return
+	}
+	if h == nil || h.gatewayService == nil {
+		return
+	}
+	if err := h.gatewayService.ClearStickySession(ctx, groupID, sessionKey); err != nil {
+		if reqLog != nil {
+			reqLog.Warn("gateway.sticky_clear_after_429_failed",
+				zap.String("session_key", sessionKey),
+				zap.Int64("account_id", accountID),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+	if reqLog != nil {
+		reqLog.Info("gateway.sticky_cleared_after_429",
+			zap.String("session_key", sessionKey),
+			zap.Int64("account_id", accountID),
+		)
+	}
 }
 
 // gatewayForwardErrorAlreadyCommunicated reports whether a Forward implementation

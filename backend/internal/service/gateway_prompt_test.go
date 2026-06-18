@@ -545,3 +545,28 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *t
 	require.Equal(t, "tail", arr[2].Get("text").String())
 	require.Equal(t, "1h", arr[2].Get("cache_control.ttl").String())
 }
+
+func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_AutoCacheControlFollowsRequestTTL(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-6","system":[{"type":"text","text":"Project instructions","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hello"}]}`)
+	system := []any{
+		map[string]any{
+			"type": "text",
+			"text": "Project instructions",
+			"cache_control": map[string]any{
+				"type": "ephemeral",
+				"ttl":  "1h",
+			},
+		},
+	}
+	blocks := `{"blocks":[{"type":"text","text":"auto cache block","cache_control":true}]}`
+
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, "", blocks)
+
+	injectedBlock := gjson.GetBytes(result, "system.0")
+	require.Equal(t, "auto cache block", injectedBlock.Get("text").String())
+	require.Equal(t, "ephemeral", injectedBlock.Get("cache_control.type").String())
+	require.Equal(t, "1h", injectedBlock.Get("cache_control.ttl").String())
+
+	migratedInstructionBlock := gjson.GetBytes(result, "messages.0.content.0")
+	require.Equal(t, "1h", migratedInstructionBlock.Get("cache_control.ttl").String())
+}

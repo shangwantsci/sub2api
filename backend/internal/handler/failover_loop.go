@@ -160,6 +160,23 @@ func needForceCacheBilling(hasBoundSession bool, failoverErr *service.UpstreamFa
 	return hasBoundSession || (failoverErr != nil && failoverErr.ForceCacheBilling)
 }
 
+func shouldClearStickySessionAfterFailover(
+	sessionKey string,
+	accountID int64,
+	failoverErr *service.UpstreamFailoverError,
+	action FailoverAction,
+	failedAccountIDs map[int64]struct{},
+) bool {
+	if sessionKey == "" || accountID <= 0 || failoverErr == nil {
+		return false
+	}
+	if failoverErr.StatusCode != http.StatusTooManyRequests || action == FailoverCanceled {
+		return false
+	}
+	_, failed := failedAccountIDs[accountID]
+	return failed
+}
+
 // sleepWithContext 等待指定时长，返回 false 表示 context 已取消。
 func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
