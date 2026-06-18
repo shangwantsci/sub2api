@@ -1375,6 +1375,78 @@
           </div>
         </div>
 
+        <!-- Anthropic 混合类型权重调度 -->
+        <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">
+                混合池权重调度
+              </label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {{
+                  createForm.anthropic_mixed_type_weight_enabled
+                    ? "已启用"
+                    : "未启用"
+                }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="
+                createForm.anthropic_mixed_type_weight_enabled =
+                  !createForm.anthropic_mixed_type_weight_enabled
+              "
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                createForm.anthropic_mixed_type_weight_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  createForm.anthropic_mixed_type_weight_enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+          <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="input-label">Setup Token 池权重</label>
+              <input
+                v-model.number="createForm.anthropic_setup_token_pool_weight"
+                type="number"
+                min="0"
+                class="input"
+                @input="
+                  createForm.anthropic_setup_token_pool_weight = Math.max(
+                    0,
+                    createForm.anthropic_setup_token_pool_weight || 0,
+                  )
+                "
+              />
+            </div>
+            <div>
+              <label class="input-label">API Key 池权重</label>
+              <input
+                v-model.number="createForm.anthropic_api_key_pool_weight"
+                type="number"
+                min="0"
+                class="input"
+                @input="
+                  createForm.anthropic_api_key_pool_weight = Math.max(
+                    0,
+                    createForm.anthropic_api_key_pool_weight || 0,
+                  )
+                "
+              />
+            </div>
+          </div>
+        </div>
+
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
         <div
           v-if="
@@ -2659,6 +2731,78 @@
           </div>
         </div>
 
+        <!-- Anthropic 混合类型权重调度 -->
+        <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="text-sm text-gray-600 dark:text-gray-400">
+                混合池权重调度
+              </label>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {{
+                  editForm.anthropic_mixed_type_weight_enabled
+                    ? "已启用"
+                    : "未启用"
+                }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="
+                editForm.anthropic_mixed_type_weight_enabled =
+                  !editForm.anthropic_mixed_type_weight_enabled
+              "
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                editForm.anthropic_mixed_type_weight_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600'
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  editForm.anthropic_mixed_type_weight_enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+          <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="input-label">Setup Token 池权重</label>
+              <input
+                v-model.number="editForm.anthropic_setup_token_pool_weight"
+                type="number"
+                min="0"
+                class="input"
+                @input="
+                  editForm.anthropic_setup_token_pool_weight = Math.max(
+                    0,
+                    editForm.anthropic_setup_token_pool_weight || 0,
+                  )
+                "
+              />
+            </div>
+            <div>
+              <label class="input-label">API Key 池权重</label>
+              <input
+                v-model.number="editForm.anthropic_api_key_pool_weight"
+                type="number"
+                min="0"
+                class="input"
+                @input="
+                  editForm.anthropic_api_key_pool_weight = Math.max(
+                    0,
+                    editForm.anthropic_api_key_pool_weight || 0,
+                  )
+                "
+              />
+            </div>
+          </div>
+        </div>
+
         <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
         <div
           v-if="
@@ -3355,6 +3499,10 @@ const createForm = reactive({
   require_privacy_set: false,
   // 模型路由开关
   model_routing_enabled: false,
+  // Anthropic setup-token/api-key 混合类型权重调度
+  anthropic_mixed_type_weight_enabled: false,
+  anthropic_setup_token_pool_weight: 100,
+  anthropic_api_key_pool_weight: 0,
   // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   // MCP XML 协议注入开关（仅 antigravity 平台）
@@ -3687,6 +3835,10 @@ const editForm = reactive({
   require_privacy_set: false,
   // 模型路由开关
   model_routing_enabled: false,
+  // Anthropic setup-token/api-key 混合类型权重调度
+  anthropic_mixed_type_weight_enabled: false,
+  anthropic_setup_token_pool_weight: 100,
+  anthropic_api_key_pool_weight: 0,
   // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   // MCP XML 协议注入开关（仅 antigravity 平台）
@@ -3928,6 +4080,9 @@ const closeCreateModal = () => {
   resetMessagesDispatchFormState(createForm);
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
+  createForm.anthropic_mixed_type_weight_enabled = false;
+  createForm.anthropic_setup_token_pool_weight = 100;
+  createForm.anthropic_api_key_pool_weight = 0;
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
@@ -4066,6 +4221,12 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.require_oauth_only = group.require_oauth_only ?? false;
   editForm.require_privacy_set = group.require_privacy_set ?? false;
   editForm.model_routing_enabled = group.model_routing_enabled || false;
+  editForm.anthropic_mixed_type_weight_enabled =
+    group.anthropic_mixed_type_weight_enabled ?? false;
+  editForm.anthropic_setup_token_pool_weight =
+    group.anthropic_setup_token_pool_weight ?? 100;
+  editForm.anthropic_api_key_pool_weight =
+    group.anthropic_api_key_pool_weight ?? 0;
   editForm.supported_model_scopes = group.supported_model_scopes || [
     "claude",
     "gemini_text",
@@ -4244,6 +4405,11 @@ watch(
       createForm.require_oauth_only = false;
       createForm.require_privacy_set = false;
     }
+    if (newVal !== "anthropic") {
+      createForm.anthropic_mixed_type_weight_enabled = false;
+      createForm.anthropic_setup_token_pool_weight = 100;
+      createForm.anthropic_api_key_pool_weight = 0;
+    }
     resetModelsListState(createModelsListState);
     loadModelsListCandidates("create", 0, newVal);
   },
@@ -4261,6 +4427,11 @@ watch(
     if (!["openai", "antigravity", "anthropic", "gemini"].includes(newVal)) {
       editForm.require_oauth_only = false;
       editForm.require_privacy_set = false;
+    }
+    if (newVal !== "anthropic") {
+      editForm.anthropic_mixed_type_weight_enabled = false;
+      editForm.anthropic_setup_token_pool_weight = 100;
+      editForm.anthropic_api_key_pool_weight = 0;
     }
     if (editingGroup.value) {
       resetModelsListState(editModelsListState, editForm.platform === editingGroup.value.platform ? editingGroup.value.models_list_config : undefined);

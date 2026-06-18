@@ -1302,6 +1302,12 @@
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
+        <div v-if="props.account?.type === 'apikey'">
+          <label class="input-label">{{ t('admin.accounts.poolWeight') }}</label>
+          <input v-model.number="form.pool_weight" type="number" min="0" class="input"
+            @input="form.pool_weight = Math.max(0, form.pool_weight || 0)" />
+          <p class="input-hint">{{ t('admin.accounts.poolWeightHint') }}</p>
+        </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
@@ -2858,6 +2864,7 @@ const form = reactive({
   proxy_id: null as number | null,
   concurrency: 1,
   load_factor: null as number | null,
+  pool_weight: 1,
   priority: 1,
   rate_multiplier: 1,
   status: 'active' as 'active' | 'inactive' | 'error',
@@ -2925,6 +2932,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.proxy_id = newAccount.proxy_id
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
+  form.pool_weight = newAccount.pool_weight ?? 1
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
@@ -3678,6 +3686,11 @@ const handleSubmit = async () => {
     const lf = form.load_factor
     if (lf == null || Number.isNaN(lf) || lf <= 0) {
       updatePayload.load_factor = 0
+    }
+    if (props.account.type === 'apikey') {
+      updatePayload.pool_weight = Math.max(0, form.pool_weight || 0)
+    } else {
+      delete updatePayload.pool_weight
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
 

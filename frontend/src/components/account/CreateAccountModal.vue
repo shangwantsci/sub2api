@@ -1,7 +1,7 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="t('admin.accounts.createAccount')"
+    :title="dialogTitle"
     width="wide"
     @close="handleClose"
   >
@@ -45,16 +45,29 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
+      <div
+        v-if="isAnthropicSessionImportMode"
+        class="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800 dark:border-orange-800/40 dark:bg-orange-900/20 dark:text-orange-200"
+      >
+        <div class="font-semibold">{{ t('admin.accounts.anthropicSessionBulkImportTitle') }}</div>
+        <p class="mt-1 text-xs leading-5">
+          {{ t('admin.accounts.anthropicSessionBulkImportFormHint') }}
+        </p>
+      </div>
       <div>
         <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
         <input
           v-model="form.name"
           type="text"
-          required
+          :required="!isAnthropicSessionImportMode"
+          :disabled="isAnthropicSessionImportMode"
           class="input"
-          :placeholder="t('admin.accounts.enterAccountName')"
+          :placeholder="isAnthropicSessionImportMode ? t('admin.accounts.anthropicSessionAutoNamePlaceholder') : t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
         />
+        <p v-if="isAnthropicSessionImportMode" class="input-hint">
+          {{ t('admin.accounts.anthropicSessionAutoNameHint') }}
+        </p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
@@ -2483,6 +2496,12 @@
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
+        <div v-if="form.type === 'apikey'">
+          <label class="input-label">{{ t('admin.accounts.poolWeight') }}</label>
+          <input v-model.number="form.pool_weight" type="number" min="0" class="input"
+            @input="form.pool_weight = Math.max(0, form.pool_weight || 0)" />
+          <p class="input-hint">{{ t('admin.accounts.poolWeightHint') }}</p>
+        </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
@@ -2869,6 +2888,7 @@
         :show-session-token-option="false"
         :show-access-token-option="false"
         :show-codex-session-import-option="form.platform === 'openai'"
+        :default-input-method="isAnthropicSessionImportMode ? 'cookie' : 'manual'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
@@ -3355,9 +3375,12 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
+  initialMode?: 'standard' | 'anthropic-session-import'
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  initialMode: 'standard'
+})
 const emit = defineEmits<{
   close: []
   created: []
@@ -3790,6 +3813,7 @@ const form = reactive({
   proxy_id: null as number | null,
   concurrency: 10,
   load_factor: null as number | null,
+  pool_weight: 1,
   priority: 1,
   rate_multiplier: 1,
   group_ids: [] as number[],
@@ -3808,6 +3832,19 @@ const isOAuthFlow = computed(() => {
   }
   return accountCategory.value === 'oauth-based'
 })
+
+const isAnthropicSessionImportMode = computed(() =>
+  props.initialMode === 'anthropic-session-import' &&
+  form.platform === 'anthropic' &&
+  accountCategory.value === 'oauth-based' &&
+  addMethod.value === 'setup-token'
+)
+
+const dialogTitle = computed(() =>
+  isAnthropicSessionImportMode.value
+    ? t('admin.accounts.anthropicSessionBulkImportTitle')
+    : t('admin.accounts.createAccount')
+)
 
 const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'
@@ -3839,6 +3876,7 @@ watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
+      applyInitialMode()
       // Load TLS fingerprint profiles
       adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
@@ -4306,6 +4344,7 @@ const resetForm = () => {
   form.proxy_id = null
   form.concurrency = 10
   form.load_factor = null
+  form.pool_weight = 1
   form.priority = 1
   form.rate_multiplier = 1
   form.group_ids = []
@@ -4391,6 +4430,16 @@ const resetForm = () => {
   oauthFlowRef.value?.reset()
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
+}
+
+const applyInitialMode = () => {
+  if (props.initialMode !== 'anthropic-session-import') return
+  step.value = 1
+  form.name = ''
+  form.platform = 'anthropic'
+  form.type = 'setup-token'
+  accountCategory.value = 'oauth-based'
+  addMethod.value = 'setup-token'
 }
 
 const handleClose = () => {
@@ -4622,7 +4671,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 const handleSubmit = async () => {
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
-    if (!form.name.trim()) {
+    if (!isAnthropicSessionImportMode.value && !form.name.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }

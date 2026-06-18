@@ -34,7 +34,7 @@
                 class="text-blue-600 focus:ring-blue-500"
               />
               <span class="text-sm text-blue-900 dark:text-blue-200">{{
-                t('admin.accounts.oauth.cookieAutoAuth')
+                cookieAuthMethodLabel
               }}</span>
             </label>
             <label v-if="showRefreshTokenOption" class="flex cursor-pointer items-center gap-2">
@@ -264,7 +264,7 @@
             class="rounded-lg border border-blue-300 bg-white/80 p-4 dark:border-blue-600 dark:bg-gray-800/80"
           >
             <p class="mb-3 text-sm text-blue-700 dark:text-blue-300">
-              {{ t('admin.accounts.oauth.cookieAutoAuthDesc') }}
+              {{ cookieAuthDescription }}
             </p>
 
             <!-- sessionKey Input -->
@@ -273,7 +273,7 @@
                 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
               >
                 <Icon name="key" size="sm" class="text-blue-500" />
-                {{ t('admin.accounts.oauth.sessionKey') }}
+                {{ sessionKeyInputLabel }}
                 <span
                   v-if="parsedKeyCount > 1 && allowMultiple"
                   class="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white"
@@ -303,10 +303,12 @@
               </label>
               <textarea
                 v-model="sessionKeyInput"
-                rows="3"
+                :rows="isAnthropicSessionBulkImport ? 8 : 3"
                 class="input w-full resize-y font-mono text-sm"
                 :placeholder="
-                  allowMultiple
+                  isAnthropicSessionBulkImport
+                    ? t('admin.accounts.oauth.anthropicSessionBulkImportPlaceholder')
+                    : allowMultiple
                     ? t('admin.accounts.oauth.sessionKeyPlaceholder')
                     : t('admin.accounts.oauth.sessionKeyPlaceholderSingle')
                 "
@@ -315,7 +317,11 @@
                 v-if="parsedKeyCount > 1 && allowMultiple"
                 class="mt-1 text-xs text-blue-600 dark:text-blue-400"
               >
-                {{ t('admin.accounts.oauth.batchCreateAccounts', { count: parsedKeyCount }) }}
+                {{
+                  isAnthropicSessionBulkImport
+                    ? t('admin.accounts.oauth.batchImportAccounts', { count: parsedKeyCount })
+                    : t('admin.accounts.oauth.batchCreateAccounts', { count: parsedKeyCount })
+                }}
               </p>
             </div>
 
@@ -383,8 +389,8 @@
               <Icon v-else name="sparkles" size="sm" class="mr-2" />
               {{
                 loading
-                  ? t('admin.accounts.oauth.authorizing')
-                  : t('admin.accounts.oauth.startAutoAuth')
+                  ? cookieAuthLoadingText
+                  : cookieAuthButtonText
               }}
             </button>
           </div>
@@ -652,6 +658,7 @@ interface Props {
   showSessionTokenOption?: boolean
   showAccessTokenOption?: boolean
   showCodexSessionImportOption?: boolean
+  defaultInputMethod?: AuthInputMethod
   platform?: AccountPlatform // Platform type for different UI/text
   showProjectId?: boolean // New prop to control project ID visibility
 }
@@ -671,6 +678,7 @@ const props = withDefaults(defineProps<Props>(), {
   showSessionTokenOption: false,
   showAccessTokenOption: false,
   showCodexSessionImportOption: false,
+  defaultInputMethod: 'manual',
   platform: 'anthropic',
   showProjectId: true
 })
@@ -690,6 +698,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const isOpenAI = computed(() => props.platform === 'openai')
+const isAnthropicSessionBulkImport = computed(() =>
+  props.platform === 'anthropic' && props.addMethod === 'setup-token'
+)
 
 // Get translation key based on platform
 const getOAuthKey = (key: string) => {
@@ -716,9 +727,34 @@ const oauthImportantNotice = computed(() => {
   if (props.platform === 'antigravity') return t('admin.accounts.oauth.antigravity.importantNotice')
   return ''
 })
+const cookieAuthMethodLabel = computed(() =>
+  isAnthropicSessionBulkImport.value
+    ? t('admin.accounts.oauth.anthropicSessionBulkImport')
+    : t('admin.accounts.oauth.cookieAutoAuth')
+)
+const cookieAuthDescription = computed(() =>
+  isAnthropicSessionBulkImport.value
+    ? t('admin.accounts.oauth.anthropicSessionBulkImportDesc')
+    : t('admin.accounts.oauth.cookieAutoAuthDesc')
+)
+const sessionKeyInputLabel = computed(() =>
+  isAnthropicSessionBulkImport.value
+    ? t('admin.accounts.oauth.sessionKeys')
+    : t('admin.accounts.oauth.sessionKey')
+)
+const cookieAuthLoadingText = computed(() =>
+  isAnthropicSessionBulkImport.value
+    ? t('admin.accounts.oauth.importing')
+    : t('admin.accounts.oauth.authorizing')
+)
+const cookieAuthButtonText = computed(() =>
+  isAnthropicSessionBulkImport.value
+    ? t('admin.accounts.oauth.startBatchImport')
+    : t('admin.accounts.oauth.startAutoAuth')
+)
 
 // Local state
-const inputMethod = ref<AuthInputMethod>(props.showCookieOption ? 'manual' : 'manual')
+const inputMethod = ref<AuthInputMethod>(props.defaultInputMethod)
 const authCodeInput = ref('')
 const sessionKeyInput = ref('')
 const refreshTokenInput = ref('')
@@ -764,6 +800,13 @@ const parsedCodexSessionCount = computed(() => {
 watch(inputMethod, (newVal) => {
   emit('update:inputMethod', newVal)
 })
+
+watch(
+  () => props.defaultInputMethod,
+  (method) => {
+    inputMethod.value = method
+  }
+)
 
 // Auto-extract code from callback URL (OpenAI/Gemini/Antigravity)
 // e.g., http://localhost:8085/callback?code=xxx...&state=...

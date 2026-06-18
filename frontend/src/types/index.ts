@@ -528,6 +528,9 @@ export interface Group {
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   require_oauth_only: boolean
   require_privacy_set: boolean
+  anthropic_mixed_type_weight_enabled: boolean
+  anthropic_setup_token_pool_weight: number
+  anthropic_api_key_pool_weight: number
   created_at: string
   updated_at: string
 }
@@ -650,6 +653,9 @@ export interface CreateGroupRequest {
   rpm_limit?: number
   require_oauth_only?: boolean
   require_privacy_set?: boolean
+  anthropic_mixed_type_weight_enabled?: boolean
+  anthropic_setup_token_pool_weight?: number
+  anthropic_api_key_pool_weight?: number
   // 从指定分组复制账号
   copy_accounts_from_group_ids?: number[]
 }
@@ -685,6 +691,9 @@ export interface UpdateGroupRequest {
   rpm_limit?: number
   require_oauth_only?: boolean
   require_privacy_set?: boolean
+  anthropic_mixed_type_weight_enabled?: boolean
+  anthropic_setup_token_pool_weight?: number
+  anthropic_api_key_pool_weight?: number
   copy_accounts_from_group_ids?: number[]
 }
 
@@ -839,6 +848,7 @@ export interface Account {
   proxy_fallback_origin_name?: string | null
   concurrency: number
   load_factor?: number | null
+  pool_weight?: number | null
   current_concurrency?: number // Real-time concurrency count from Redis
   priority: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
@@ -1031,6 +1041,7 @@ export interface CreateAccountRequest {
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
+  pool_weight?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   group_ids?: number[]
@@ -1048,6 +1059,7 @@ export interface UpdateAccountRequest {
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
+  pool_weight?: number | null
   priority?: number
   rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
   schedulable?: boolean

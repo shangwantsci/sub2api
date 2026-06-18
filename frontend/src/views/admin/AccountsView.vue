@@ -14,7 +14,7 @@
           <AccountTableActions
             :loading="loading"
             @refresh="handleManualRefresh"
-            @create="showCreate = true"
+            @create="openCreateAccount"
           >
             <template #after>
               <!-- Auto Refresh Dropdown -->
@@ -98,6 +98,12 @@
                       </span>
                       <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
                     </button>
+                    <button class="account-tools-menu-item" @click="openAnthropicSessionImport">
+                      <span class="account-tools-menu-icon bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-300">
+                        <Icon name="key" size="sm" />
+                      </span>
+                      <span class="flex-1 text-left">{{ t('admin.accounts.anthropicSessionBulkImport') }}</span>
+                    </button>
                     <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
                       <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
                         <Icon name="download" size="sm" />
@@ -155,6 +161,16 @@
                   </div>
                 </div>
               </div>
+            </template>
+            <template #beforeCreate>
+              <button
+                class="btn btn-secondary px-2 md:px-3"
+                :title="t('admin.accounts.anthropicSessionBulkImport')"
+                @click="openAnthropicSessionImport"
+              >
+                <Icon name="key" size="sm" class="md:mr-1.5" />
+                <span class="hidden md:inline">{{ t('admin.accounts.anthropicSessionBulkImportShort') }}</span>
+              </button>
             </template>
           </AccountTableActions>
         </div>
@@ -365,7 +381,14 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <CreateAccountModal
+      :show="showCreate"
+      :proxies="proxies"
+      :groups="groups"
+      :initial-mode="createInitialMode"
+      @close="closeCreateAccount"
+      @created="reload"
+    />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
@@ -487,6 +510,8 @@ const selTypes = computed<AccountType[]>(() => {
   return [...types]
 })
 const showCreate = ref(false)
+type CreateAccountInitialMode = 'standard' | 'anthropic-session-import'
+const createInitialMode = ref<CreateAccountInitialMode>('standard')
 const showEdit = ref(false)
 const showSync = ref(false)
 const showImportData = ref(false)
@@ -989,6 +1014,21 @@ const handleManualRefresh = async () => {
   await load()
   // Force usage cells to refetch /usage on explicit user refresh.
   usageManualRefreshToken.value += 1
+}
+
+const openCreateAccount = () => {
+  createInitialMode.value = 'standard'
+  showCreate.value = true
+}
+
+const openAnthropicSessionImport = () => {
+  closeAccountToolsDropdown()
+  createInitialMode.value = 'anthropic-session-import'
+  showCreate.value = true
+}
+
+const closeCreateAccount = () => {
+  showCreate.value = false
 }
 
 const closeAccountToolsDropdown = () => {
