@@ -30,6 +30,7 @@ type RateLimitService struct {
 	settingService        *SettingService
 	tokenCacheInvalidator TokenCacheInvalidator
 	runtimeBlocker        AccountRuntimeBlocker
+	accountRuntimeBlocks  sync.Map
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
 }
@@ -65,6 +66,11 @@ const geminiPrecheckCacheTTL = time.Minute
 const (
 	defaultRateLimit429CooldownSeconds = 5
 	maxRateLimit429CooldownSeconds     = 7200
+)
+
+const (
+	accountRuntimeBlockBridgeCooldown      = 2 * time.Minute
+	anthropic429RuntimeFallbackMinCooldown = time.Minute
 )
 
 const (
@@ -118,16 +124,180 @@ func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocke
 
 func (s *RateLimitService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {
 	if s == nil || s.runtimeBlocker == nil || account == nil {
+		if s != nil && account != nil {
+			s.blockLocalAccountScheduling(account.ID, until, reason, 0)
+		}
 		return
 	}
+	s.blockLocalAccountScheduling(account.ID, until, reason, 0)
 	s.runtimeBlocker.BlockAccountScheduling(account, until, reason)
 }
 
 func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) {
 	if s == nil || s.runtimeBlocker == nil || accountID <= 0 {
+		if s != nil && accountID > 0 {
+			s.clearLocalAccountSchedulingBlock(accountID)
+		}
 		return
 	}
+	s.clearLocalAccountSchedulingBlock(accountID)
 	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
+}
+
+type accountRuntimeBlock struct {
+	Until      time.Time
+	Reason     string
+	Source     string
+	StatusCode int
+}
+
+type tempUnschedBatchReader interface {
+	GetTempUnschedBatch(ctx context.Context, accountIDs []int64) (map[int64]*TempUnschedState, error)
+}
+
+func (s *RateLimitService) blockLocalAccountScheduling(accountID int64, until time.Time, reason string, statusCode int) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	now := time.Now()
+	blockUntil := until
+	if blockUntil.IsZero() || !blockUntil.After(now) {
+		blockUntil = now.Add(accountRuntimeBlockBridgeCooldown)
+	}
+	next := accountRuntimeBlock{
+		Until:      blockUntil,
+		Reason:     reason,
+		Source:     "runtime",
+		StatusCode: statusCode,
+	}
+
+	for {
+		current, loaded := s.accountRuntimeBlocks.Load(accountID)
+		if !loaded {
+			actual, stored := s.accountRuntimeBlocks.LoadOrStore(accountID, next)
+			if !stored {
+				return
+			}
+			current = actual
+		}
+
+		currentBlock, ok := current.(accountRuntimeBlock)
+		if !ok || currentBlock.Until.IsZero() || !currentBlock.Until.After(now) {
+			if s.accountRuntimeBlocks.CompareAndSwap(accountID, current, next) {
+				return
+			}
+			continue
+		}
+		if currentBlock.Until.After(next.Until) {
+			return
+		}
+		if s.accountRuntimeBlocks.CompareAndSwap(accountID, current, next) {
+			return
+		}
+	}
+}
+
+func (s *RateLimitService) clearLocalAccountSchedulingBlock(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.accountRuntimeBlocks.Delete(accountID)
+}
+
+func (s *RateLimitService) GetAccountRuntimeSchedulingBlocks(ctx context.Context, accounts []Account) map[int64]accountRuntimeBlock {
+	blocks := make(map[int64]accountRuntimeBlock)
+	if s == nil || len(accounts) == 0 {
+		return blocks
+	}
+
+	now := time.Now()
+	accountIDs := make([]int64, 0, len(accounts))
+	seen := make(map[int64]struct{}, len(accounts))
+	for i := range accounts {
+		accountID := accounts[i].ID
+		if accountID <= 0 {
+			continue
+		}
+		if _, ok := seen[accountID]; !ok {
+			seen[accountID] = struct{}{}
+			accountIDs = append(accountIDs, accountID)
+		}
+
+		value, ok := s.accountRuntimeBlocks.Load(accountID)
+		if !ok {
+			continue
+		}
+		block, ok := value.(accountRuntimeBlock)
+		if !ok || block.Until.IsZero() || !block.Until.After(now) {
+			s.accountRuntimeBlocks.Delete(accountID)
+			continue
+		}
+		blocks[accountID] = block
+	}
+
+	if s.tempUnschedCache == nil || len(accountIDs) == 0 {
+		return blocks
+	}
+
+	var states map[int64]*TempUnschedState
+	var err error
+	if batchReader, ok := s.tempUnschedCache.(tempUnschedBatchReader); ok {
+		states, err = batchReader.GetTempUnschedBatch(ctx, accountIDs)
+	} else {
+		states = make(map[int64]*TempUnschedState, len(accountIDs))
+		for _, accountID := range accountIDs {
+			state, getErr := s.tempUnschedCache.GetTempUnsched(ctx, accountID)
+			if getErr != nil {
+				err = getErr
+				break
+			}
+			if state != nil {
+				states[accountID] = state
+			}
+		}
+	}
+	if err != nil {
+		slog.Warn("runtime_scheduling_block_prefetch_failed", "error", err)
+		return blocks
+	}
+
+	for accountID, state := range states {
+		block, ok := runtimeBlockFromTempUnschedState(state, now)
+		if !ok {
+			continue
+		}
+		if current, exists := blocks[accountID]; !exists || block.Until.After(current.Until) {
+			blocks[accountID] = block
+		}
+	}
+	return blocks
+}
+
+func (s *RateLimitService) IsAccountRuntimeSchedulingBlocked(ctx context.Context, account *Account) bool {
+	if account == nil {
+		return false
+	}
+	return len(s.GetAccountRuntimeSchedulingBlocks(ctx, []Account{*account})) > 0
+}
+
+func runtimeBlockFromTempUnschedState(state *TempUnschedState, now time.Time) (accountRuntimeBlock, bool) {
+	if state == nil || state.UntilUnix <= now.Unix() {
+		return accountRuntimeBlock{}, false
+	}
+	until := time.Unix(state.UntilUnix, 0)
+	if !until.After(now) {
+		return accountRuntimeBlock{}, false
+	}
+	reason := strings.TrimSpace(state.MatchedKeyword)
+	if reason == "" {
+		reason = strings.TrimSpace(state.ErrorMessage)
+	}
+	return accountRuntimeBlock{
+		Until:      until,
+		Reason:     reason,
+		Source:     "temp_unsched_cache",
+		StatusCode: state.StatusCode,
+	}, true
 }
 
 // ErrorPolicyResult 表示错误策略检查的结果
@@ -899,6 +1069,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
+		s.setRuntime429TempCache(ctx, account, result.resetAt, "anthropic_429_window", responseBody)
 		if err := s.accountRepo.SetRateLimited(ctx, account.ID, result.resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			return
@@ -951,12 +1122,13 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		}
 
 		// Anthropic 平台：没有限流重置时间的 429 可能是非真实限流（如 Extra usage required），
-		// 不标记账号限流状态，直接透传错误给客户端
+		// 不写入数据库长期限流，但需要短时间运行时冷却，避免后续请求继续撞同一个账号。
 		if account.Platform == PlatformAnthropic {
-			slog.Warn("rate_limit_429_no_reset_time_skipped",
+			s.applyAnthropic429RuntimeCooldown(ctx, account, "no_reset_time", responseBody)
+			slog.Warn("anthropic_429_no_reset_runtime_cooldown",
 				"account_id", account.ID,
 				"platform", account.Platform,
-				"reason", "no rate limit reset time in headers, likely not a real rate limit")
+				"reason", "no rate limit reset time in headers")
 			return
 		}
 
@@ -977,6 +1149,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 
 	// 标记限流状态
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429")
+	s.setRuntime429TempCache(ctx, account, resetAt, "429_unified_reset", responseBody)
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		return
@@ -992,6 +1165,46 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
 }
 
+func (s *RateLimitService) applyAnthropic429RuntimeCooldown(ctx context.Context, account *Account, reason string, responseBody []byte) {
+	if account == nil {
+		return
+	}
+	cooldown, enabled := s.get429FallbackCooldown(ctx, account)
+	if !enabled {
+		slog.Info("anthropic_429_runtime_cooldown_disabled", "account_id", account.ID, "reason", reason)
+		return
+	}
+	if cooldown < anthropic429RuntimeFallbackMinCooldown {
+		cooldown = anthropic429RuntimeFallbackMinCooldown
+	}
+
+	until := time.Now().Add(cooldown)
+	s.blockLocalAccountScheduling(account.ID, until, "anthropic_429_runtime_"+reason, http.StatusTooManyRequests)
+	s.setRuntime429TempCache(ctx, account, until, "anthropic_429_runtime_"+reason, responseBody)
+	slog.Warn("anthropic_429_runtime_cooldown_set",
+		"account_id", account.ID,
+		"until", until,
+		"cooldown", cooldown.String(),
+		"reason", reason)
+}
+
+func (s *RateLimitService) setRuntime429TempCache(ctx context.Context, account *Account, until time.Time, reason string, responseBody []byte) {
+	if s == nil || s.tempUnschedCache == nil || account == nil || !until.After(time.Now()) {
+		return
+	}
+	state := &TempUnschedState{
+		UntilUnix:       until.Unix(),
+		TriggeredAtUnix: time.Now().Unix(),
+		StatusCode:      http.StatusTooManyRequests,
+		MatchedKeyword:  reason,
+		RuleIndex:       -1,
+		ErrorMessage:    truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
+	}
+	if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
+		slog.Warn("runtime_429_temp_cache_set_failed", "account_id", account.ID, "error", err)
+	}
+}
+
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {
 	cooldown, enabled := s.get429FallbackCooldown(ctx, account)
 	if !enabled {
@@ -1002,6 +1215,7 @@ func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, accoun
 	resetAt := time.Now().Add(cooldown)
 	slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429_fallback")
+	s.setRuntime429TempCache(ctx, account, resetAt, "429_fallback_"+reason, nil)
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 	}
@@ -1186,6 +1400,7 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 	}
 
 	s.notifyAccountSchedulingBlocked(account, limit.resetAt, limit.reason)
+	s.setRuntime429TempCache(ctx, account, limit.resetAt, limit.reason, nil)
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, limit.resetAt); err != nil {
 		slog.Warn("anthropic_window_rate_limit_set_failed",
 			"account_id", account.ID,

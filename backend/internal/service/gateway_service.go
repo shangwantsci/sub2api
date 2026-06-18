@@ -1704,6 +1704,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if err != nil {
 				return nil, err
 			}
+			if s.rateLimitService != nil && s.rateLimitService.IsAccountRuntimeSchedulingBlocked(ctx, account) {
+				localExcluded[account.ID] = struct{}{}
+				if sessionHash != "" && s.cache != nil {
+					_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+				}
+				continue
+			}
 
 			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 			if err == nil && result.Acquired {
@@ -1766,6 +1773,30 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	for i := range accounts {
 		accountByID[accounts[i].ID] = &accounts[i]
 	}
+	runtimeBlocks := map[int64]accountRuntimeBlock(nil)
+	if s.rateLimitService != nil {
+		runtimeBlocks = s.rateLimitService.GetAccountRuntimeSchedulingBlocks(ctx, accounts)
+		if len(runtimeBlocks) > 0 {
+			slog.Debug("account_runtime_blocks_prefetched",
+				"group_id", derefGroupID(groupID),
+				"model", requestedModel,
+				"blocked_count", len(runtimeBlocks),
+			)
+		}
+	}
+	isRuntimeBlocked := func(account *Account) bool {
+		if account == nil || len(runtimeBlocks) == 0 {
+			return false
+		}
+		block, ok := runtimeBlocks[account.ID]
+		if !ok {
+			return false
+		}
+		if !block.Until.After(time.Now()) {
+			return false
+		}
+		return true
+	}
 	isExcluded := func(accountID int64) bool {
 		if excludedIDs == nil {
 			return false
@@ -1800,7 +1831,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	if len(routingAccountIDs) > 0 && s.concurrencyService != nil {
 		// 1. 过滤出路由列表中可调度的账号
 		var routingCandidates []*Account
-		var filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost int
+		var filteredExcluded, filteredMissing, filteredUnsched, filteredRuntime, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost int
 		var modelScopeSkippedIDs []int64 // 记录因模型限流被跳过的账号 ID
 		for _, routingAccountID := range routingAccountIDs {
 			if isExcluded(routingAccountID) {
@@ -1814,6 +1845,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				} else {
 					filteredUnsched++
 				}
+				continue
+			}
+			if isRuntimeBlocked(account) {
+				filteredRuntime++
 				continue
 			}
 			if !s.isAccountAllowedForPlatform(account, platform, useMixed) {
@@ -1846,9 +1881,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		if s.debugModelRoutingEnabled() {
-			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed candidates: group_id=%v model=%s routed=%d candidates=%d filtered(excluded=%d missing=%d unsched=%d platform=%d model_scope=%d model_mapping=%d window_cost=%d)",
+			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed candidates: group_id=%v model=%s routed=%d candidates=%d filtered(excluded=%d missing=%d unsched=%d runtime=%d platform=%d model_scope=%d model_mapping=%d window_cost=%d)",
 				derefGroupID(groupID), requestedModel, len(routingAccountIDs), len(routingCandidates),
-				filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost)
+				filteredExcluded, filteredMissing, filteredUnsched, filteredRuntime, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost)
 			if len(modelScopeSkippedIDs) > 0 {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] model_rate_limited accounts skipped: group_id=%v model=%s account_ids=%v",
 					derefGroupID(groupID), requestedModel, modelScopeSkippedIDs)
@@ -1869,8 +1904,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					// 粘性账号在路由列表中，优先使用
 					if stickyAccount, ok := accountByID[stickyAccountID]; ok {
 						var stickyCacheMissReason string
+						stickyRuntimeBlocked := isRuntimeBlocked(stickyAccount)
+						if stickyRuntimeBlocked && s.cache != nil {
+							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						}
 
-						gatePass := s.isAccountSchedulableForSelection(stickyAccount) &&
+						gatePass := !stickyRuntimeBlocked &&
+							s.isAccountSchedulableForSelection(stickyAccount) &&
 							s.isAccountAllowedForPlatform(stickyAccount, platform, useMixed) &&
 							(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, stickyAccount, requestedModel)) &&
 							s.isAccountSchedulableForModelSelection(ctx, stickyAccount, requestedModel) &&
@@ -1923,6 +1963,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								}
 							}
 							// 粘性账号槽位满且等待队列已满，继续使用负载感知选择
+						} else if stickyRuntimeBlocked {
+							stickyCacheMissReason = "runtime_blocked"
 						} else if !gatePass {
 							stickyCacheMissReason = "gate_check"
 						} else {
@@ -2041,11 +2083,17 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			account, ok := accountByID[accountID]
 			if ok {
 				// 检查账户是否需要清理粘性会话绑定
-				clearSticky := shouldClearStickySession(account, requestedModel)
+				runtimeBlocked := isRuntimeBlocked(account)
+				clearSticky := runtimeBlocked || shouldClearStickySession(account, requestedModel)
 				if clearSticky {
 					slog.Debug("sticky.layer1_5_no_routing_clear",
 						"account_id", accountID,
-						"reason", "should_clear_sticky_session",
+						"reason", func() string {
+							if runtimeBlocked {
+								return "runtime_blocked"
+							}
+							return "should_clear_sticky_session"
+						}(),
 						"session", shortSessionHash(sessionHash),
 					)
 					_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
@@ -2066,6 +2114,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					"account_id", accountID,
 					"session", shortSessionHash(sessionHash),
 					"clear_sticky", clearSticky,
+					"runtime_blocked", runtimeBlocked,
 					"schedulable", schedulable,
 					"platform_ok", platformOK,
 					"model_supported", modelSupported,
@@ -2163,6 +2212,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	for i := range accounts {
 		acc := &accounts[i]
 		if isExcluded(acc.ID) {
+			continue
+		}
+		if isRuntimeBlocked(acc) {
 			continue
 		}
 		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);

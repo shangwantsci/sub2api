@@ -3215,6 +3215,62 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 	})
 }
 
+func TestGatewayService_SelectAccountWithLoadAwareness_Runtime429Block(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(1)
+
+	newRuntimeBlockedService := func(sessionBindings map[string]int64) (*GatewayService, *mockConcurrencyCache, *mockGatewayCacheForPlatform) {
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Priority: 0, Status: StatusActive, Schedulable: true, Concurrency: 5, AccountGroups: []AccountGroup{{GroupID: groupID}}},
+				{ID: 2, Platform: PlatformAnthropic, Priority: 10, Status: StatusActive, Schedulable: true, Concurrency: 5, AccountGroups: []AccountGroup{{GroupID: groupID}}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{sessionBindings: sessionBindings}
+		concurrencyCache := &mockConcurrencyCache{}
+		rateLimitSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		rateLimitSvc.blockLocalAccountScheduling(1, time.Now().Add(time.Minute), "anthropic_429_runtime", 429)
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			groupRepo:          &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: {ID: groupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}}},
+			cache:              cache,
+			cfg:                testConfig(),
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+			rateLimitService:   rateLimitSvc,
+		}
+		svc.cfg.Gateway.Scheduling.LoadBatchEnabled = true
+		return svc, concurrencyCache, cache
+	}
+
+	t.Run("负载选择跳过429冷却账号", func(t *testing.T) {
+		svc, concurrencyCache, _ := newRuntimeBlockedService(nil)
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.NotContains(t, concurrencyCache.acquireAccountIDs, int64(1), "429冷却账号不应进入槽位获取")
+	})
+
+	t.Run("粘连账号429冷却时清理粘连并切到健康账号", func(t *testing.T) {
+		sessionHash := "sticky-runtime-429"
+		svc, concurrencyCache, cache := newRuntimeBlockedService(map[string]int64{sessionHash: 1})
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, sessionHash, "claude-3-5-sonnet-20241022", nil, "", int64(0))
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.Equal(t, 1, cache.deletedSessions[sessionHash], "429冷却的粘连账号应被清理")
+		require.NotContains(t, concurrencyCache.acquireAccountIDs, int64(1), "冷却中的粘连账号不应继续排队或获取槽位")
+	})
+}
+
 func TestSelectAccountWithLoadAwareness_MixedTypeWeight_APIKeyWeightZeroUsesSetupToken(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(501)

@@ -111,3 +111,14 @@ func TestHandle429_FallbackUsesDefaultSecondsWhenSettingServiceMissing(t *testin
 	require.Equal(t, int64(44), accountRepo.lastRateLimitID)
 	require.True(t, !accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)) && !accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
+
+func TestHandle429_AnthropicNoResetUsesRuntimeCooldownOnly(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+
+	account := &Account{ID: 45, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`))
+
+	require.Zero(t, accountRepo.rateLimitCalls, "无 reset 的 Anthropic 429 不应写入数据库长期限流")
+	require.True(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account), "无 reset 的 Anthropic 429 应进入短运行时冷却")
+}

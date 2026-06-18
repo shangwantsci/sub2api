@@ -84,6 +84,51 @@ func (c *tempUnschedCache) GetTempUnsched(ctx context.Context, accountID int64) 
 	return &state, nil
 }
 
+func (c *tempUnschedCache) GetTempUnschedBatch(ctx context.Context, accountIDs []int64) (map[int64]*service.TempUnschedState, error) {
+	result := make(map[int64]*service.TempUnschedState, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return result, nil
+	}
+
+	keys := make([]string, 0, len(accountIDs))
+	ids := make([]int64, 0, len(accountIDs))
+	seen := make(map[int64]struct{}, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		if _, ok := seen[accountID]; ok {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		ids = append(ids, accountID)
+		keys = append(keys, fmt.Sprintf("%s%d", tempUnschedPrefix, accountID))
+	}
+	if len(keys) == 0 {
+		return result, nil
+	}
+
+	values, err := c.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	for i, value := range values {
+		if value == nil {
+			continue
+		}
+		raw, ok := value.(string)
+		if !ok || raw == "" {
+			continue
+		}
+		var state service.TempUnschedState
+		if err := json.Unmarshal([]byte(raw), &state); err != nil {
+			return nil, fmt.Errorf("unmarshal state for account %d: %w", ids[i], err)
+		}
+		result[ids[i]] = &state
+	}
+	return result, nil
+}
+
 // DeleteTempUnsched 删除临时不可调度状态
 func (c *tempUnschedCache) DeleteTempUnsched(ctx context.Context, accountID int64) error {
 	key := fmt.Sprintf("%s%d", tempUnschedPrefix, accountID)
