@@ -1423,13 +1423,11 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	}
 
 	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
-	systemRewritten := false
 	if systemPromptInjectionEnabled && !strings.Contains(strings.ToLower(model), "haiku") {
 		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks)
-		systemRewritten = true
 	}
 
-	normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: !systemRewritten}
+	normalizeOpts := claudeOAuthNormalizeOptions{}
 
 	if s.identityService != nil && c != nil && c.Request != nil {
 		if fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header); err == nil && fp != nil {
@@ -4399,6 +4397,47 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 	return items, nil
 }
 
+func decodeUserCacheControl(value any) any {
+	if value == nil {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	cacheControl, err := decodeClaudeOAuthSystemPromptCacheControl(raw)
+	if err != nil {
+		return nil
+	}
+	return cacheControl
+}
+
+func extractSystemTextAndCacheControlForMigration(system any) (string, any) {
+	switch v := system.(type) {
+	case string:
+		return strings.TrimSpace(v), nil
+	case []any:
+		var parts []string
+		var cacheControl any
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
+				parts = append(parts, text)
+			}
+			if cc, ok := m["cache_control"]; ok {
+				if decoded := decodeUserCacheControl(cc); decoded != nil {
+					cacheControl = decoded
+				}
+			}
+		}
+		return strings.Join(parts, "\n\n"), cacheControl
+	}
+	return "", nil
+}
+
 func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -4426,22 +4465,8 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	system = normalizeSystemParam(system)
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
 
-	// 1. 提取原始 system prompt 文本
-	var originalSystemText string
-	switch v := system.(type) {
-	case string:
-		originalSystemText = strings.TrimSpace(v)
-	case []any:
-		var parts []string
-		for _, item := range v {
-			if m, ok := item.(map[string]any); ok {
-				if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, text)
-				}
-			}
-		}
-		originalSystemText = strings.Join(parts, "\n\n")
-	}
+	// 1. 提取原始 system prompt 文本及客户端声明的缓存断点。
+	originalSystemText, originalSystemCacheControl := extractSystemTextAndCacheControlForMigration(system)
 
 	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
 	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli; cch=00000;）
@@ -4474,11 +4499,16 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    模型仍通过 messages 接收完整指令，保留客户端功能
 	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
 	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
+		instructionBlock := map[string]any{
+			"type": "text",
+			"text": "[System Instructions]\n" + originalSystemText,
+		}
+		if originalSystemCacheControl != nil {
+			instructionBlock["cache_control"] = originalSystemCacheControl
+		}
 		instrMsg, err1 := json.Marshal(map[string]any{
-			"role": "user",
-			"content": []map[string]any{
-				{"type": "text", "text": "[System Instructions]\n" + originalSystemText},
-			},
+			"role":    "user",
+			"content": []map[string]any{instructionBlock},
 		})
 		ackMsg, err2 := json.Marshal(map[string]any{
 			"role": "assistant",
@@ -4839,7 +4869,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// Code..." system prompt 但缺少 billing attribution block，导致 Anthropic
 		// 检测到"有 CC prompt 但无 billing block"的不一致而判为 third-party。
 		// Parrot 的 transform_request 从不检查客户端 system 内容，直接覆盖。
-		systemRewritten := false
 		if !strings.Contains(strings.ToLower(reqModel), "haiku") {
 			systemRaw, _ := parsed.SystemValue()
 			systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
@@ -4847,14 +4876,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
 					return nil, err
 				}
-				systemRewritten = true
 			}
 		}
 
-		// system 被重写时保留 CC prompt 的 cache_control: ephemeral（匹配真实 Claude Code 行为）；
-		// 未重写时（haiku / 注入开关关闭）剥离客户端 cache_control，与原有行为一致。
+		// system 被重写时，原始 system 的 cache_control 会随指令消息迁移；
+		// 未重写时（haiku / 注入开关关闭）保留客户端明确声明的 system cache_control。
 		// 两种情况下 enforceCacheControlLimit 都会兜底处理上限。
-		normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: !systemRewritten}
+		normalizeOpts := claudeOAuthNormalizeOptions{}
 		if s.identityService != nil {
 			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
 			if err == nil && fp != nil {
@@ -6940,6 +6968,69 @@ func (s *GatewayService) getBetaHeader(modelID string, clientBetaHeader string) 
 	return claude.DefaultBetaHeader
 }
 
+func cacheControlUsesTTL1h(cc gjson.Result) bool {
+	return cc.Exists() &&
+		cc.Get("type").String() == "ephemeral" &&
+		strings.EqualFold(cc.Get("ttl").String(), cacheTTLTarget1h)
+}
+
+func bodyUsesAnthropicCacheTTL1h(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if cacheControlUsesTTL1h(gjson.GetBytes(body, "cache_control")) {
+		return true
+	}
+
+	found := false
+	system := gjson.GetBytes(body, "system")
+	if system.IsArray() {
+		system.ForEach(func(_, block gjson.Result) bool {
+			if cacheControlUsesTTL1h(block.Get("cache_control")) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+
+	messages := gjson.GetBytes(body, "messages")
+	if messages.IsArray() {
+		messages.ForEach(func(_, msg gjson.Result) bool {
+			content := msg.Get("content")
+			if !content.IsArray() {
+				return true
+			}
+			content.ForEach(func(_, block gjson.Result) bool {
+				if cacheControlUsesTTL1h(block.Get("cache_control")) {
+					found = true
+					return false
+				}
+				return true
+			})
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+
+	tools := gjson.GetBytes(body, "tools")
+	if tools.IsArray() {
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			if cacheControlUsesTTL1h(tool.Get("cache_control")) {
+				found = true
+				return false
+			}
+			return true
+		})
+	}
+	return found
+}
+
 func requestNeedsBetaFeatures(body []byte) bool {
 	tools := gjson.GetBytes(body, "tools")
 	if tools.Exists() && tools.IsArray() && len(tools.Array()) > 0 {
@@ -7051,6 +7142,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
+	needsExtendedCacheTTL := bodyUsesAnthropicCacheTTL1h(body)
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
@@ -7060,15 +7152,28 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 			if !strings.Contains(strings.ToLower(modelID), "haiku") {
 				requiredBetas = claude.FullClaudeCodeMimicryBetas()
 			}
+			if needsExtendedCacheTTL {
+				requiredBetas = append(requiredBetas, claude.BetaExtendedCacheTTL)
+			}
 			return mergeAnthropicBetaDropping(requiredBetas, "", effectiveDropSet), true
 		}
 		// 真 Claude Code 客户端透传路径
-		return stripBetaTokensWithSet(s.getBetaHeader(modelID, clientBeta), effectiveDropSet), true
+		beta := s.getBetaHeader(modelID, clientBeta)
+		if needsExtendedCacheTTL {
+			return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, beta, effectiveDropSet), true
+		}
+		return stripBetaTokensWithSet(beta, effectiveDropSet), true
 	}
 
 	// API-key accounts
 	if clientBeta != "" {
+		if needsExtendedCacheTTL {
+			return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, clientBeta, effectiveDropSet), true
+		}
 		return stripBetaTokensWithSet(clientBeta, effectiveDropSet), true
+	}
+	if needsExtendedCacheTTL {
+		return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, "", effectiveDropSet), true
 	}
 	if s.cfg != nil && s.cfg.Gateway.InjectBetaForAPIKey {
 		if requestNeedsBetaFeatures(body) {
@@ -7102,6 +7207,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
 	}
+	needsExtendedCacheTTL := bodyUsesAnthropicCacheTTL1h(body)
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
@@ -7110,21 +7216,36 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 			// incomingBeta = req.Header[anthropic-beta] = 客户端透传过来的 client beta。
 			// 重构后直接从 clientHeaders 拿同一个值，保持行为一致。
 			requiredBetas := append(claude.FullClaudeCodeMimicryBetas(), claude.BetaTokenCounting)
+			if needsExtendedCacheTTL {
+				requiredBetas = append(requiredBetas, claude.BetaExtendedCacheTTL)
+			}
 			return mergeAnthropicBetaDropping(requiredBetas, clientBeta, effectiveDropSet), true
 		}
 		if clientBeta == "" {
+			if needsExtendedCacheTTL {
+				return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, claude.CountTokensBetaHeader, effectiveDropSet), true
+			}
 			return claude.CountTokensBetaHeader, true
 		}
 		beta := s.getBetaHeader(modelID, clientBeta)
 		if !strings.Contains(beta, claude.BetaTokenCounting) {
 			beta = beta + "," + claude.BetaTokenCounting
 		}
+		if needsExtendedCacheTTL {
+			return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, beta, effectiveDropSet), true
+		}
 		return stripBetaTokensWithSet(beta, effectiveDropSet), true
 	}
 
 	// API-key accounts
 	if clientBeta != "" {
+		if needsExtendedCacheTTL {
+			return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, clientBeta, effectiveDropSet), true
+		}
 		return stripBetaTokensWithSet(clientBeta, effectiveDropSet), true
+	}
+	if needsExtendedCacheTTL {
+		return mergeAnthropicBetaDropping([]string{claude.BetaExtendedCacheTTL}, "", effectiveDropSet), true
 	}
 	if s.cfg != nil && s.cfg.Gateway.InjectBetaForAPIKey {
 		if requestNeedsBetaFeatures(body) {
@@ -9788,7 +9909,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCodeCT
 
 	if shouldMimicClaudeCode {
-		normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: true}
+		normalizeOpts := claudeOAuthNormalizeOptions{}
 		var normalizedBody []byte
 		normalizedBody, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
 		if err := replaceBody(normalizedBody); err != nil {

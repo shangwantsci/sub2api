@@ -468,6 +468,40 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 	}
 }
 
+func TestRewriteSystemForNonClaudeCode_PreservesOriginalSystemCacheControlTTL(t *testing.T) {
+	tests := []struct {
+		name    string
+		ttl     string
+		wantTTL string
+	}{
+		{name: "preserves explicit 5m ttl", ttl: "5m", wantTTL: "5m"},
+		{name: "preserves explicit 1h ttl", ttl: "1h", wantTTL: "1h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"claude-sonnet-4-6","system":[{"type":"text","text":"Project instructions","cache_control":{"type":"ephemeral","ttl":"` + tt.ttl + `"}}],"messages":[{"role":"user","content":"hello"}]}`)
+			system := []any{
+				map[string]any{
+					"type": "text",
+					"text": "Project instructions",
+					"cache_control": map[string]any{
+						"type": "ephemeral",
+						"ttl":  tt.ttl,
+					},
+				},
+			}
+
+			result := rewriteSystemForNonClaudeCode(body, system)
+
+			firstInstructionBlock := gjson.GetBytes(result, "messages.0.content.0")
+			require.Equal(t, "[System Instructions]\nProject instructions", firstInstructionBlock.Get("text").String())
+			require.Equal(t, "ephemeral", firstInstructionBlock.Get("cache_control.type").String())
+			require.Equal(t, tt.wantTTL, firstInstructionBlock.Get("cache_control.ttl").String())
+		})
+	}
+}
+
 func TestRewriteSystemForNonClaudeCodeWithPrompt_UsesCustomExpansionPrompt(t *testing.T) {
 	body := []byte(`{"model":"claude-3","system":"Project instructions","messages":[{"role":"user","content":"hello"}]}`)
 	customPrompt := "Custom Claude OAuth expansion prompt"
