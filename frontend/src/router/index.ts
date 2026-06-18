@@ -167,6 +167,15 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/pool-health',
+    name: 'PoolHealth',
+    component: () => import('@/views/public/PoolHealthView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Pool Health'
+    }
+  },
+  {
     path: '/legal/:documentId',
     name: 'LegalDocument',
     component: () => import('@/views/public/LegalDocumentView.vue'),
