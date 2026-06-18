@@ -470,12 +470,13 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 
 func TestRewriteSystemForNonClaudeCode_PreservesOriginalSystemCacheControlTTL(t *testing.T) {
 	tests := []struct {
-		name    string
-		ttl     string
-		wantTTL string
+		name            string
+		ttl             string
+		wantTTL         string
+		wantInjectedTTL string
 	}{
-		{name: "preserves explicit 5m ttl", ttl: "5m", wantTTL: "5m"},
-		{name: "preserves explicit 1h ttl", ttl: "1h", wantTTL: "1h"},
+		{name: "preserves explicit 5m ttl", ttl: "5m", wantTTL: "5m", wantInjectedTTL: "5m"},
+		{name: "preserves explicit 1h ttl", ttl: "1h", wantTTL: "1h", wantInjectedTTL: "1h"},
 	}
 
 	for _, tt := range tests {
@@ -498,6 +499,10 @@ func TestRewriteSystemForNonClaudeCode_PreservesOriginalSystemCacheControlTTL(t 
 			require.Equal(t, "[System Instructions]\nProject instructions", firstInstructionBlock.Get("text").String())
 			require.Equal(t, "ephemeral", firstInstructionBlock.Get("cache_control.type").String())
 			require.Equal(t, tt.wantTTL, firstInstructionBlock.Get("cache_control.ttl").String())
+
+			injectedExpansionBlock := gjson.GetBytes(result, "system.2")
+			require.Equal(t, "ephemeral", injectedExpansionBlock.Get("cache_control.type").String())
+			require.Equal(t, tt.wantInjectedTTL, injectedExpansionBlock.Get("cache_control.ttl").String())
 		})
 	}
 }

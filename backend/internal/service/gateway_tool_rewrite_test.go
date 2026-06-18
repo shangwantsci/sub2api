@@ -142,6 +142,13 @@ func TestApplyToolsLastCacheBreakpoint_InjectsDefault(t *testing.T) {
 	require.False(t, gjson.GetBytes(out, "tools.0.cache_control").Exists())
 }
 
+func TestApplyToolsLastCacheBreakpoint_UsesOneHourWhenRequestAlreadyUsesOneHour(t *testing.T) {
+	body := []byte(`{"tools":[{"name":"a","input_schema":{}}],"system":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`)
+	out := applyToolsLastCacheBreakpoint(body)
+	require.Equal(t, "ephemeral", gjson.GetBytes(out, "tools.0.cache_control.type").String())
+	require.Equal(t, "1h", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
+}
+
 func TestApplyToolsLastCacheBreakpoint_PassesThroughClientTTL(t *testing.T) {
 	body := []byte(`{"tools":[{"name":"a","input_schema":{},"cache_control":{"type":"ephemeral","ttl":"1h"}}]}`)
 	out := applyToolsLastCacheBreakpoint(body)

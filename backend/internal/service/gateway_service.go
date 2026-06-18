@@ -4356,6 +4356,27 @@ func defaultClaudeOAuthSystemPromptBlockConfig() []claudeOAuthSystemPromptBlockC
 	}
 }
 
+func cacheControlTTLForAutoInjectedBreakpoints(body []byte) string {
+	if bodyUsesAnthropicCacheTTL1h(body) {
+		return cacheTTLTarget1h
+	}
+	return claude.DefaultCacheControlTTL
+}
+
+func alignEphemeralCacheControlTTL(raw []byte, ttl string) []byte {
+	if len(raw) == 0 || ttl == "" {
+		return raw
+	}
+	cc := gjson.GetBytes(raw, "cache_control")
+	if !cc.Exists() || cc.Get("type").String() != "ephemeral" || cc.Get("ttl").String() == ttl {
+		return raw
+	}
+	if next, err := sjson.SetBytes(raw, "cache_control.ttl", ttl); err == nil {
+		return next
+	}
+	return raw
+}
+
 func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string) ([][]byte, error) {
 	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
 	if err != nil {
@@ -4365,6 +4386,7 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		blocks = defaultClaudeOAuthSystemPromptBlockConfig()
 	}
 
+	autoCacheTTL := cacheControlTTLForAutoInjectedBreakpoints(body)
 	items := make([][]byte, 0, len(blocks))
 	for i, block := range blocks {
 		if block.Enabled != nil && !*block.Enabled {
@@ -4392,6 +4414,7 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		if err != nil {
 			return nil, err
 		}
+		raw = alignEphemeralCacheControlTTL(raw, autoCacheTTL)
 		items = append(items, raw)
 	}
 	return items, nil

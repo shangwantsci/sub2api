@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -252,7 +251,7 @@ func applyToolNameRewriteToBody(body []byte, rw *ToolNameRewrite) []byte {
 // 断点，对齐 Parrot `tools[-1]["cache_control"] = {"type":"ephemeral","ttl":"1h"}`
 // 行为，但 ttl 按本仓规则：
 //   - 客户端已为该 tool 显式设置 cache_control.ttl → 完全透传不覆盖
-//   - 否则注入 {"type":"ephemeral","ttl": claude.DefaultCacheControlTTL}
+//   - 否则按请求中已有的缓存 TTL 注入自动断点，默认 5m，遇到 1h 请求时跟随 1h
 //
 // 纯副作用函数，tools 不存在或为空数组时 no-op。
 func applyToolsLastCacheBreakpoint(body []byte) []byte {
@@ -266,19 +265,20 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 	}
 	lastIdx := len(arr) - 1
 	existingCC := arr[lastIdx].Get("cache_control")
+	autoCacheTTL := cacheControlTTLForAutoInjectedBreakpoints(body)
 
 	if existingCC.Exists() && existingCC.Get("ttl").String() != "" {
 		return body
 	}
 
 	if existingCC.Exists() {
-		if next, err := sjson.SetBytes(body, fmt.Sprintf("tools.%d.cache_control.ttl", lastIdx), claude.DefaultCacheControlTTL); err == nil {
+		if next, err := sjson.SetBytes(body, fmt.Sprintf("tools.%d.cache_control.ttl", lastIdx), autoCacheTTL); err == nil {
 			body = next
 		}
 		return body
 	}
 
-	raw := fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, claude.DefaultCacheControlTTL)
+	raw := fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, autoCacheTTL)
 	if next, err := sjson.SetRawBytes(body, fmt.Sprintf("tools.%d.cache_control", lastIdx), []byte(raw)); err == nil {
 		body = next
 	}
