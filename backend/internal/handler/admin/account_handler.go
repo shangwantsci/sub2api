@@ -58,6 +58,10 @@ type AccountHandler struct {
 	sessionLimitCache       service.SessionLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
+
+	anthropicSessionImportMu     sync.Mutex
+	anthropicSessionImportJobs   map[string]*anthropicSessionImportJob
+	anthropicSessionImportActive string
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -77,19 +81,20 @@ func NewAccountHandler(
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 ) *AccountHandler {
 	return &AccountHandler{
-		adminService:            adminService,
-		oauthService:            oauthService,
-		openaiOAuthService:      openaiOAuthService,
-		geminiOAuthService:      geminiOAuthService,
-		antigravityOAuthService: antigravityOAuthService,
-		rateLimitService:        rateLimitService,
-		accountUsageService:     accountUsageService,
-		accountTestService:      accountTestService,
-		concurrencyService:      concurrencyService,
-		crsSyncService:          crsSyncService,
-		sessionLimitCache:       sessionLimitCache,
-		rpmCache:                rpmCache,
-		tokenCacheInvalidator:   tokenCacheInvalidator,
+		adminService:               adminService,
+		oauthService:               oauthService,
+		openaiOAuthService:         openaiOAuthService,
+		geminiOAuthService:         geminiOAuthService,
+		antigravityOAuthService:    antigravityOAuthService,
+		rateLimitService:           rateLimitService,
+		accountUsageService:        accountUsageService,
+		accountTestService:         accountTestService,
+		concurrencyService:         concurrencyService,
+		crsSyncService:             crsSyncService,
+		sessionLimitCache:          sessionLimitCache,
+		rpmCache:                   rpmCache,
+		tokenCacheInvalidator:      tokenCacheInvalidator,
+		anthropicSessionImportJobs: map[string]*anthropicSessionImportJob{},
 	}
 }
 

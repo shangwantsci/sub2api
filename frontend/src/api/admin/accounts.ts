@@ -18,6 +18,8 @@ import type {
   AdminDataImportResult,
   CodexSessionImportRequest,
   CodexSessionImportResult,
+  AnthropicSessionImportRequest,
+  AnthropicSessionImportJobSnapshot,
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
 } from '@/types'
@@ -612,6 +614,34 @@ export async function importCodexSession(payload: CodexSessionImportRequest): Pr
   return data
 }
 
+export async function startAnthropicSessionImport(
+  payload: AnthropicSessionImportRequest
+): Promise<AnthropicSessionImportJobSnapshot> {
+  const { data } = await apiClient.post<AnthropicSessionImportJobSnapshot>(
+    '/admin/accounts/import/anthropic-session',
+    payload
+  )
+  return data
+}
+
+export async function getAnthropicSessionImport(
+  id: string
+): Promise<AnthropicSessionImportJobSnapshot> {
+  const { data } = await apiClient.get<AnthropicSessionImportJobSnapshot>(
+    `/admin/accounts/import/anthropic-session/${id}`
+  )
+  return data
+}
+
+export async function cancelAnthropicSessionImport(
+  id: string
+): Promise<AnthropicSessionImportJobSnapshot> {
+  const { data } = await apiClient.post<AnthropicSessionImportJobSnapshot>(
+    `/admin/accounts/import/anthropic-session/${id}/cancel`
+  )
+  return data
+}
+
 /**
  * Get Antigravity default model mapping from backend
  * @returns Default model mapping (from -> to)
@@ -812,6 +842,9 @@ export const accountsAPI = {
   exportData,
   importData,
   importCodexSession,
+  startAnthropicSessionImport,
+  getAnthropicSessionImport,
+  cancelAnthropicSessionImport,
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,
