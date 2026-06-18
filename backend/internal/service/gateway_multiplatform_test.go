@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	mathrand "math/rand"
 	"testing"
 	"time"
 
@@ -1987,6 +1988,7 @@ func (m *mockConcurrencyService) GetAccountWaitingCount(ctx context.Context, acc
 
 type mockConcurrencyCache struct {
 	acquireAccountCalls int
+	acquireAccountIDs   []int64
 	loadBatchCalls      int
 	acquireResults      map[int64]bool
 	loadBatchErr        error
@@ -1997,6 +1999,7 @@ type mockConcurrencyCache struct {
 
 func (m *mockConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
 	m.acquireAccountCalls++
+	m.acquireAccountIDs = append(m.acquireAccountIDs, accountID)
 	if m.acquireResults != nil {
 		if result, ok := m.acquireResults[accountID]; ok {
 			return result, nil
@@ -3210,6 +3213,152 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NotNil(t, result.Account)
 		require.Equal(t, int64(2), result.Account.ID)
 	})
+}
+
+func TestSelectAccountWithLoadAwareness_MixedTypeWeight_APIKeyWeightZeroUsesSetupToken(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(501)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Priority: 50, Status: StatusActive, Schedulable: true, Concurrency: 5},
+			{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	group := &Group{
+		ID:                              groupID,
+		Platform:                        PlatformAnthropic,
+		Status:                          StatusActive,
+		Hydrated:                        true,
+		AnthropicMixedTypeWeightEnabled: true,
+		AnthropicSetupTokenPoolWeight:   100,
+		AnthropicAPIKeyPoolWeight:       0,
+	}
+
+	concurrencyCache := &mockConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, LoadRate: 80},
+			2: {AccountID: 2, LoadRate: 0},
+		},
+	}
+	cfg := testConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+	svc := &GatewayService{
+		accountRepo:        repo,
+		groupRepo:          &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}},
+		cache:              &mockGatewayCacheForPlatform{},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "mixed-api-zero", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(1), result.Account.ID)
+}
+
+func TestSelectAccountWithLoadAwareness_MixedTypeWeight_SetupUnavailableFallsBackToAPIKey(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(502)
+	mathrand.Seed(1)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
+			{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Priority: 50, Status: StatusActive, Schedulable: true, Concurrency: 5, PoolWeight: ptr(1)},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	group := &Group{
+		ID:                              groupID,
+		Platform:                        PlatformAnthropic,
+		Status:                          StatusActive,
+		Hydrated:                        true,
+		AnthropicMixedTypeWeightEnabled: true,
+		AnthropicSetupTokenPoolWeight:   100,
+		AnthropicAPIKeyPoolWeight:       1,
+	}
+
+	concurrencyCache := &mockConcurrencyCache{
+		acquireResults: map[int64]bool{1: false, 2: true},
+		loadMap: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, LoadRate: 0},
+			2: {AccountID: 2, LoadRate: 0},
+		},
+	}
+	cfg := testConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+	svc := &GatewayService{
+		accountRepo:        repo,
+		groupRepo:          &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}},
+		cache:              &mockGatewayCacheForPlatform{},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "mixed-fallback", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(2), result.Account.ID)
+	require.Equal(t, []int64{1, 2}, concurrencyCache.acquireAccountIDs)
+}
+
+func TestSelectAccountWithLoadAwareness_MixedTypeWeight_StickyStillWins(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(503)
+	sessionHash := "mixed-sticky"
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Priority: 50, Status: StatusActive, Schedulable: true, Concurrency: 5},
+			{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, PoolWeight: ptr(1)},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	group := &Group{
+		ID:                              groupID,
+		Platform:                        PlatformAnthropic,
+		Status:                          StatusActive,
+		Hydrated:                        true,
+		AnthropicMixedTypeWeightEnabled: true,
+		AnthropicSetupTokenPoolWeight:   0,
+		AnthropicAPIKeyPoolWeight:       100,
+	}
+
+	concurrencyCache := &mockConcurrencyCache{}
+	cfg := testConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	svc := &GatewayService{
+		accountRepo:        repo,
+		groupRepo:          &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}},
+		cache:              &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{sessionHash: 1}},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, sessionHash, "claude-3-5-sonnet-20241022", nil, "", int64(0))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(1), result.Account.ID)
+	require.Equal(t, 0, concurrencyCache.loadBatchCalls)
 }
 
 func TestGatewayService_GroupResolution_ReusesContextGroup(t *testing.T) {

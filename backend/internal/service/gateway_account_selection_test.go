@@ -151,6 +151,54 @@ func TestFilterByMinLoadRate_SelectsMinLoadRate(t *testing.T) {
 	require.Equal(t, int64(3), result[1].account.ID)
 }
 
+// --- Anthropic mixed type weight scheduling ---
+
+func TestMixedTypeSchedulingFiltersAPIKeyWhenPoolWeightZero(t *testing.T) {
+	apiPoolWeight := 5
+	available := []accountWithLoad{
+		makeAccWithLoad(1, 50, 10, nil, AccountTypeSetupToken),
+		makeAccWithLoad(2, 1, 0, nil, AccountTypeAPIKey),
+	}
+	available[1].account.PoolWeight = &apiPoolWeight
+
+	group := &Group{
+		Platform:                        PlatformAnthropic,
+		AnthropicMixedTypeWeightEnabled: true,
+		AnthropicSetupTokenPoolWeight:   100,
+		AnthropicAPIKeyPoolWeight:       0,
+	}
+
+	got := filterAvailableForMixedTypePolicy(available, group)
+
+	require.Len(t, got, 1)
+	require.Equal(t, int64(1), got[0].account.ID)
+}
+
+func TestSelectWeightedAPIKeyCandidateSkipsZeroPoolWeight(t *testing.T) {
+	zeroWeight := 0
+	positiveWeight := 3
+	accounts := []accountWithLoad{
+		makeAccWithLoad(1, 1, 0, nil, AccountTypeAPIKey),
+		makeAccWithLoad(2, 1, 90, nil, AccountTypeAPIKey),
+		makeAccWithLoad(3, 1, 0, nil, AccountTypeSetupToken),
+	}
+	accounts[0].account.PoolWeight = &zeroWeight
+	accounts[1].account.PoolWeight = &positiveWeight
+
+	got := selectWeightedAPIKeyCandidate(accounts)
+
+	require.NotNil(t, got)
+	require.Equal(t, int64(2), got.account.ID)
+}
+
+func TestSelectWeightedPoolChoiceUsesRelativeWeights(t *testing.T) {
+	require.Equal(t, mixedTypePoolSetupToken, selectMixedTypePoolByDraw(100, 25, 0))
+	require.Equal(t, mixedTypePoolSetupToken, selectMixedTypePoolByDraw(100, 25, 99))
+	require.Equal(t, mixedTypePoolAPIKey, selectMixedTypePoolByDraw(100, 25, 100))
+	require.Equal(t, mixedTypePoolAPIKey, selectMixedTypePoolByDraw(0, 25, 0))
+	require.Equal(t, mixedTypePoolSetupToken, selectMixedTypePoolByDraw(100, 0, 0))
+}
+
 // --- selectByLRU ---
 
 func TestSelectByLRU_Empty(t *testing.T) {
