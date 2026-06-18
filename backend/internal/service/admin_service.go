@@ -230,6 +230,10 @@ type CreateGroupInput struct {
 	ModelsListConfig            GroupModelsListConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制）
 	RPMLimit int
+	// Anthropic setup-token/api-key 混合类型权重调度配置
+	AnthropicMixedTypeWeightEnabled bool
+	AnthropicSetupTokenPoolWeight   *int
+	AnthropicAPIKeyPoolWeight       *int
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -271,6 +275,10 @@ type UpdateGroupInput struct {
 	ModelsListConfig            *GroupModelsListConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制），nil 表示未提供不改动。
 	RPMLimit *int
+	// Anthropic setup-token/api-key 混合类型权重调度配置
+	AnthropicMixedTypeWeightEnabled *bool
+	AnthropicSetupTokenPoolWeight   *int
+	AnthropicAPIKeyPoolWeight       *int
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -287,6 +295,7 @@ type CreateAccountInput struct {
 	Priority           int
 	RateMultiplier     *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor         *int
+	PoolWeight         *int
 	GroupIDs           []int64
 	ExpiresAt          *int64
 	AutoPauseOnExpired *bool
@@ -308,6 +317,7 @@ type UpdateAccountInput struct {
 	Priority              *int     // 使用指针区分"未提供"和"设置为0"
 	RateMultiplier        *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor            *int
+	PoolWeight            *int
 	Status                string
 	GroupIDs              *[]int64
 	ExpiresAt             *int64
@@ -1804,6 +1814,16 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		subscriptionType = SubscriptionTypeStandard
 	}
 
+	mixedTypeEnabled, setupPoolWeight, apiKeyPoolWeight, err := normalizeAnthropicMixedTypeWeightConfig(
+		platform,
+		input.AnthropicMixedTypeWeightEnabled,
+		input.AnthropicSetupTokenPoolWeight,
+		input.AnthropicAPIKeyPoolWeight,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
 	weeklyLimit := normalizeLimit(input.WeeklyLimitUSD)
@@ -1906,6 +1926,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
 		ModelsListConfig:                normalizeGroupModelsListConfig(input.ModelsListConfig),
 		RPMLimit:                        input.RPMLimit,
+		AnthropicMixedTypeWeightEnabled: mixedTypeEnabled,
+		AnthropicSetupTokenPoolWeight:   setupPoolWeight,
+		AnthropicAPIKeyPoolWeight:       apiKeyPoolWeight,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -1958,6 +1981,37 @@ func normalizePrice(price *float64) *float64 {
 		return nil
 	}
 	return price
+}
+
+func normalizeAnthropicMixedTypeWeightConfig(platform string, enabled bool, setupWeight, apiKeyWeight *int) (bool, int, int, error) {
+	setup := 100
+	if setupWeight != nil {
+		setup = *setupWeight
+	}
+	apiKey := 0
+	if apiKeyWeight != nil {
+		apiKey = *apiKeyWeight
+	}
+	return validateAnthropicMixedTypeWeightConfig(platform, enabled, setup, apiKey)
+}
+
+func validateAnthropicMixedTypeWeightConfig(platform string, enabled bool, setupWeight, apiKeyWeight int) (bool, int, int, error) {
+	if platform != PlatformAnthropic {
+		return false, 100, 0, nil
+	}
+	if setupWeight < 0 {
+		return false, 0, 0, errors.New("anthropic_setup_token_pool_weight must be >= 0")
+	}
+	if apiKeyWeight < 0 {
+		return false, 0, 0, errors.New("anthropic_api_key_pool_weight must be >= 0")
+	}
+	if setupWeight == 0 && apiKeyWeight == 0 {
+		if enabled {
+			return false, 0, 0, errors.New("at least one anthropic mixed type pool weight must be > 0")
+		}
+		setupWeight = 100
+	}
+	return enabled, setupWeight, apiKeyWeight, nil
 }
 
 // validateFallbackGroup 校验降级分组的有效性
@@ -2061,6 +2115,32 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.SubscriptionType != "" {
 		group.SubscriptionType = input.SubscriptionType
 	}
+	mixedTypeEnabled := group.AnthropicMixedTypeWeightEnabled
+	if input.AnthropicMixedTypeWeightEnabled != nil {
+		mixedTypeEnabled = *input.AnthropicMixedTypeWeightEnabled
+	}
+	setupPoolWeight := group.AnthropicSetupTokenPoolWeight
+	if input.AnthropicSetupTokenPoolWeight != nil {
+		setupPoolWeight = *input.AnthropicSetupTokenPoolWeight
+	}
+	apiKeyPoolWeight := group.AnthropicAPIKeyPoolWeight
+	if input.AnthropicAPIKeyPoolWeight != nil {
+		apiKeyPoolWeight = *input.AnthropicAPIKeyPoolWeight
+	}
+	var weightErr error
+	mixedTypeEnabled, setupPoolWeight, apiKeyPoolWeight, weightErr = validateAnthropicMixedTypeWeightConfig(
+		group.Platform,
+		mixedTypeEnabled,
+		setupPoolWeight,
+		apiKeyPoolWeight,
+	)
+	if weightErr != nil {
+		return nil, weightErr
+	}
+	group.AnthropicMixedTypeWeightEnabled = mixedTypeEnabled
+	group.AnthropicSetupTokenPoolWeight = setupPoolWeight
+	group.AnthropicAPIKeyPoolWeight = apiKeyPoolWeight
+
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
 	// 前端始终发送这三个字段，无需 nil 守卫
 	group.DailyLimitUSD = normalizeLimit(input.DailyLimitUSD)
@@ -2635,6 +2715,14 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 		account.LoadFactor = input.LoadFactor
 	}
+	poolWeight := 1
+	if input.PoolWeight != nil {
+		if *input.PoolWeight < 0 {
+			return nil, errors.New("pool_weight must be >= 0")
+		}
+		poolWeight = *input.PoolWeight
+	}
+	account.PoolWeight = &poolWeight
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -2754,6 +2842,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		} else {
 			account.LoadFactor = input.LoadFactor
 		}
+	}
+	if input.PoolWeight != nil {
+		if *input.PoolWeight < 0 {
+			return nil, errors.New("pool_weight must be >= 0")
+		}
+		account.PoolWeight = input.PoolWeight
 	}
 	if input.Status != "" {
 		account.Status = input.Status

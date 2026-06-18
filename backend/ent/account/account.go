@@ -41,6 +41,8 @@ const (
 	FieldConcurrency = "concurrency"
 	// FieldLoadFactor holds the string denoting the load_factor field in the database.
 	FieldLoadFactor = "load_factor"
+	// FieldPoolWeight holds the string denoting the pool_weight field in the database.
+	FieldPoolWeight = "pool_weight"
 	// FieldPriority holds the string denoting the priority field in the database.
 	FieldPriority = "priority"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
@@ -127,6 +129,7 @@ var Columns = []string{
 	FieldProxyFallbackOriginID,
 	FieldConcurrency,
 	FieldLoadFactor,
+	FieldPoolWeight,
 	FieldPriority,
 	FieldRateMultiplier,
 	FieldStatus,
@@ -187,6 +190,8 @@ var (
 	DefaultExtra func() map[string]interface{}
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
 	DefaultConcurrency int
+	// DefaultPoolWeight holds the default value on creation for the "pool_weight" field.
+	DefaultPoolWeight int
 	// DefaultPriority holds the default value on creation for the "priority" field.
 	DefaultPriority int
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
@@ -264,6 +269,11 @@ func ByConcurrency(opts ...sql.OrderTermOption) OrderOption {
 // ByLoadFactor orders the results by the load_factor field.
 func ByLoadFactor(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLoadFactor, opts...).ToFunc()
+}
+
+// ByPoolWeight orders the results by the pool_weight field.
+func ByPoolWeight(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPoolWeight, opts...).ToFunc()
 }
 
 // ByPriority orders the results by the priority field.

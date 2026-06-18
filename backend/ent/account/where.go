@@ -110,6 +110,11 @@ func LoadFactor(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldLoadFactor, v))
 }
 
+// PoolWeight applies equality check predicate on the "pool_weight" field. It's identical to PoolWeightEQ.
+func PoolWeight(v int) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldPoolWeight, v))
+}
+
 // Priority applies equality check predicate on the "priority" field. It's identical to PriorityEQ.
 func Priority(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldPriority, v))
@@ -758,6 +763,46 @@ func LoadFactorIsNil() predicate.Account {
 // LoadFactorNotNil applies the NotNil predicate on the "load_factor" field.
 func LoadFactorNotNil() predicate.Account {
 	return predicate.Account(sql.FieldNotNull(FieldLoadFactor))
+}
+
+// PoolWeightEQ applies the EQ predicate on the "pool_weight" field.
+func PoolWeightEQ(v int) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldPoolWeight, v))
+}
+
+// PoolWeightNEQ applies the NEQ predicate on the "pool_weight" field.
+func PoolWeightNEQ(v int) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldPoolWeight, v))
+}
+
+// PoolWeightIn applies the In predicate on the "pool_weight" field.
+func PoolWeightIn(vs ...int) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldPoolWeight, vs...))
+}
+
+// PoolWeightNotIn applies the NotIn predicate on the "pool_weight" field.
+func PoolWeightNotIn(vs ...int) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldPoolWeight, vs...))
+}
+
+// PoolWeightGT applies the GT predicate on the "pool_weight" field.
+func PoolWeightGT(v int) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldPoolWeight, v))
+}
+
+// PoolWeightGTE applies the GTE predicate on the "pool_weight" field.
+func PoolWeightGTE(v int) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldPoolWeight, v))
+}
+
+// PoolWeightLT applies the LT predicate on the "pool_weight" field.
+func PoolWeightLT(v int) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldPoolWeight, v))
+}
+
+// PoolWeightLTE applies the LTE predicate on the "pool_weight" field.
+func PoolWeightLTE(v int) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldPoolWeight, v))
 }
 
 // PriorityEQ applies the EQ predicate on the "priority" field.

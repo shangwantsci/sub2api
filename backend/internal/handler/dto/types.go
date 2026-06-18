@@ -120,6 +120,11 @@ type Group struct {
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
 
+	// Anthropic setup-token/api-key 混合类型权重调度配置
+	AnthropicMixedTypeWeightEnabled bool `json:"anthropic_mixed_type_weight_enabled"`
+	AnthropicSetupTokenPoolWeight   int  `json:"anthropic_setup_token_pool_weight"`
+	AnthropicAPIKeyPoolWeight       int  `json:"anthropic_api_key_pool_weight"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -168,6 +173,7 @@ type Account struct {
 	ProxyFallbackOriginName *string         `json:"proxy_fallback_origin_name,omitempty"`
 	Concurrency             int             `json:"concurrency"`
 	LoadFactor              *int            `json:"load_factor,omitempty"`
+	PoolWeight              *int            `json:"pool_weight,omitempty"`
 	Priority                int             `json:"priority"`
 	RateMultiplier          float64         `json:"rate_multiplier"`
 	Status                  string          `json:"status"`

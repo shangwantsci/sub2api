@@ -102,6 +102,11 @@ func (Account) Fields() []ent.Field {
 
 		field.Int("load_factor").Optional().Nillable(),
 
+		// pool_weight: 混合池调度权重。仅 api-key 账号在 Anthropic 混合类型权重调度中使用。
+		// 0 表示在启用该策略时不参与 api-key 池调度。
+		field.Int("pool_weight").
+			Default(1),
+
 		// priority: 账户优先级，数值越小优先级越高
 		// 调度器会优先使用高优先级的账户
 		field.Int("priority").

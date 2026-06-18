@@ -167,6 +167,20 @@ func (_c *AccountCreate) SetNillableLoadFactor(v *int) *AccountCreate {
 	return _c
 }
 
+// SetPoolWeight sets the "pool_weight" field.
+func (_c *AccountCreate) SetPoolWeight(v int) *AccountCreate {
+	_c.mutation.SetPoolWeight(v)
+	return _c
+}
+
+// SetNillablePoolWeight sets the "pool_weight" field if the given value is not nil.
+func (_c *AccountCreate) SetNillablePoolWeight(v *int) *AccountCreate {
+	if v != nil {
+		_c.SetPoolWeight(*v)
+	}
+	return _c
+}
+
 // SetPriority sets the "priority" field.
 func (_c *AccountCreate) SetPriority(v int) *AccountCreate {
 	_c.mutation.SetPriority(v)
@@ -495,6 +509,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultConcurrency
 		_c.mutation.SetConcurrency(v)
 	}
+	if _, ok := _c.mutation.PoolWeight(); !ok {
+		v := account.DefaultPoolWeight
+		_c.mutation.SetPoolWeight(v)
+	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		v := account.DefaultPriority
 		_c.mutation.SetPriority(v)
@@ -558,6 +576,9 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		return &ValidationError{Name: "concurrency", err: errors.New(`ent: missing required field "Account.concurrency"`)}
+	}
+	if _, ok := _c.mutation.PoolWeight(); !ok {
+		return &ValidationError{Name: "pool_weight", err: errors.New(`ent: missing required field "Account.pool_weight"`)}
 	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		return &ValidationError{Name: "priority", err: errors.New(`ent: missing required field "Account.priority"`)}
@@ -658,6 +679,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.LoadFactor(); ok {
 		_spec.SetField(account.FieldLoadFactor, field.TypeInt, value)
 		_node.LoadFactor = &value
+	}
+	if value, ok := _c.mutation.PoolWeight(); ok {
+		_spec.SetField(account.FieldPoolWeight, field.TypeInt, value)
+		_node.PoolWeight = value
 	}
 	if value, ok := _c.mutation.Priority(); ok {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)
@@ -1017,6 +1042,24 @@ func (u *AccountUpsert) AddLoadFactor(v int) *AccountUpsert {
 // ClearLoadFactor clears the value of the "load_factor" field.
 func (u *AccountUpsert) ClearLoadFactor() *AccountUpsert {
 	u.SetNull(account.FieldLoadFactor)
+	return u
+}
+
+// SetPoolWeight sets the "pool_weight" field.
+func (u *AccountUpsert) SetPoolWeight(v int) *AccountUpsert {
+	u.Set(account.FieldPoolWeight, v)
+	return u
+}
+
+// UpdatePoolWeight sets the "pool_weight" field to the value that was provided on create.
+func (u *AccountUpsert) UpdatePoolWeight() *AccountUpsert {
+	u.SetExcluded(account.FieldPoolWeight)
+	return u
+}
+
+// AddPoolWeight adds v to the "pool_weight" field.
+func (u *AccountUpsert) AddPoolWeight(v int) *AccountUpsert {
+	u.Add(account.FieldPoolWeight, v)
 	return u
 }
 
@@ -1556,6 +1599,27 @@ func (u *AccountUpsertOne) UpdateLoadFactor() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearLoadFactor() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearLoadFactor()
+	})
+}
+
+// SetPoolWeight sets the "pool_weight" field.
+func (u *AccountUpsertOne) SetPoolWeight(v int) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetPoolWeight(v)
+	})
+}
+
+// AddPoolWeight adds v to the "pool_weight" field.
+func (u *AccountUpsertOne) AddPoolWeight(v int) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddPoolWeight(v)
+	})
+}
+
+// UpdatePoolWeight sets the "pool_weight" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdatePoolWeight() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdatePoolWeight()
 	})
 }
 
@@ -2306,6 +2370,27 @@ func (u *AccountUpsertBulk) UpdateLoadFactor() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearLoadFactor() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearLoadFactor()
+	})
+}
+
+// SetPoolWeight sets the "pool_weight" field.
+func (u *AccountUpsertBulk) SetPoolWeight(v int) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetPoolWeight(v)
+	})
+}
+
+// AddPoolWeight adds v to the "pool_weight" field.
+func (u *AccountUpsertBulk) AddPoolWeight(v int) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddPoolWeight(v)
+	})
+}
+
+// UpdatePoolWeight sets the "pool_weight" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdatePoolWeight() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdatePoolWeight()
 	})
 }
 

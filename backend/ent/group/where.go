@@ -210,6 +210,21 @@ func RpmLimit(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRpmLimit, v))
 }
 
+// AnthropicMixedTypeWeightEnabled applies equality check predicate on the "anthropic_mixed_type_weight_enabled" field. It's identical to AnthropicMixedTypeWeightEnabledEQ.
+func AnthropicMixedTypeWeightEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAnthropicMixedTypeWeightEnabled, v))
+}
+
+// AnthropicSetupTokenPoolWeight applies equality check predicate on the "anthropic_setup_token_pool_weight" field. It's identical to AnthropicSetupTokenPoolWeightEQ.
+func AnthropicSetupTokenPoolWeight(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeight applies equality check predicate on the "anthropic_api_key_pool_weight" field. It's identical to AnthropicAPIKeyPoolWeightEQ.
+func AnthropicAPIKeyPoolWeight(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -1438,6 +1453,96 @@ func RpmLimitLT(v int) predicate.Group {
 // RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
 func RpmLimitLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// AnthropicMixedTypeWeightEnabledEQ applies the EQ predicate on the "anthropic_mixed_type_weight_enabled" field.
+func AnthropicMixedTypeWeightEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAnthropicMixedTypeWeightEnabled, v))
+}
+
+// AnthropicMixedTypeWeightEnabledNEQ applies the NEQ predicate on the "anthropic_mixed_type_weight_enabled" field.
+func AnthropicMixedTypeWeightEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAnthropicMixedTypeWeightEnabled, v))
+}
+
+// AnthropicSetupTokenPoolWeightEQ applies the EQ predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicSetupTokenPoolWeightNEQ applies the NEQ predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicSetupTokenPoolWeightIn applies the In predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldAnthropicSetupTokenPoolWeight, vs...))
+}
+
+// AnthropicSetupTokenPoolWeightNotIn applies the NotIn predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldAnthropicSetupTokenPoolWeight, vs...))
+}
+
+// AnthropicSetupTokenPoolWeightGT applies the GT predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicSetupTokenPoolWeightGTE applies the GTE predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicSetupTokenPoolWeightLT applies the LT predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicSetupTokenPoolWeightLTE applies the LTE predicate on the "anthropic_setup_token_pool_weight" field.
+func AnthropicSetupTokenPoolWeightLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldAnthropicSetupTokenPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeightEQ applies the EQ predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeightNEQ applies the NEQ predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeightIn applies the In predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldAnthropicAPIKeyPoolWeight, vs...))
+}
+
+// AnthropicAPIKeyPoolWeightNotIn applies the NotIn predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldAnthropicAPIKeyPoolWeight, vs...))
+}
+
+// AnthropicAPIKeyPoolWeightGT applies the GT predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeightGTE applies the GTE predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeightLT applies the LT predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
+// AnthropicAPIKeyPoolWeightLTE applies the LTE predicate on the "anthropic_api_key_pool_weight" field.
+func AnthropicAPIKeyPoolWeightLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldAnthropicAPIKeyPoolWeight, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

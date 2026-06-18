@@ -164,6 +164,17 @@ func (Group) Fields() []ent.Field {
 		field.Int("rpm_limit").
 			Default(0).
 			Comment("分组 RPM 上限，0 表示不限制；设置后接管该分组用户的限流"),
+
+		// Anthropic setup-token/api-key 混合类型权重调度配置
+		field.Bool("anthropic_mixed_type_weight_enabled").
+			Default(false).
+			Comment("是否启用 Anthropic setup-token/api-key 分池权重调度"),
+		field.Int("anthropic_setup_token_pool_weight").
+			Default(100).
+			Comment("Anthropic setup-token 池权重，0 表示不参与混合类型调度"),
+		field.Int("anthropic_api_key_pool_weight").
+			Default(0).
+			Comment("Anthropic api-key 池权重，0 表示不参与混合类型调度"),
 	}
 }
 

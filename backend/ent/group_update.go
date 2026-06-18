@@ -651,6 +651,62 @@ func (_u *GroupUpdate) AddRpmLimit(v int) *GroupUpdate {
 	return _u
 }
 
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (_u *GroupUpdate) SetAnthropicMixedTypeWeightEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetAnthropicMixedTypeWeightEnabled(v)
+	return _u
+}
+
+// SetNillableAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableAnthropicMixedTypeWeightEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetAnthropicMixedTypeWeightEnabled(*v)
+	}
+	return _u
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (_u *GroupUpdate) SetAnthropicSetupTokenPoolWeight(v int) *GroupUpdate {
+	_u.mutation.ResetAnthropicSetupTokenPoolWeight()
+	_u.mutation.SetAnthropicSetupTokenPoolWeight(v)
+	return _u
+}
+
+// SetNillableAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableAnthropicSetupTokenPoolWeight(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetAnthropicSetupTokenPoolWeight(*v)
+	}
+	return _u
+}
+
+// AddAnthropicSetupTokenPoolWeight adds value to the "anthropic_setup_token_pool_weight" field.
+func (_u *GroupUpdate) AddAnthropicSetupTokenPoolWeight(v int) *GroupUpdate {
+	_u.mutation.AddAnthropicSetupTokenPoolWeight(v)
+	return _u
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (_u *GroupUpdate) SetAnthropicAPIKeyPoolWeight(v int) *GroupUpdate {
+	_u.mutation.ResetAnthropicAPIKeyPoolWeight()
+	_u.mutation.SetAnthropicAPIKeyPoolWeight(v)
+	return _u
+}
+
+// SetNillableAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableAnthropicAPIKeyPoolWeight(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetAnthropicAPIKeyPoolWeight(*v)
+	}
+	return _u
+}
+
+// AddAnthropicAPIKeyPoolWeight adds value to the "anthropic_api_key_pool_weight" field.
+func (_u *GroupUpdate) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpdate {
+	_u.mutation.AddAnthropicAPIKeyPoolWeight(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1134,6 +1190,21 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AnthropicMixedTypeWeightEnabled(); ok {
+		_spec.SetField(group.FieldAnthropicMixedTypeWeightEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.AnthropicSetupTokenPoolWeight(); ok {
+		_spec.SetField(group.FieldAnthropicSetupTokenPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAnthropicSetupTokenPoolWeight(); ok {
+		_spec.AddField(group.FieldAnthropicSetupTokenPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AnthropicAPIKeyPoolWeight(); ok {
+		_spec.SetField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAnthropicAPIKeyPoolWeight(); ok {
+		_spec.AddField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2064,6 +2135,62 @@ func (_u *GroupUpdateOne) AddRpmLimit(v int) *GroupUpdateOne {
 	return _u
 }
 
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (_u *GroupUpdateOne) SetAnthropicMixedTypeWeightEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetAnthropicMixedTypeWeightEnabled(v)
+	return _u
+}
+
+// SetNillableAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableAnthropicMixedTypeWeightEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetAnthropicMixedTypeWeightEnabled(*v)
+	}
+	return _u
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (_u *GroupUpdateOne) SetAnthropicSetupTokenPoolWeight(v int) *GroupUpdateOne {
+	_u.mutation.ResetAnthropicSetupTokenPoolWeight()
+	_u.mutation.SetAnthropicSetupTokenPoolWeight(v)
+	return _u
+}
+
+// SetNillableAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableAnthropicSetupTokenPoolWeight(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetAnthropicSetupTokenPoolWeight(*v)
+	}
+	return _u
+}
+
+// AddAnthropicSetupTokenPoolWeight adds value to the "anthropic_setup_token_pool_weight" field.
+func (_u *GroupUpdateOne) AddAnthropicSetupTokenPoolWeight(v int) *GroupUpdateOne {
+	_u.mutation.AddAnthropicSetupTokenPoolWeight(v)
+	return _u
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (_u *GroupUpdateOne) SetAnthropicAPIKeyPoolWeight(v int) *GroupUpdateOne {
+	_u.mutation.ResetAnthropicAPIKeyPoolWeight()
+	_u.mutation.SetAnthropicAPIKeyPoolWeight(v)
+	return _u
+}
+
+// SetNillableAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableAnthropicAPIKeyPoolWeight(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetAnthropicAPIKeyPoolWeight(*v)
+	}
+	return _u
+}
+
+// AddAnthropicAPIKeyPoolWeight adds value to the "anthropic_api_key_pool_weight" field.
+func (_u *GroupUpdateOne) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpdateOne {
+	_u.mutation.AddAnthropicAPIKeyPoolWeight(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2577,6 +2704,21 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AnthropicMixedTypeWeightEnabled(); ok {
+		_spec.SetField(group.FieldAnthropicMixedTypeWeightEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.AnthropicSetupTokenPoolWeight(); ok {
+		_spec.SetField(group.FieldAnthropicSetupTokenPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAnthropicSetupTokenPoolWeight(); ok {
+		_spec.AddField(group.FieldAnthropicSetupTokenPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AnthropicAPIKeyPoolWeight(); ok {
+		_spec.SetField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedAnthropicAPIKeyPoolWeight(); ok {
+		_spec.AddField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

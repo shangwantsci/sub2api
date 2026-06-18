@@ -93,6 +93,11 @@ type APIKeyAuthGroupSnapshot struct {
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
 	RPMLimit int `json:"rpm_limit"`
+
+	// Anthropic setup-token/api-key 混合类型权重调度配置。
+	AnthropicMixedTypeWeightEnabled bool `json:"anthropic_mixed_type_weight_enabled"`
+	AnthropicSetupTokenPoolWeight   int  `json:"anthropic_setup_token_pool_weight"`
+	AnthropicAPIKeyPoolWeight       int  `json:"anthropic_api_key_pool_weight"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

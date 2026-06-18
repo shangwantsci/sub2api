@@ -194,6 +194,9 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldMessagesDispatchModelConfig,
 				group.FieldModelsListConfig,
 				group.FieldRpmLimit,
+				group.FieldAnthropicMixedTypeWeightEnabled,
+				group.FieldAnthropicSetupTokenPoolWeight,
+				group.FieldAnthropicAPIKeyPoolWeight,
 			)
 		}).
 		Only(ctx)
@@ -814,6 +817,9 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		MessagesDispatchModelConfig:     g.MessagesDispatchModelConfig,
 		ModelsListConfig:                g.ModelsListConfig,
 		RPMLimit:                        g.RpmLimit,
+		AnthropicMixedTypeWeightEnabled: g.AnthropicMixedTypeWeightEnabled,
+		AnthropicSetupTokenPoolWeight:   g.AnthropicSetupTokenPoolWeight,
+		AnthropicAPIKeyPoolWeight:       g.AnthropicAPIKeyPoolWeight,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

@@ -33,6 +33,7 @@ type Account struct {
 	// 使用指针用于兼容旧版本调度缓存（Redis）中缺字段的情况：nil 表示按 1.0 处理。
 	RateMultiplier     *float64
 	LoadFactor         *int // 调度负载因子；nil 表示使用 Concurrency
+	PoolWeight         *int // 混合池调度权重；nil 表示旧缓存/未配置，按 1 处理
 	Status             string
 	ErrorMessage       string
 	LastUsedAt         *time.Time
@@ -113,6 +114,13 @@ func (a *Account) EffectiveLoadFactor() int {
 		return a.Concurrency
 	}
 	return 1
+}
+
+func (a *Account) EffectivePoolWeight() int {
+	if a == nil || a.PoolWeight == nil {
+		return 1
+	}
+	return *a.PoolWeight
 }
 
 func (a *Account) IsSchedulable() bool {

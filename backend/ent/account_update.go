@@ -226,6 +226,27 @@ func (_u *AccountUpdate) ClearLoadFactor() *AccountUpdate {
 	return _u
 }
 
+// SetPoolWeight sets the "pool_weight" field.
+func (_u *AccountUpdate) SetPoolWeight(v int) *AccountUpdate {
+	_u.mutation.ResetPoolWeight()
+	_u.mutation.SetPoolWeight(v)
+	return _u
+}
+
+// SetNillablePoolWeight sets the "pool_weight" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillablePoolWeight(v *int) *AccountUpdate {
+	if v != nil {
+		_u.SetPoolWeight(*v)
+	}
+	return _u
+}
+
+// AddPoolWeight adds value to the "pool_weight" field.
+func (_u *AccountUpdate) AddPoolWeight(v int) *AccountUpdate {
+	_u.mutation.AddPoolWeight(v)
+	return _u
+}
+
 // SetPriority sets the "priority" field.
 func (_u *AccountUpdate) SetPriority(v int) *AccountUpdate {
 	_u.mutation.ResetPriority()
@@ -756,6 +777,12 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.LoadFactorCleared() {
 		_spec.ClearField(account.FieldLoadFactor, field.TypeInt)
 	}
+	if value, ok := _u.mutation.PoolWeight(); ok {
+		_spec.SetField(account.FieldPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedPoolWeight(); ok {
+		_spec.AddField(account.FieldPoolWeight, field.TypeInt, value)
+	}
 	if value, ok := _u.mutation.Priority(); ok {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)
 	}
@@ -1186,6 +1213,27 @@ func (_u *AccountUpdateOne) AddLoadFactor(v int) *AccountUpdateOne {
 // ClearLoadFactor clears the value of the "load_factor" field.
 func (_u *AccountUpdateOne) ClearLoadFactor() *AccountUpdateOne {
 	_u.mutation.ClearLoadFactor()
+	return _u
+}
+
+// SetPoolWeight sets the "pool_weight" field.
+func (_u *AccountUpdateOne) SetPoolWeight(v int) *AccountUpdateOne {
+	_u.mutation.ResetPoolWeight()
+	_u.mutation.SetPoolWeight(v)
+	return _u
+}
+
+// SetNillablePoolWeight sets the "pool_weight" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillablePoolWeight(v *int) *AccountUpdateOne {
+	if v != nil {
+		_u.SetPoolWeight(*v)
+	}
+	return _u
+}
+
+// AddPoolWeight adds value to the "pool_weight" field.
+func (_u *AccountUpdateOne) AddPoolWeight(v int) *AccountUpdateOne {
+	_u.mutation.AddPoolWeight(v)
 	return _u
 }
 
@@ -1748,6 +1796,12 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.LoadFactorCleared() {
 		_spec.ClearField(account.FieldLoadFactor, field.TypeInt)
+	}
+	if value, ok := _u.mutation.PoolWeight(); ok {
+		_spec.SetField(account.FieldPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedPoolWeight(); ok {
+		_spec.AddField(account.FieldPoolWeight, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.Priority(); ok {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)

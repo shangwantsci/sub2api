@@ -2292,6 +2292,8 @@ type AccountMutation struct {
 	addconcurrency              *int
 	load_factor                 *int
 	addload_factor              *int
+	pool_weight                 *int
+	addpool_weight              *int
 	priority                    *int
 	addpriority                 *int
 	rate_multiplier             *float64
@@ -3015,6 +3017,62 @@ func (m *AccountMutation) ResetLoadFactor() {
 	m.load_factor = nil
 	m.addload_factor = nil
 	delete(m.clearedFields, account.FieldLoadFactor)
+}
+
+// SetPoolWeight sets the "pool_weight" field.
+func (m *AccountMutation) SetPoolWeight(i int) {
+	m.pool_weight = &i
+	m.addpool_weight = nil
+}
+
+// PoolWeight returns the value of the "pool_weight" field in the mutation.
+func (m *AccountMutation) PoolWeight() (r int, exists bool) {
+	v := m.pool_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPoolWeight returns the old "pool_weight" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldPoolWeight(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPoolWeight is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPoolWeight requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPoolWeight: %w", err)
+	}
+	return oldValue.PoolWeight, nil
+}
+
+// AddPoolWeight adds i to the "pool_weight" field.
+func (m *AccountMutation) AddPoolWeight(i int) {
+	if m.addpool_weight != nil {
+		*m.addpool_weight += i
+	} else {
+		m.addpool_weight = &i
+	}
+}
+
+// AddedPoolWeight returns the value that was added to the "pool_weight" field in this mutation.
+func (m *AccountMutation) AddedPoolWeight() (r int, exists bool) {
+	v := m.addpool_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPoolWeight resets all changes to the "pool_weight" field.
+func (m *AccountMutation) ResetPoolWeight() {
+	m.pool_weight = nil
+	m.addpool_weight = nil
 }
 
 // SetPriority sets the "priority" field.
@@ -3945,7 +4003,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 29)
+	fields := make([]string, 0, 30)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -3984,6 +4042,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.load_factor != nil {
 		fields = append(fields, account.FieldLoadFactor)
+	}
+	if m.pool_weight != nil {
+		fields = append(fields, account.FieldPoolWeight)
 	}
 	if m.priority != nil {
 		fields = append(fields, account.FieldPriority)
@@ -4067,6 +4128,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Concurrency()
 	case account.FieldLoadFactor:
 		return m.LoadFactor()
+	case account.FieldPoolWeight:
+		return m.PoolWeight()
 	case account.FieldPriority:
 		return m.Priority()
 	case account.FieldRateMultiplier:
@@ -4134,6 +4197,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldConcurrency(ctx)
 	case account.FieldLoadFactor:
 		return m.OldLoadFactor(ctx)
+	case account.FieldPoolWeight:
+		return m.OldPoolWeight(ctx)
 	case account.FieldPriority:
 		return m.OldPriority(ctx)
 	case account.FieldRateMultiplier:
@@ -4266,6 +4331,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetLoadFactor(v)
 		return nil
+	case account.FieldPoolWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPoolWeight(v)
+		return nil
 	case account.FieldPriority:
 		v, ok := value.(int)
 		if !ok {
@@ -4395,6 +4467,9 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addload_factor != nil {
 		fields = append(fields, account.FieldLoadFactor)
 	}
+	if m.addpool_weight != nil {
+		fields = append(fields, account.FieldPoolWeight)
+	}
 	if m.addpriority != nil {
 		fields = append(fields, account.FieldPriority)
 	}
@@ -4415,6 +4490,8 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedConcurrency()
 	case account.FieldLoadFactor:
 		return m.AddedLoadFactor()
+	case account.FieldPoolWeight:
+		return m.AddedPoolWeight()
 	case account.FieldPriority:
 		return m.AddedPriority()
 	case account.FieldRateMultiplier:
@@ -4448,6 +4525,13 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddLoadFactor(v)
+		return nil
+	case account.FieldPoolWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPoolWeight(v)
 		return nil
 	case account.FieldPriority:
 		v, ok := value.(int)
@@ -4627,6 +4711,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldLoadFactor:
 		m.ResetLoadFactor()
+		return nil
+	case account.FieldPoolWeight:
+		m.ResetPoolWeight()
 		return nil
 	case account.FieldPriority:
 		m.ResetPriority()
@@ -15098,6 +15185,11 @@ type GroupMutation struct {
 	models_list_config                      *domain.GroupModelsListConfig
 	rpm_limit                               *int
 	addrpm_limit                            *int
+	anthropic_mixed_type_weight_enabled     *bool
+	anthropic_setup_token_pool_weight       *int
+	addanthropic_setup_token_pool_weight    *int
+	anthropic_api_key_pool_weight           *int
+	addanthropic_api_key_pool_weight        *int
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -16906,6 +16998,154 @@ func (m *GroupMutation) ResetRpmLimit() {
 	m.addrpm_limit = nil
 }
 
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (m *GroupMutation) SetAnthropicMixedTypeWeightEnabled(b bool) {
+	m.anthropic_mixed_type_weight_enabled = &b
+}
+
+// AnthropicMixedTypeWeightEnabled returns the value of the "anthropic_mixed_type_weight_enabled" field in the mutation.
+func (m *GroupMutation) AnthropicMixedTypeWeightEnabled() (r bool, exists bool) {
+	v := m.anthropic_mixed_type_weight_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnthropicMixedTypeWeightEnabled returns the old "anthropic_mixed_type_weight_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldAnthropicMixedTypeWeightEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnthropicMixedTypeWeightEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnthropicMixedTypeWeightEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnthropicMixedTypeWeightEnabled: %w", err)
+	}
+	return oldValue.AnthropicMixedTypeWeightEnabled, nil
+}
+
+// ResetAnthropicMixedTypeWeightEnabled resets all changes to the "anthropic_mixed_type_weight_enabled" field.
+func (m *GroupMutation) ResetAnthropicMixedTypeWeightEnabled() {
+	m.anthropic_mixed_type_weight_enabled = nil
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (m *GroupMutation) SetAnthropicSetupTokenPoolWeight(i int) {
+	m.anthropic_setup_token_pool_weight = &i
+	m.addanthropic_setup_token_pool_weight = nil
+}
+
+// AnthropicSetupTokenPoolWeight returns the value of the "anthropic_setup_token_pool_weight" field in the mutation.
+func (m *GroupMutation) AnthropicSetupTokenPoolWeight() (r int, exists bool) {
+	v := m.anthropic_setup_token_pool_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnthropicSetupTokenPoolWeight returns the old "anthropic_setup_token_pool_weight" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldAnthropicSetupTokenPoolWeight(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnthropicSetupTokenPoolWeight is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnthropicSetupTokenPoolWeight requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnthropicSetupTokenPoolWeight: %w", err)
+	}
+	return oldValue.AnthropicSetupTokenPoolWeight, nil
+}
+
+// AddAnthropicSetupTokenPoolWeight adds i to the "anthropic_setup_token_pool_weight" field.
+func (m *GroupMutation) AddAnthropicSetupTokenPoolWeight(i int) {
+	if m.addanthropic_setup_token_pool_weight != nil {
+		*m.addanthropic_setup_token_pool_weight += i
+	} else {
+		m.addanthropic_setup_token_pool_weight = &i
+	}
+}
+
+// AddedAnthropicSetupTokenPoolWeight returns the value that was added to the "anthropic_setup_token_pool_weight" field in this mutation.
+func (m *GroupMutation) AddedAnthropicSetupTokenPoolWeight() (r int, exists bool) {
+	v := m.addanthropic_setup_token_pool_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAnthropicSetupTokenPoolWeight resets all changes to the "anthropic_setup_token_pool_weight" field.
+func (m *GroupMutation) ResetAnthropicSetupTokenPoolWeight() {
+	m.anthropic_setup_token_pool_weight = nil
+	m.addanthropic_setup_token_pool_weight = nil
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (m *GroupMutation) SetAnthropicAPIKeyPoolWeight(i int) {
+	m.anthropic_api_key_pool_weight = &i
+	m.addanthropic_api_key_pool_weight = nil
+}
+
+// AnthropicAPIKeyPoolWeight returns the value of the "anthropic_api_key_pool_weight" field in the mutation.
+func (m *GroupMutation) AnthropicAPIKeyPoolWeight() (r int, exists bool) {
+	v := m.anthropic_api_key_pool_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnthropicAPIKeyPoolWeight returns the old "anthropic_api_key_pool_weight" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldAnthropicAPIKeyPoolWeight(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnthropicAPIKeyPoolWeight is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnthropicAPIKeyPoolWeight requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnthropicAPIKeyPoolWeight: %w", err)
+	}
+	return oldValue.AnthropicAPIKeyPoolWeight, nil
+}
+
+// AddAnthropicAPIKeyPoolWeight adds i to the "anthropic_api_key_pool_weight" field.
+func (m *GroupMutation) AddAnthropicAPIKeyPoolWeight(i int) {
+	if m.addanthropic_api_key_pool_weight != nil {
+		*m.addanthropic_api_key_pool_weight += i
+	} else {
+		m.addanthropic_api_key_pool_weight = &i
+	}
+}
+
+// AddedAnthropicAPIKeyPoolWeight returns the value that was added to the "anthropic_api_key_pool_weight" field in this mutation.
+func (m *GroupMutation) AddedAnthropicAPIKeyPoolWeight() (r int, exists bool) {
+	v := m.addanthropic_api_key_pool_weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAnthropicAPIKeyPoolWeight resets all changes to the "anthropic_api_key_pool_weight" field.
+func (m *GroupMutation) ResetAnthropicAPIKeyPoolWeight() {
+	m.anthropic_api_key_pool_weight = nil
+	m.addanthropic_api_key_pool_weight = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -17264,7 +17504,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 35)
+	fields := make([]string, 0, 38)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17370,6 +17610,15 @@ func (m *GroupMutation) Fields() []string {
 	if m.rpm_limit != nil {
 		fields = append(fields, group.FieldRpmLimit)
 	}
+	if m.anthropic_mixed_type_weight_enabled != nil {
+		fields = append(fields, group.FieldAnthropicMixedTypeWeightEnabled)
+	}
+	if m.anthropic_setup_token_pool_weight != nil {
+		fields = append(fields, group.FieldAnthropicSetupTokenPoolWeight)
+	}
+	if m.anthropic_api_key_pool_weight != nil {
+		fields = append(fields, group.FieldAnthropicAPIKeyPoolWeight)
+	}
 	return fields
 }
 
@@ -17448,6 +17697,12 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ModelsListConfig()
 	case group.FieldRpmLimit:
 		return m.RpmLimit()
+	case group.FieldAnthropicMixedTypeWeightEnabled:
+		return m.AnthropicMixedTypeWeightEnabled()
+	case group.FieldAnthropicSetupTokenPoolWeight:
+		return m.AnthropicSetupTokenPoolWeight()
+	case group.FieldAnthropicAPIKeyPoolWeight:
+		return m.AnthropicAPIKeyPoolWeight()
 	}
 	return nil, false
 }
@@ -17527,6 +17782,12 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldModelsListConfig(ctx)
 	case group.FieldRpmLimit:
 		return m.OldRpmLimit(ctx)
+	case group.FieldAnthropicMixedTypeWeightEnabled:
+		return m.OldAnthropicMixedTypeWeightEnabled(ctx)
+	case group.FieldAnthropicSetupTokenPoolWeight:
+		return m.OldAnthropicSetupTokenPoolWeight(ctx)
+	case group.FieldAnthropicAPIKeyPoolWeight:
+		return m.OldAnthropicAPIKeyPoolWeight(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -17781,6 +18042,27 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRpmLimit(v)
 		return nil
+	case group.FieldAnthropicMixedTypeWeightEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnthropicMixedTypeWeightEnabled(v)
+		return nil
+	case group.FieldAnthropicSetupTokenPoolWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnthropicSetupTokenPoolWeight(v)
+		return nil
+	case group.FieldAnthropicAPIKeyPoolWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnthropicAPIKeyPoolWeight(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
 }
@@ -17828,6 +18110,12 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addrpm_limit != nil {
 		fields = append(fields, group.FieldRpmLimit)
 	}
+	if m.addanthropic_setup_token_pool_weight != nil {
+		fields = append(fields, group.FieldAnthropicSetupTokenPoolWeight)
+	}
+	if m.addanthropic_api_key_pool_weight != nil {
+		fields = append(fields, group.FieldAnthropicAPIKeyPoolWeight)
+	}
 	return fields
 }
 
@@ -17862,6 +18150,10 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedSortOrder()
 	case group.FieldRpmLimit:
 		return m.AddedRpmLimit()
+	case group.FieldAnthropicSetupTokenPoolWeight:
+		return m.AddedAnthropicSetupTokenPoolWeight()
+	case group.FieldAnthropicAPIKeyPoolWeight:
+		return m.AddedAnthropicAPIKeyPoolWeight()
 	}
 	return nil, false
 }
@@ -17961,6 +18253,20 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRpmLimit(v)
+		return nil
+	case group.FieldAnthropicSetupTokenPoolWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAnthropicSetupTokenPoolWeight(v)
+		return nil
+	case group.FieldAnthropicAPIKeyPoolWeight:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAnthropicAPIKeyPoolWeight(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group numeric field %s", name)
@@ -18162,6 +18468,15 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldRpmLimit:
 		m.ResetRpmLimit()
+		return nil
+	case group.FieldAnthropicMixedTypeWeightEnabled:
+		m.ResetAnthropicMixedTypeWeightEnabled()
+		return nil
+	case group.FieldAnthropicSetupTokenPoolWeight:
+		m.ResetAnthropicSetupTokenPoolWeight()
+		return nil
+	case group.FieldAnthropicAPIKeyPoolWeight:
+		m.ResetAnthropicAPIKeyPoolWeight()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

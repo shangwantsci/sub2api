@@ -45,6 +45,8 @@ type Account struct {
 	Concurrency int `json:"concurrency,omitempty"`
 	// LoadFactor holds the value of the "load_factor" field.
 	LoadFactor *int `json:"load_factor,omitempty"`
+	// PoolWeight holds the value of the "pool_weight" field.
+	PoolWeight int `json:"pool_weight,omitempty"`
 	// Priority holds the value of the "priority" field.
 	Priority int `json:"priority,omitempty"`
 	// RateMultiplier holds the value of the "rate_multiplier" field.
@@ -147,7 +149,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPriority:
+		case account.FieldID, account.FieldProxyID, account.FieldProxyFallbackOriginID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldPoolWeight, account.FieldPriority:
 			values[i] = new(sql.NullInt64)
 		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus:
 			values[i] = new(sql.NullString)
@@ -260,6 +262,12 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.LoadFactor = new(int)
 				*_m.LoadFactor = int(value.Int64)
+			}
+		case account.FieldPoolWeight:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field pool_weight", values[i])
+			} else if value.Valid {
+				_m.PoolWeight = int(value.Int64)
 			}
 		case account.FieldPriority:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -472,6 +480,9 @@ func (_m *Account) String() string {
 		builder.WriteString("load_factor=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	builder.WriteString("pool_weight=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PoolWeight))
 	builder.WriteString(", ")
 	builder.WriteString("priority=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Priority))

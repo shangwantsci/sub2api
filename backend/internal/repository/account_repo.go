@@ -103,6 +103,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if account.LoadFactor != nil {
 		builder.SetLoadFactor(*account.LoadFactor)
 	}
+	if account.PoolWeight != nil {
+		builder.SetPoolWeight(*account.PoolWeight)
+	}
 
 	if account.ProxyID != nil {
 		builder.SetProxyID(*account.ProxyID)
@@ -345,6 +348,9 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		builder.SetLoadFactor(*account.LoadFactor)
 	} else {
 		builder.ClearLoadFactor()
+	}
+	if account.PoolWeight != nil {
+		builder.SetPoolWeight(*account.PoolWeight)
 	}
 
 	if account.ProxyID != nil {
@@ -1899,6 +1905,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	}
 
 	rateMultiplier := m.RateMultiplier
+	poolWeight := m.PoolWeight
 
 	return &service.Account{
 		ID:                      m.ID,
@@ -1914,6 +1921,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		Priority:                m.Priority,
 		RateMultiplier:          &rateMultiplier,
 		LoadFactor:              m.LoadFactor,
+		PoolWeight:              &poolWeight,
 		Status:                  m.Status,
 		ErrorMessage:            derefString(m.ErrorMessage),
 		LastUsedAt:              m.LastUsedAt,

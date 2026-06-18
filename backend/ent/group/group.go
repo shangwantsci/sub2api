@@ -86,6 +86,12 @@ const (
 	FieldModelsListConfig = "models_list_config"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
+	// FieldAnthropicMixedTypeWeightEnabled holds the string denoting the anthropic_mixed_type_weight_enabled field in the database.
+	FieldAnthropicMixedTypeWeightEnabled = "anthropic_mixed_type_weight_enabled"
+	// FieldAnthropicSetupTokenPoolWeight holds the string denoting the anthropic_setup_token_pool_weight field in the database.
+	FieldAnthropicSetupTokenPoolWeight = "anthropic_setup_token_pool_weight"
+	// FieldAnthropicAPIKeyPoolWeight holds the string denoting the anthropic_api_key_pool_weight field in the database.
+	FieldAnthropicAPIKeyPoolWeight = "anthropic_api_key_pool_weight"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -196,6 +202,9 @@ var Columns = []string{
 	FieldMessagesDispatchModelConfig,
 	FieldModelsListConfig,
 	FieldRpmLimit,
+	FieldAnthropicMixedTypeWeightEnabled,
+	FieldAnthropicSetupTokenPoolWeight,
+	FieldAnthropicAPIKeyPoolWeight,
 }
 
 var (
@@ -283,6 +292,12 @@ var (
 	DefaultModelsListConfig domain.GroupModelsListConfig
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
+	// DefaultAnthropicMixedTypeWeightEnabled holds the default value on creation for the "anthropic_mixed_type_weight_enabled" field.
+	DefaultAnthropicMixedTypeWeightEnabled bool
+	// DefaultAnthropicSetupTokenPoolWeight holds the default value on creation for the "anthropic_setup_token_pool_weight" field.
+	DefaultAnthropicSetupTokenPoolWeight int
+	// DefaultAnthropicAPIKeyPoolWeight holds the default value on creation for the "anthropic_api_key_pool_weight" field.
+	DefaultAnthropicAPIKeyPoolWeight int
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -446,6 +461,21 @@ func ByDefaultMappedModel(opts ...sql.OrderTermOption) OrderOption {
 // ByRpmLimit orders the results by the rpm_limit field.
 func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
+}
+
+// ByAnthropicMixedTypeWeightEnabled orders the results by the anthropic_mixed_type_weight_enabled field.
+func ByAnthropicMixedTypeWeightEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnthropicMixedTypeWeightEnabled, opts...).ToFunc()
+}
+
+// ByAnthropicSetupTokenPoolWeight orders the results by the anthropic_setup_token_pool_weight field.
+func ByAnthropicSetupTokenPoolWeight(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnthropicSetupTokenPoolWeight, opts...).ToFunc()
+}
+
+// ByAnthropicAPIKeyPoolWeight orders the results by the anthropic_api_key_pool_weight field.
+func ByAnthropicAPIKeyPoolWeight(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnthropicAPIKeyPoolWeight, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

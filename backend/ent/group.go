@@ -89,6 +89,12 @@ type Group struct {
 	ModelsListConfig domain.GroupModelsListConfig `json:"models_list_config,omitempty"`
 	// 分组 RPM 上限，0 表示不限制；设置后接管该分组用户的限流
 	RpmLimit int `json:"rpm_limit,omitempty"`
+	// 是否启用 Anthropic setup-token/api-key 分池权重调度
+	AnthropicMixedTypeWeightEnabled bool `json:"anthropic_mixed_type_weight_enabled,omitempty"`
+	// Anthropic setup-token 池权重，0 表示不参与混合类型调度
+	AnthropicSetupTokenPoolWeight int `json:"anthropic_setup_token_pool_weight,omitempty"`
+	// Anthropic api-key 池权重，0 表示不参与混合类型调度
+	AnthropicAPIKeyPoolWeight int `json:"anthropic_api_key_pool_weight,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.
 	Edges        GroupEdges `json:"edges"`
@@ -197,11 +203,11 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig:
 			values[i] = new([]byte)
-		case group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldImageRateIndependent, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet:
+		case group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldImageRateIndependent, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet, group.FieldAnthropicMixedTypeWeightEnabled:
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImageRateMultiplier, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k:
 			values[i] = new(sql.NullFloat64)
-		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
+		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit, group.FieldAnthropicSetupTokenPoolWeight, group.FieldAnthropicAPIKeyPoolWeight:
 			values[i] = new(sql.NullInt64)
 		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel:
 			values[i] = new(sql.NullString)
@@ -456,6 +462,24 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.RpmLimit = int(value.Int64)
 			}
+		case group.FieldAnthropicMixedTypeWeightEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field anthropic_mixed_type_weight_enabled", values[i])
+			} else if value.Valid {
+				_m.AnthropicMixedTypeWeightEnabled = value.Bool
+			}
+		case group.FieldAnthropicSetupTokenPoolWeight:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field anthropic_setup_token_pool_weight", values[i])
+			} else if value.Valid {
+				_m.AnthropicSetupTokenPoolWeight = int(value.Int64)
+			}
+		case group.FieldAnthropicAPIKeyPoolWeight:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field anthropic_api_key_pool_weight", values[i])
+			} else if value.Valid {
+				_m.AnthropicAPIKeyPoolWeight = int(value.Int64)
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -656,6 +680,15 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("rpm_limit=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RpmLimit))
+	builder.WriteString(", ")
+	builder.WriteString("anthropic_mixed_type_weight_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.AnthropicMixedTypeWeightEnabled))
+	builder.WriteString(", ")
+	builder.WriteString("anthropic_setup_token_pool_weight=")
+	builder.WriteString(fmt.Sprintf("%v", _m.AnthropicSetupTokenPoolWeight))
+	builder.WriteString(", ")
+	builder.WriteString("anthropic_api_key_pool_weight=")
+	builder.WriteString(fmt.Sprintf("%v", _m.AnthropicAPIKeyPoolWeight))
 	builder.WriteByte(')')
 	return builder.String()
 }

@@ -1,0 +1,7 @@
+ALTER TABLE groups
+    ADD COLUMN IF NOT EXISTS anthropic_mixed_type_weight_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS anthropic_setup_token_pool_weight INTEGER NOT NULL DEFAULT 100,
+    ADD COLUMN IF NOT EXISTS anthropic_api_key_pool_weight INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS pool_weight INTEGER NOT NULL DEFAULT 1;

@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 12 // v12: include exclusive group authorization fields
+const apiKeyAuthSnapshotVersion = 13 // v13: include Anthropic mixed type weight scheduling fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -276,6 +276,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
+			AnthropicMixedTypeWeightEnabled: apiKey.Group.AnthropicMixedTypeWeightEnabled,
+			AnthropicSetupTokenPoolWeight:   apiKey.Group.AnthropicSetupTokenPoolWeight,
+			AnthropicAPIKeyPoolWeight:       apiKey.Group.AnthropicAPIKeyPoolWeight,
 		}
 	}
 	return snapshot
@@ -349,6 +352,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
+			AnthropicMixedTypeWeightEnabled: snapshot.Group.AnthropicMixedTypeWeightEnabled,
+			AnthropicSetupTokenPoolWeight:   snapshot.Group.AnthropicSetupTokenPoolWeight,
+			AnthropicAPIKeyPoolWeight:       snapshot.Group.AnthropicAPIKeyPoolWeight,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)

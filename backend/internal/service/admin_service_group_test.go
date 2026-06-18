@@ -15,6 +15,10 @@ func ptrString[T ~string](v T) *string {
 	return &s
 }
 
+func intPtrForGroupTest(v int) *int {
+	return &v
+}
+
 // groupRepoStubForAdmin 用于测试 AdminService 的 GroupRepository Stub
 type groupRepoStubForAdmin struct {
 	created *Group // 记录 Create 调用的参数
@@ -196,6 +200,55 @@ func TestAdminService_CreateGroup_NilImagePricing(t *testing.T) {
 	require.Nil(t, repo.created.ImagePrice1K)
 	require.Nil(t, repo.created.ImagePrice2K)
 	require.Nil(t, repo.created.ImagePrice4K)
+}
+
+func TestAdminService_CreateGroup_NormalizesAnthropicMixedTypeWeights(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	input := &CreateGroupInput{
+		Name:                            "weighted-anthropic",
+		Platform:                        PlatformAnthropic,
+		RateMultiplier:                  1.0,
+		AnthropicMixedTypeWeightEnabled: true,
+		AnthropicSetupTokenPoolWeight:   intPtrForGroupTest(0),
+		AnthropicAPIKeyPoolWeight:       intPtrForGroupTest(25),
+	}
+
+	group, err := svc.CreateGroup(context.Background(), input)
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.True(t, repo.created.AnthropicMixedTypeWeightEnabled)
+	require.Equal(t, 0, repo.created.AnthropicSetupTokenPoolWeight)
+	require.Equal(t, 25, repo.created.AnthropicAPIKeyPoolWeight)
+}
+
+func TestAdminService_UpdateGroup_RejectsAllZeroAnthropicMixedTypeWeights(t *testing.T) {
+	existingGroup := &Group{
+		ID:                            1,
+		Name:                          "weighted-anthropic",
+		Platform:                      PlatformAnthropic,
+		Status:                        StatusActive,
+		RateMultiplier:                1.0,
+		SubscriptionType:              SubscriptionTypeStandard,
+		AnthropicSetupTokenPoolWeight: 100,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	enabled := true
+	input := &UpdateGroupInput{
+		AnthropicMixedTypeWeightEnabled: &enabled,
+		AnthropicSetupTokenPoolWeight:   intPtrForGroupTest(0),
+		AnthropicAPIKeyPoolWeight:       intPtrForGroupTest(0),
+	}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, input)
+	require.Error(t, err)
+	require.Nil(t, group)
+	require.Nil(t, repo.updated)
+	require.Contains(t, err.Error(), "at least one anthropic mixed type pool weight must be > 0")
 }
 
 // TestAdminService_UpdateGroup_WithImagePricing 测试更新分组时 ImagePrice 字段正确更新

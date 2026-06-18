@@ -68,6 +68,11 @@ type Group struct {
 	// 一旦设置即接管该分组用户的限流（覆盖用户级 rpm_limit），可被 user-group rpm_override 进一步覆盖。
 	RPMLimit int
 
+	// Anthropic setup-token/api-key 混合类型权重调度配置。
+	AnthropicMixedTypeWeightEnabled bool
+	AnthropicSetupTokenPoolWeight   int
+	AnthropicAPIKeyPoolWeight       int
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 

@@ -495,6 +495,48 @@ func (_c *GroupCreate) SetNillableRpmLimit(v *int) *GroupCreate {
 	return _c
 }
 
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (_c *GroupCreate) SetAnthropicMixedTypeWeightEnabled(v bool) *GroupCreate {
+	_c.mutation.SetAnthropicMixedTypeWeightEnabled(v)
+	return _c
+}
+
+// SetNillableAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAnthropicMixedTypeWeightEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetAnthropicMixedTypeWeightEnabled(*v)
+	}
+	return _c
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (_c *GroupCreate) SetAnthropicSetupTokenPoolWeight(v int) *GroupCreate {
+	_c.mutation.SetAnthropicSetupTokenPoolWeight(v)
+	return _c
+}
+
+// SetNillableAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAnthropicSetupTokenPoolWeight(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetAnthropicSetupTokenPoolWeight(*v)
+	}
+	return _c
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (_c *GroupCreate) SetAnthropicAPIKeyPoolWeight(v int) *GroupCreate {
+	_c.mutation.SetAnthropicAPIKeyPoolWeight(v)
+	return _c
+}
+
+// SetNillableAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAnthropicAPIKeyPoolWeight(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetAnthropicAPIKeyPoolWeight(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -720,6 +762,18 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultRpmLimit
 		_c.mutation.SetRpmLimit(v)
 	}
+	if _, ok := _c.mutation.AnthropicMixedTypeWeightEnabled(); !ok {
+		v := group.DefaultAnthropicMixedTypeWeightEnabled
+		_c.mutation.SetAnthropicMixedTypeWeightEnabled(v)
+	}
+	if _, ok := _c.mutation.AnthropicSetupTokenPoolWeight(); !ok {
+		v := group.DefaultAnthropicSetupTokenPoolWeight
+		_c.mutation.SetAnthropicSetupTokenPoolWeight(v)
+	}
+	if _, ok := _c.mutation.AnthropicAPIKeyPoolWeight(); !ok {
+		v := group.DefaultAnthropicAPIKeyPoolWeight
+		_c.mutation.SetAnthropicAPIKeyPoolWeight(v)
+	}
 	return nil
 }
 
@@ -821,6 +875,15 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "Group.rpm_limit"`)}
+	}
+	if _, ok := _c.mutation.AnthropicMixedTypeWeightEnabled(); !ok {
+		return &ValidationError{Name: "anthropic_mixed_type_weight_enabled", err: errors.New(`ent: missing required field "Group.anthropic_mixed_type_weight_enabled"`)}
+	}
+	if _, ok := _c.mutation.AnthropicSetupTokenPoolWeight(); !ok {
+		return &ValidationError{Name: "anthropic_setup_token_pool_weight", err: errors.New(`ent: missing required field "Group.anthropic_setup_token_pool_weight"`)}
+	}
+	if _, ok := _c.mutation.AnthropicAPIKeyPoolWeight(); !ok {
+		return &ValidationError{Name: "anthropic_api_key_pool_weight", err: errors.New(`ent: missing required field "Group.anthropic_api_key_pool_weight"`)}
 	}
 	return nil
 }
@@ -988,6 +1051,18 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(group.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.AnthropicMixedTypeWeightEnabled(); ok {
+		_spec.SetField(group.FieldAnthropicMixedTypeWeightEnabled, field.TypeBool, value)
+		_node.AnthropicMixedTypeWeightEnabled = value
+	}
+	if value, ok := _c.mutation.AnthropicSetupTokenPoolWeight(); ok {
+		_spec.SetField(group.FieldAnthropicSetupTokenPoolWeight, field.TypeInt, value)
+		_node.AnthropicSetupTokenPoolWeight = value
+	}
+	if value, ok := _c.mutation.AnthropicAPIKeyPoolWeight(); ok {
+		_spec.SetField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
+		_node.AnthropicAPIKeyPoolWeight = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1697,6 +1772,54 @@ func (u *GroupUpsert) AddRpmLimit(v int) *GroupUpsert {
 	return u
 }
 
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (u *GroupUpsert) SetAnthropicMixedTypeWeightEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldAnthropicMixedTypeWeightEnabled, v)
+	return u
+}
+
+// UpdateAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAnthropicMixedTypeWeightEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldAnthropicMixedTypeWeightEnabled)
+	return u
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (u *GroupUpsert) SetAnthropicSetupTokenPoolWeight(v int) *GroupUpsert {
+	u.Set(group.FieldAnthropicSetupTokenPoolWeight, v)
+	return u
+}
+
+// UpdateAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAnthropicSetupTokenPoolWeight() *GroupUpsert {
+	u.SetExcluded(group.FieldAnthropicSetupTokenPoolWeight)
+	return u
+}
+
+// AddAnthropicSetupTokenPoolWeight adds v to the "anthropic_setup_token_pool_weight" field.
+func (u *GroupUpsert) AddAnthropicSetupTokenPoolWeight(v int) *GroupUpsert {
+	u.Add(group.FieldAnthropicSetupTokenPoolWeight, v)
+	return u
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (u *GroupUpsert) SetAnthropicAPIKeyPoolWeight(v int) *GroupUpsert {
+	u.Set(group.FieldAnthropicAPIKeyPoolWeight, v)
+	return u
+}
+
+// UpdateAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAnthropicAPIKeyPoolWeight() *GroupUpsert {
+	u.SetExcluded(group.FieldAnthropicAPIKeyPoolWeight)
+	return u
+}
+
+// AddAnthropicAPIKeyPoolWeight adds v to the "anthropic_api_key_pool_weight" field.
+func (u *GroupUpsert) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpsert {
+	u.Add(group.FieldAnthropicAPIKeyPoolWeight, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -2383,6 +2506,62 @@ func (u *GroupUpsertOne) AddRpmLimit(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateRpmLimit() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (u *GroupUpsertOne) SetAnthropicMixedTypeWeightEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAnthropicMixedTypeWeightEnabled(v)
+	})
+}
+
+// UpdateAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAnthropicMixedTypeWeightEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAnthropicMixedTypeWeightEnabled()
+	})
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (u *GroupUpsertOne) SetAnthropicSetupTokenPoolWeight(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAnthropicSetupTokenPoolWeight(v)
+	})
+}
+
+// AddAnthropicSetupTokenPoolWeight adds v to the "anthropic_setup_token_pool_weight" field.
+func (u *GroupUpsertOne) AddAnthropicSetupTokenPoolWeight(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddAnthropicSetupTokenPoolWeight(v)
+	})
+}
+
+// UpdateAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAnthropicSetupTokenPoolWeight() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAnthropicSetupTokenPoolWeight()
+	})
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (u *GroupUpsertOne) SetAnthropicAPIKeyPoolWeight(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAnthropicAPIKeyPoolWeight(v)
+	})
+}
+
+// AddAnthropicAPIKeyPoolWeight adds v to the "anthropic_api_key_pool_weight" field.
+func (u *GroupUpsertOne) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddAnthropicAPIKeyPoolWeight(v)
+	})
+}
+
+// UpdateAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAnthropicAPIKeyPoolWeight() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAnthropicAPIKeyPoolWeight()
 	})
 }
 
@@ -3238,6 +3417,62 @@ func (u *GroupUpsertBulk) AddRpmLimit(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateRpmLimit() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field.
+func (u *GroupUpsertBulk) SetAnthropicMixedTypeWeightEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAnthropicMixedTypeWeightEnabled(v)
+	})
+}
+
+// UpdateAnthropicMixedTypeWeightEnabled sets the "anthropic_mixed_type_weight_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAnthropicMixedTypeWeightEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAnthropicMixedTypeWeightEnabled()
+	})
+}
+
+// SetAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field.
+func (u *GroupUpsertBulk) SetAnthropicSetupTokenPoolWeight(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAnthropicSetupTokenPoolWeight(v)
+	})
+}
+
+// AddAnthropicSetupTokenPoolWeight adds v to the "anthropic_setup_token_pool_weight" field.
+func (u *GroupUpsertBulk) AddAnthropicSetupTokenPoolWeight(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddAnthropicSetupTokenPoolWeight(v)
+	})
+}
+
+// UpdateAnthropicSetupTokenPoolWeight sets the "anthropic_setup_token_pool_weight" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAnthropicSetupTokenPoolWeight() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAnthropicSetupTokenPoolWeight()
+	})
+}
+
+// SetAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field.
+func (u *GroupUpsertBulk) SetAnthropicAPIKeyPoolWeight(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAnthropicAPIKeyPoolWeight(v)
+	})
+}
+
+// AddAnthropicAPIKeyPoolWeight adds v to the "anthropic_api_key_pool_weight" field.
+func (u *GroupUpsertBulk) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddAnthropicAPIKeyPoolWeight(v)
+	})
+}
+
+// UpdateAnthropicAPIKeyPoolWeight sets the "anthropic_api_key_pool_weight" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAnthropicAPIKeyPoolWeight() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAnthropicAPIKeyPoolWeight()
 	})
 }
 

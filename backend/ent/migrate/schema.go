@@ -108,6 +108,7 @@ var (
 		{Name: "proxy_fallback_origin_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "concurrency", Type: field.TypeInt, Default: 3},
 		{Name: "load_factor", Type: field.TypeInt, Nullable: true},
+		{Name: "pool_weight", Type: field.TypeInt, Default: 1},
 		{Name: "priority", Type: field.TypeInt, Default: 50},
 		{Name: "rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
@@ -134,7 +135,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[29]},
+				Columns:    []*schema.Column{AccountsColumns[30]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -153,52 +154,52 @@ var (
 			{
 				Name:    "account_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[16]},
 			},
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[29]},
+				Columns: []*schema.Column{AccountsColumns[30]},
 			},
 			{
 				Name:    "account_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[14]},
 			},
 			{
 				Name:    "account_last_used_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[17]},
+				Columns: []*schema.Column{AccountsColumns[18]},
 			},
 			{
 				Name:    "account_schedulable",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[20]},
+				Columns: []*schema.Column{AccountsColumns[21]},
 			},
 			{
 				Name:    "account_rate_limited_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[21]},
+				Columns: []*schema.Column{AccountsColumns[22]},
 			},
 			{
 				Name:    "account_rate_limit_reset_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[22]},
+				Columns: []*schema.Column{AccountsColumns[23]},
 			},
 			{
 				Name:    "account_overload_until",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[23]},
+				Columns: []*schema.Column{AccountsColumns[24]},
 			},
 			{
 				Name:    "account_platform_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[14]},
 			},
 			{
 				Name:    "account_priority_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13], AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[14], AccountsColumns[16]},
 			},
 			{
 				Name:    "account_deleted_at",
@@ -673,6 +674,9 @@ var (
 		{Name: "messages_dispatch_model_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "models_list_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
+		{Name: "anthropic_mixed_type_weight_enabled", Type: field.TypeBool, Default: false},
+		{Name: "anthropic_setup_token_pool_weight", Type: field.TypeInt, Default: 100},
+		{Name: "anthropic_api_key_pool_weight", Type: field.TypeInt, Default: 0},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
 	GroupsTable = &schema.Table{

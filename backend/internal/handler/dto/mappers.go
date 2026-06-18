@@ -191,6 +191,9 @@ func groupFromServiceBase(g *service.Group) Group {
 		RequireOAuthOnly:                g.RequireOAuthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,
 		RPMLimit:                        g.RPMLimit,
+		AnthropicMixedTypeWeightEnabled: g.AnthropicMixedTypeWeightEnabled,
+		AnthropicSetupTokenPoolWeight:   g.AnthropicSetupTokenPoolWeight,
+		AnthropicAPIKeyPoolWeight:       g.AnthropicAPIKeyPoolWeight,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}
@@ -215,6 +218,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		ProxyFallbackOriginName: a.ProxyFallbackOriginName,
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,
+		PoolWeight:              a.PoolWeight,
 		Priority:                a.Priority,
 		RateMultiplier:          a.BillingRateMultiplier(),
 		Status:                  a.Status,
