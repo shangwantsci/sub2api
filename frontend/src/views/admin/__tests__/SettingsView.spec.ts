@@ -683,6 +683,72 @@ describe("admin SettingsView payment visible method controls", () => {
     ]);
   });
 
+  it("uses Claude Code 2.1.195 Agent SDK identity for default OAuth system blocks", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      claude_oauth_system_prompt_blocks: "",
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    const payload = updateSettings.mock.calls[0][0] as {
+      claude_oauth_system_prompt_blocks: string;
+    };
+    const blocks = JSON.parse(payload.claude_oauth_system_prompt_blocks) as Array<{
+      text: string;
+    }>;
+
+    expect(blocks[1]?.text).toBe(
+      "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+    );
+    expect(blocks[1]?.text).not.toBe(
+      "You are Claude Code, Anthropic's official CLI for Claude.",
+    );
+  });
+
+  it("normalizes legacy Claude Code identity blocks to the Agent SDK identity", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      claude_oauth_system_prompt_blocks: JSON.stringify([
+        { enabled: true, type: "text", text: "{billing_header}" },
+        {
+          enabled: true,
+          type: "text",
+          text: "You are Claude Code, Anthropic's official CLI for Claude.",
+        },
+        {
+          enabled: true,
+          type: "text",
+          text: "custom expansion",
+          cache_control: { type: "ephemeral", ttl: "5m" },
+        },
+      ]),
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    const payload = updateSettings.mock.calls[0][0] as {
+      claude_oauth_system_prompt_blocks: string;
+    };
+    const blocks = JSON.parse(payload.claude_oauth_system_prompt_blocks) as Array<{
+      text: string;
+    }>;
+
+    expect(blocks[1]?.text).toBe(
+      "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+    );
+  });
+
   it("submits Claude mimicry profile and guard settings", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

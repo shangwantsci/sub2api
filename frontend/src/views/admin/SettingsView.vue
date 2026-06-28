@@ -7545,8 +7545,10 @@ interface ClaudeOAuthSystemPromptRawBlock {
   cache_control?: unknown;
 }
 
-const defaultClaudeCodeSystemPrompt =
+const legacyClaudeCodeSystemPrompt =
   "You are Claude Code, Anthropic's official CLI for Claude.";
+const defaultClaudeCodeSystemPrompt =
+  "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 
 const defaultClaudeCodeExpansionPrompt = `You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
@@ -7599,6 +7601,9 @@ function normalizeClaudeOAuthSystemPromptBlockText(
 ): string {
   const trimmed = text.trim();
   if (trimmed === "{claude_code_system_prompt}") {
+    return defaultClaudeCodeSystemPrompt;
+  }
+  if (trimmed === legacyClaudeCodeSystemPrompt) {
     return defaultClaudeCodeSystemPrompt;
   }
   if (trimmed === "{claude_code_expansion_prompt}") {
