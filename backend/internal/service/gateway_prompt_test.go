@@ -416,7 +416,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			require.Equal(t, "text", billingBlock["type"])
 			require.Contains(t, billingBlock["text"], "x-anthropic-billing-header:")
 			require.Contains(t, billingBlock["text"], "cc_version=")
-			require.Contains(t, billingBlock["text"], "cc_entrypoint=cli")
+			require.Contains(t, billingBlock["text"], "cc_entrypoint=sdk-cli")
 			// 新版 CLI 已取消 cch=... 签名字段，注入的 billing block 不应再带 cch。
 			require.NotContains(t, billingBlock["text"], "cch=")
 
@@ -519,6 +519,19 @@ func TestRewriteSystemForNonClaudeCodeWithPrompt_UsesCustomExpansionPrompt(t *te
 	require.Len(t, system.Array(), 3)
 	require.Equal(t, customPrompt, system.Array()[2].Get("text").String())
 	require.Equal(t, "ephemeral", system.Array()[2].Get("cache_control.type").String())
+}
+
+func TestRewriteSystemForNonClaudeCode_UsesCapturedAgentSDKIdentity(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"Project instructions","messages":[{"role":"user","content":"hello"}]}`)
+
+	result := rewriteSystemForNonClaudeCode(body, "Project instructions")
+
+	system := gjson.GetBytes(result, "system")
+	require.True(t, system.IsArray())
+	require.Contains(t, system.Array()[0].Get("text").String(), "cc_version=2.1.195.")
+	require.Contains(t, system.Array()[0].Get("text").String(), "cc_entrypoint=sdk-cli")
+	require.NotContains(t, system.Array()[0].Get("text").String(), "cch=")
+	require.Equal(t, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", system.Array()[1].Get("text").String())
 }
 
 func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *testing.T) {

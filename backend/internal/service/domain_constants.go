@@ -442,6 +442,10 @@ const (
 	// 网关随之不再注入/签名 cch（见 buildBillingAttributionText）。保留该 key 仅为向后兼容，
 	// 开关不再产生任何效果。
 	SettingKeyEnableCCHSigning = "enable_cch_signing"
+	// SettingKeyClaudeCodeMimicryProfile Claude Code 伪装 profile ID（默认 2.1.195 macOS arm64）
+	SettingKeyClaudeCodeMimicryProfile = "claude_code_mimicry_profile"
+	// SettingKeyClaudeMimicryGuardMode Claude Code 伪装审计模式：off/warn/block（默认 warn）
+	SettingKeyClaudeMimicryGuardMode = "claude_mimicry_guard_mode"
 	// SettingKeyEnableClaudeOAuthSystemPromptInjection 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
 	SettingKeyEnableClaudeOAuthSystemPromptInjection = "enable_claude_oauth_system_prompt_injection"
 	// SettingKeyClaudeOAuthSystemPrompt Claude OAuth mimic 路径注入的通用扩展 system prompt（空值使用内置默认）

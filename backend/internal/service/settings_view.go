@@ -193,6 +193,8 @@ type SystemSettings struct {
 	EnableFingerprintUnification           bool   // 是否统一 OAuth 账号的指纹头（默认 true）
 	EnableMetadataPassthrough              bool   // 是否透传客户端原始 metadata（默认 false）
 	EnableCCHSigning                       bool   // 已废弃 no-op：新版 CLI 取消 cch 签名后网关不再注入/签名 cch，开关无效果
+	ClaudeCodeMimicryProfile               string // Claude Code 伪装 profile ID
+	ClaudeMimicryGuardMode                 string // Claude Code 伪装审计模式：off/warn/block
 	EnableClaudeOAuthSystemPromptInjection bool   // 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
 	ClaudeOAuthSystemPrompt                string // Claude OAuth mimic 路径注入的通用扩展 system prompt；空值使用内置默认
 	ClaudeOAuthSystemPromptBlocks          string // Claude OAuth mimic 路径注入的 system blocks JSON 配置；空值使用内置默认

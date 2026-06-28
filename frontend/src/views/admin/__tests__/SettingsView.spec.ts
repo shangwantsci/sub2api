@@ -378,6 +378,8 @@ const baseSettingsResponse = {
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
+  claude_code_mimicry_profile: "cc-2.1.195-sdk-cli-macos-arm64",
+  claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: "",
@@ -679,6 +681,28 @@ describe("admin SettingsView payment visible method controls", () => {
         },
       },
     ]);
+  });
+
+  it("submits Claude mimicry profile and guard settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      claude_code_mimicry_profile: "cc-2.1.195-sdk-cli-macos-arm64",
+      claude_mimicry_guard_mode: "block",
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claude_code_mimicry_profile: "cc-2.1.195-sdk-cli-macos-arm64",
+        claude_mimicry_guard_mode: "block",
+      }),
+    );
   });
 
   it("submits Antigravity user agent version gateway setting", async () => {

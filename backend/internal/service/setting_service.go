@@ -19,6 +19,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/imroc/req/v3"
@@ -107,6 +108,8 @@ type cachedGatewayForwardingSettings struct {
 	fingerprintUnification           bool
 	metadataPassthrough              bool
 	cchSigning                       bool
+	claudeCodeMimicryProfile         string
+	claudeMimicryGuardMode           string
 	claudeOAuthSystemPromptInjection bool
 	claudeOAuthSystemPrompt          string
 	claudeOAuthSystemPromptBlocks    string
@@ -2199,6 +2202,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableFingerprintUnification] = strconv.FormatBool(settings.EnableFingerprintUnification)
 	updates[SettingKeyEnableMetadataPassthrough] = strconv.FormatBool(settings.EnableMetadataPassthrough)
 	updates[SettingKeyEnableCCHSigning] = strconv.FormatBool(settings.EnableCCHSigning)
+	updates[SettingKeyClaudeCodeMimicryProfile] = normalizeClaudeCodeMimicryProfileID(settings.ClaudeCodeMimicryProfile)
+	updates[SettingKeyClaudeMimicryGuardMode] = normalizeClaudeMimicryGuardMode(settings.ClaudeMimicryGuardMode)
 	updates[SettingKeyEnableClaudeOAuthSystemPromptInjection] = strconv.FormatBool(settings.EnableClaudeOAuthSystemPromptInjection)
 	updates[SettingKeyClaudeOAuthSystemPrompt] = settings.ClaudeOAuthSystemPrompt
 	if err := ValidateClaudeOAuthSystemPromptBlocksConfig(settings.ClaudeOAuthSystemPromptBlocks); err != nil {
@@ -2340,6 +2345,8 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		fingerprintUnification:           settings.EnableFingerprintUnification,
 		metadataPassthrough:              settings.EnableMetadataPassthrough,
 		cchSigning:                       settings.EnableCCHSigning,
+		claudeCodeMimicryProfile:         normalizeClaudeCodeMimicryProfileID(settings.ClaudeCodeMimicryProfile),
+		claudeMimicryGuardMode:           normalizeClaudeMimicryGuardMode(settings.ClaudeMimicryGuardMode),
 		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
 		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
 		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
@@ -2394,6 +2401,16 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 
 func (s *SettingService) defaultRewriteMessageCacheControl() bool {
 	return false
+}
+
+type ClaudeMimicryRuntimeSettings struct {
+	ProfileID string
+	GuardMode string
+}
+
+func normalizeClaudeCodeMimicryProfileID(id string) string {
+	profile := claude.ResolveClaudeCodeMimicryProfile(id)
+	return profile.ID
 }
 
 func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, items []DefaultSubscriptionSetting) error {
@@ -2549,6 +2566,7 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 type gatewayForwardingSettingsResult struct {
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
+	claudeCodeMimicryProfile, claudeMimicryGuardMode                                      string
 }
 
 func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context) gatewayForwardingSettingsResult {
@@ -2558,6 +2576,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				fp:                               cached.fingerprintUnification,
 				mp:                               cached.metadataPassthrough,
 				cch:                              cached.cchSigning,
+				claudeCodeMimicryProfile:         normalizeClaudeCodeMimicryProfileID(cached.claudeCodeMimicryProfile),
+				claudeMimicryGuardMode:           normalizeClaudeMimicryGuardMode(cached.claudeMimicryGuardMode),
 				claudeOAuthSystemPromptInjection: cached.claudeOAuthSystemPromptInjection,
 				claudeOAuthSystemPrompt:          cached.claudeOAuthSystemPrompt,
 				claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
@@ -2573,6 +2593,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					fp:                               cached.fingerprintUnification,
 					mp:                               cached.metadataPassthrough,
 					cch:                              cached.cchSigning,
+					claudeCodeMimicryProfile:         normalizeClaudeCodeMimicryProfileID(cached.claudeCodeMimicryProfile),
+					claudeMimicryGuardMode:           normalizeClaudeMimicryGuardMode(cached.claudeMimicryGuardMode),
 					claudeOAuthSystemPromptInjection: cached.claudeOAuthSystemPromptInjection,
 					claudeOAuthSystemPrompt:          cached.claudeOAuthSystemPrompt,
 					claudeOAuthSystemPromptBlocks:    cached.claudeOAuthSystemPromptBlocks,
@@ -2587,6 +2609,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableFingerprintUnification,
 			SettingKeyEnableMetadataPassthrough,
 			SettingKeyEnableCCHSigning,
+			SettingKeyClaudeCodeMimicryProfile,
+			SettingKeyClaudeMimicryGuardMode,
 			SettingKeyEnableClaudeOAuthSystemPromptInjection,
 			SettingKeyClaudeOAuthSystemPrompt,
 			SettingKeyClaudeOAuthSystemPromptBlocks,
@@ -2599,12 +2623,20 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				fingerprintUnification:           true,
 				metadataPassthrough:              false,
 				cchSigning:                       false,
+				claudeCodeMimicryProfile:         claude.DefaultClaudeCodeMimicryProfileID,
+				claudeMimicryGuardMode:           claudeMimicryGuardWarn,
 				claudeOAuthSystemPromptInjection: true,
 				anthropicCacheTTL1hInjection:     false,
 				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, rewriteMessageCacheControl: s.defaultRewriteMessageCacheControl()}, nil
+			return gatewayForwardingSettingsResult{
+				fp:                               true,
+				claudeCodeMimicryProfile:         claude.DefaultClaudeCodeMimicryProfileID,
+				claudeMimicryGuardMode:           claudeMimicryGuardWarn,
+				claudeOAuthSystemPromptInjection: true,
+				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
+			}, nil
 		}
 		fp := true
 		if v, ok := values[SettingKeyEnableFingerprintUnification]; ok && v != "" {
@@ -2612,6 +2644,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		}
 		mp := values[SettingKeyEnableMetadataPassthrough] == "true"
 		cch := values[SettingKeyEnableCCHSigning] == "true"
+		mimicryProfile := normalizeClaudeCodeMimicryProfileID(values[SettingKeyClaudeCodeMimicryProfile])
+		guardMode := normalizeClaudeMimicryGuardMode(values[SettingKeyClaudeMimicryGuardMode])
 		systemPromptInjection := true
 		if v, ok := values[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
 			systemPromptInjection = v == "true"
@@ -2627,6 +2661,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			fingerprintUnification:           fp,
 			metadataPassthrough:              mp,
 			cchSigning:                       cch,
+			claudeCodeMimicryProfile:         mimicryProfile,
+			claudeMimicryGuardMode:           guardMode,
 			claudeOAuthSystemPromptInjection: systemPromptInjection,
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
@@ -2638,6 +2674,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			fp:                               fp,
 			mp:                               mp,
 			cch:                              cch,
+			claudeCodeMimicryProfile:         mimicryProfile,
+			claudeMimicryGuardMode:           guardMode,
 			claudeOAuthSystemPromptInjection: systemPromptInjection,
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
@@ -2648,7 +2686,12 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true}
+	return gatewayForwardingSettingsResult{
+		fp:                               true,
+		claudeCodeMimicryProfile:         claude.DefaultClaudeCodeMimicryProfileID,
+		claudeMimicryGuardMode:           claudeMimicryGuardWarn,
+		claudeOAuthSystemPromptInjection: true,
+	}
 }
 
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
@@ -2675,6 +2718,14 @@ func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context
 func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context.Context) (enabled bool, prompt string, blocks string) {
 	result := s.getGatewayForwardingSettingsCached(ctx)
 	return result.claudeOAuthSystemPromptInjection, result.claudeOAuthSystemPrompt, result.claudeOAuthSystemPromptBlocks
+}
+
+func (s *SettingService) GetClaudeMimicryRuntimeSettings(ctx context.Context) ClaudeMimicryRuntimeSettings {
+	result := s.getGatewayForwardingSettingsCached(ctx)
+	return ClaudeMimicryRuntimeSettings{
+		ProfileID: normalizeClaudeCodeMimicryProfileID(result.claudeCodeMimicryProfile),
+		GuardMode: normalizeClaudeMimicryGuardMode(result.claudeMimicryGuardMode),
+	}
 }
 
 // IsEmailVerifyEnabled 检查是否开启邮件验证
@@ -3171,6 +3222,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:        "false",
+		SettingKeyClaudeCodeMimicryProfile:           claude.DefaultClaudeCodeMimicryProfileID,
+		SettingKeyClaudeMimicryGuardMode:             claudeMimicryGuardWarn,
 		SettingKeyEnableAnthropicCacheTTL1hInjection: "false",
 		SettingKeyRewriteMessageCacheControl:         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyAntigravityUserAgentVersion:        "",
@@ -3698,6 +3751,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.EnableMetadataPassthrough = settings[SettingKeyEnableMetadataPassthrough] == "true"
 	result.EnableCCHSigning = settings[SettingKeyEnableCCHSigning] == "true"
+	result.ClaudeCodeMimicryProfile = normalizeClaudeCodeMimicryProfileID(settings[SettingKeyClaudeCodeMimicryProfile])
+	result.ClaudeMimicryGuardMode = normalizeClaudeMimicryGuardMode(settings[SettingKeyClaudeMimicryGuardMode])
 	if v, ok := settings[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
 		result.EnableClaudeOAuthSystemPromptInjection = v == "true"
 	} else {

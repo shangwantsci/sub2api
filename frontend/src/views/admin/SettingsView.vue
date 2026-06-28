@@ -4089,6 +4089,53 @@
                 <Toggle v-model="form.enable_cch_signing" />
               </div>
 
+              <div class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeCodeMimicryProfile",
+                      )
+                    }}
+                  </label>
+                  <Select
+                    v-model="form.claude_code_mimicry_profile"
+                    :options="claudeCodeMimicryProfileOptions"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeCodeMimicryProfileHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeMimicryGuardMode",
+                      )
+                    }}
+                  </label>
+                  <Select
+                    v-model="form.claude_mimicry_guard_mode"
+                    :options="claudeMimicryGuardModeOptions"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeMimicryGuardModeHint",
+                      )
+                    }}
+                  </p>
+                </div>
+              </div>
+
               <!-- Claude OAuth System Prompt Injection -->
               <div class="flex items-center justify-between">
                 <div>
@@ -7743,6 +7790,19 @@ const claudeOAuthSystemPromptCacheTTLOptions = computed(() => [
   { value: "1h", label: t("admin.settings.gatewayForwarding.cacheTTL1h") },
 ]);
 
+const claudeCodeMimicryProfileOptions = computed(() => [
+  {
+    value: "cc-2.1.195-sdk-cli-macos-arm64",
+    label: t("admin.settings.gatewayForwarding.claudeCodeMimicryProfile2195"),
+  },
+]);
+
+const claudeMimicryGuardModeOptions = computed(() => [
+  { value: "warn", label: t("admin.settings.gatewayForwarding.guardModeWarn") },
+  { value: "block", label: t("admin.settings.gatewayForwarding.guardModeBlock") },
+  { value: "off", label: t("admin.settings.gatewayForwarding.guardModeOff") },
+]);
+
 function getClaudeOAuthPresetLabel(
   preset: ClaudeOAuthSystemPromptPreset,
 ): string {
@@ -8073,6 +8133,8 @@ const form = reactive<SettingsForm>({
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
+  claude_code_mimicry_profile: "cc-2.1.195-sdk-cli-macos-arm64",
+  claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
@@ -9287,6 +9349,10 @@ async function saveSettings() {
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,
+      claude_code_mimicry_profile:
+        form.claude_code_mimicry_profile?.trim() ||
+        "cc-2.1.195-sdk-cli-macos-arm64",
+      claude_mimicry_guard_mode: form.claude_mimicry_guard_mode || "warn",
       enable_claude_oauth_system_prompt_injection:
         form.enable_claude_oauth_system_prompt_injection,
       claude_oauth_system_prompt: form.claude_oauth_system_prompt?.trim()

@@ -26,14 +26,20 @@ var (
 )
 
 // 默认指纹值（当客户端未提供时使用）
-var defaultFingerprint = Fingerprint{
-	UserAgent:               "claude-cli/" + claude.CLICurrentVersion + " (external, cli)",
-	StainlessLang:           "js",
-	StainlessPackageVersion: "0.94.0",
-	StainlessOS:             "Linux",
-	StainlessArch:           "arm64",
-	StainlessRuntime:        "node",
-	StainlessRuntimeVersion: "v24.3.0",
+var defaultFingerprint = defaultFingerprintFromClaudeProfile()
+
+func defaultFingerprintFromClaudeProfile() Fingerprint {
+	profile := claude.DefaultClaudeCodeMimicryProfile()
+	headers := profile.Headers
+	return Fingerprint{
+		UserAgent:               headers["User-Agent"],
+		StainlessLang:           headers["X-Stainless-Lang"],
+		StainlessPackageVersion: headers["X-Stainless-Package-Version"],
+		StainlessOS:             headers["X-Stainless-OS"],
+		StainlessArch:           headers["X-Stainless-Arch"],
+		StainlessRuntime:        headers["X-Stainless-Runtime"],
+		StainlessRuntimeVersion: headers["X-Stainless-Runtime-Version"],
+	}
 }
 
 // Fingerprint represents account fingerprint data

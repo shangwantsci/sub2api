@@ -254,6 +254,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableFingerprintUnification:           settings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:              settings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       settings.EnableCCHSigning,
+		ClaudeCodeMimicryProfile:               settings.ClaudeCodeMimicryProfile,
+		ClaudeMimicryGuardMode:                 settings.ClaudeMimicryGuardMode,
 		EnableClaudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
 		ClaudeOAuthSystemPrompt:                settings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:          settings.ClaudeOAuthSystemPromptBlocks,
@@ -593,6 +595,8 @@ type UpdateSettingsRequest struct {
 	EnableFingerprintUnification           *bool   `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough              *bool   `json:"enable_metadata_passthrough"`
 	EnableCCHSigning                       *bool   `json:"enable_cch_signing"`
+	ClaudeCodeMimicryProfile               *string `json:"claude_code_mimicry_profile"`
+	ClaudeMimicryGuardMode                 *string `json:"claude_mimicry_guard_mode"`
 	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
@@ -1701,6 +1705,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableCCHSigning
 		}(),
+		ClaudeCodeMimicryProfile: func() string {
+			if req.ClaudeCodeMimicryProfile != nil {
+				return *req.ClaudeCodeMimicryProfile
+			}
+			return previousSettings.ClaudeCodeMimicryProfile
+		}(),
+		ClaudeMimicryGuardMode: func() string {
+			if req.ClaudeMimicryGuardMode != nil {
+				return *req.ClaudeMimicryGuardMode
+			}
+			return previousSettings.ClaudeMimicryGuardMode
+		}(),
 		EnableClaudeOAuthSystemPromptInjection: func() bool {
 			if req.EnableClaudeOAuthSystemPromptInjection != nil {
 				return *req.EnableClaudeOAuthSystemPromptInjection
@@ -2138,6 +2154,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableFingerprintUnification:           updatedSettings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       updatedSettings.EnableCCHSigning,
+		ClaudeCodeMimicryProfile:               updatedSettings.ClaudeCodeMimicryProfile,
+		ClaudeMimicryGuardMode:                 updatedSettings.ClaudeMimicryGuardMode,
 		EnableClaudeOAuthSystemPromptInjection: updatedSettings.EnableClaudeOAuthSystemPromptInjection,
 		ClaudeOAuthSystemPrompt:                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:          updatedSettings.ClaudeOAuthSystemPromptBlocks,
@@ -2628,6 +2646,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.EnableCCHSigning != after.EnableCCHSigning {
 		changed = append(changed, "enable_cch_signing")
+	}
+	if before.ClaudeCodeMimicryProfile != after.ClaudeCodeMimicryProfile {
+		changed = append(changed, "claude_code_mimicry_profile")
+	}
+	if before.ClaudeMimicryGuardMode != after.ClaudeMimicryGuardMode {
+		changed = append(changed, "claude_mimicry_guard_mode")
 	}
 	if before.EnableClaudeOAuthSystemPromptInjection != after.EnableClaudeOAuthSystemPromptInjection {
 		changed = append(changed, "enable_claude_oauth_system_prompt_injection")

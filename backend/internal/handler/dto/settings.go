@@ -181,6 +181,8 @@ type SystemSettings struct {
 	EnableFingerprintUnification           bool   `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough              bool   `json:"enable_metadata_passthrough"`
 	EnableCCHSigning                       bool   `json:"enable_cch_signing"`
+	ClaudeCodeMimicryProfile               string `json:"claude_code_mimicry_profile"`
+	ClaudeMimicryGuardMode                 string `json:"claude_mimicry_guard_mode"`
 	EnableClaudeOAuthSystemPromptInjection bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	ClaudeOAuthSystemPrompt                string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          string `json:"claude_oauth_system_prompt_blocks"`

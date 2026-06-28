@@ -556,6 +556,8 @@ export interface SystemSettings {
   enable_fingerprint_unification: boolean;
   enable_metadata_passthrough: boolean;
   enable_cch_signing: boolean;
+  claude_code_mimicry_profile: string;
+  claude_mimicry_guard_mode: string;
   enable_claude_oauth_system_prompt_injection: boolean;
   claude_oauth_system_prompt: string;
   claude_oauth_system_prompt_blocks: string;
@@ -806,6 +808,8 @@ export interface UpdateSettingsRequest {
   enable_fingerprint_unification?: boolean;
   enable_metadata_passthrough?: boolean;
   enable_cch_signing?: boolean;
+  claude_code_mimicry_profile?: string;
+  claude_mimicry_guard_mode?: string;
   enable_claude_oauth_system_prompt_injection?: boolean;
   claude_oauth_system_prompt?: string;
   claude_oauth_system_prompt_blocks?: string;

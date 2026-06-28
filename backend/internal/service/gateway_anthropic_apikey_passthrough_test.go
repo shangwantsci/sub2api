@@ -741,7 +741,8 @@ func TestGatewayService_AnthropicOAuth_NotAffectedByAPIKeyPassthroughToggle(t *t
 	req, _, err := svc.buildUpstreamRequest(context.Background(), c, account, []byte(`{"model":"claude-3-7-sonnet-20250219"}`), "oauth-token", "oauth", "claude-3-7-sonnet-20250219", true, false)
 	require.NoError(t, err)
 	require.Equal(t, "Bearer oauth-token", getHeaderRaw(req.Header, "authorization"))
-	require.Contains(t, getHeaderRaw(req.Header, "anthropic-beta"), claude.BetaOAuth, "OAuth 链路仍应按原逻辑补齐 oauth beta")
+	require.NotContains(t, getHeaderRaw(req.Header, "anthropic-beta"), claude.BetaOAuth, "OAuth 默认路径不再补齐 legacy oauth beta")
+	require.Contains(t, getHeaderRaw(req.Header, "anthropic-beta"), claude.BetaThinkingTokenCount)
 }
 
 func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(t *testing.T) {
@@ -812,7 +813,8 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 			require.NotNil(t, result)
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, "Bearer oauth-token", getHeaderRaw(upstream.lastReq.Header, "authorization"))
-			require.Contains(t, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"), claude.BetaOAuth)
+			require.NotContains(t, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"), claude.BetaOAuth)
+			require.Contains(t, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"), claude.BetaThinkingTokenCount)
 
 			system := gjson.GetBytes(upstream.lastBody, "system")
 			require.True(t, system.Exists())

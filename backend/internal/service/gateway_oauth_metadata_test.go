@@ -1,10 +1,16 @@
 package service
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestBuildOAuthMetadataUserID_FallbackWithoutAccountUUID(t *testing.T) {
@@ -100,4 +106,88 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 		`{"role":"user","content":"a completely different opener"}]}`)
 	idOther := svc.buildOAuthMetadataUserID(other, account, fp)
 	require.NotEqual(t, id1, idOther, "不同首条消息应派生不同 session_id")
+}
+
+func TestBuildUpstreamRequest_OAuthMimicGeneratesMissingMetadataAndSessionHeader(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	svc := &GatewayService{
+		cfg:             &config.Config{},
+		settingService:  NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, &config.Config{}),
+		identityService: NewIdentityService(&identityCacheStub{}),
+	}
+	account := &Account{
+		ID:       501,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"account_uuid": "acc-uuid"},
+	}
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+
+	req, wireBody, err := svc.buildUpstreamRequest(
+		context.Background(),
+		c,
+		account,
+		body,
+		"oauth-token",
+		"oauth",
+		"claude-sonnet-4-6",
+		true,
+		true,
+	)
+
+	require.NoError(t, err)
+	userID := gjson.GetBytes(wireBody, "metadata.user_id").String()
+	parsed := ParseMetadataUserID(userID)
+	require.NotNil(t, parsed)
+	require.True(t, parsed.IsNewFormat)
+	require.Equal(t, "acc-uuid", parsed.AccountUUID)
+	require.NotEmpty(t, parsed.SessionID)
+	require.Equal(t, parsed.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+}
+
+func TestBuildUpstreamRequest_OAuthMimicRepairsInvalidMetadataUserID(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	svc := &GatewayService{
+		cfg:             &config.Config{},
+		settingService:  NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, &config.Config{}),
+		identityService: NewIdentityService(&identityCacheStub{}),
+	}
+	account := &Account{
+		ID:       502,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"account_uuid": "acc-uuid"},
+	}
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","metadata":{"user_id":"not-a-claude-code-user"},"messages":[{"role":"user","content":"hello"}]}`)
+
+	req, wireBody, err := svc.buildUpstreamRequest(
+		context.Background(),
+		c,
+		account,
+		body,
+		"oauth-token",
+		"oauth",
+		"claude-sonnet-4-6",
+		true,
+		true,
+	)
+
+	require.NoError(t, err)
+	userID := gjson.GetBytes(wireBody, "metadata.user_id").String()
+	require.NotEqual(t, "not-a-claude-code-user", userID)
+	parsed := ParseMetadataUserID(userID)
+	require.NotNil(t, parsed)
+	require.True(t, parsed.IsNewFormat)
+	require.Equal(t, "acc-uuid", parsed.AccountUUID)
+	require.Equal(t, parsed.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+}
+
+func ginContextForOAuthMetadataTest(t *testing.T, method, target string) *gin.Context {
+	t.Helper()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(method, target, nil)
+	return c
 }

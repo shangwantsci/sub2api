@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -129,8 +131,73 @@ func TestFullClaudeCodeMimicryBetas_DoesNotDefaultRedactThinking(t *testing.T) {
 
 	require.NotContains(t, required, claude.BetaRedactThinking)
 	require.Contains(t, required, claude.BetaClaudeCode)
-	require.Contains(t, required, claude.BetaOAuth)
 	require.Contains(t, required, claude.BetaInterleavedThinking)
+	require.Contains(t, required, claude.BetaThinkingTokenCount)
+	require.NotContains(t, required, claude.BetaOAuth)
+	require.NotContains(t, required, claude.BetaExtendedCacheTTL)
+	require.NotContains(t, required, claude.BetaFineGrainedToolStreaming)
+}
+
+func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2195Baseline(t *testing.T) {
+	profile := claude.DefaultClaudeCodeMimicryProfile()
+
+	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, profile.ID)
+	require.Equal(t, "cc-2.1.195-sdk-cli-macos-arm64", profile.ID)
+	require.Equal(t, "2.1.195", profile.CLIVersion)
+	require.Equal(t, "sdk-cli", profile.BillingEntrypoint)
+	require.Equal(t, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", profile.SystemPrompt)
+	require.Equal(t, "claude-cli/2.1.195 (external, sdk-cli)", profile.Headers["User-Agent"])
+	require.Equal(t, "0.94.0", profile.Headers["X-Stainless-Package-Version"])
+	require.Equal(t, "v26.3.0", profile.Headers["X-Stainless-Runtime-Version"])
+	require.Equal(t, "MacOS", profile.Headers["X-Stainless-OS"])
+	require.Equal(t, "arm64", profile.Headers["X-Stainless-Arch"])
+	require.Equal(t, strings.Join(profile.MessageBetas, ","), strings.Join(claude.FullClaudeCodeMimicryBetas(), ","))
+}
+
+func TestComputeFinalAnthropicBeta_OAuthMimicUsesCapturedProfileBetasWithoutOAuth(t *testing.T) {
+	svc := &GatewayService{}
+	profile := claude.DefaultClaudeCodeMimicryProfile()
+
+	got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", nil, []byte(`{"model":"claude-sonnet-4-6"}`), nil)
+
+	require.True(t, shouldSet)
+	require.Equal(t, strings.Join(profile.MessageBetas, ","), got)
+	require.NotContains(t, got, claude.BetaOAuth)
+	require.Contains(t, got, claude.BetaThinkingTokenCount)
+}
+
+func TestComputeFinalAnthropicBeta_RealClaudeCodeDoesNotAppendOAuth(t *testing.T) {
+	svc := &GatewayService{}
+	headers := http.Header{}
+	headers.Set("anthropic-beta", strings.Join([]string{
+		claude.BetaClaudeCode,
+		claude.BetaInterleavedThinking,
+		claude.BetaThinkingTokenCount,
+	}, ","))
+
+	got, shouldSet := svc.computeFinalAnthropicBeta("oauth", false, "claude-sonnet-4-6", headers, []byte(`{"model":"claude-sonnet-4-6"}`), nil)
+
+	require.True(t, shouldSet)
+	require.NotContains(t, got, claude.BetaOAuth)
+	require.Contains(t, got, claude.BetaThinkingTokenCount)
+}
+
+func TestApplyClaudeCodeMimicHeaders_UsesCapturedProfileHeaders(t *testing.T) {
+	profile := claude.DefaultClaudeCodeMimicryProfile()
+	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true", nil)
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "curl/8")
+	req.Header.Set("X-Stainless-OS", "Linux")
+
+	applyClaudeCodeMimicHeaders(req, true)
+
+	for key, want := range profile.Headers {
+		require.Equal(t, want, getHeaderRaw(req.Header, key), key)
+	}
+	require.Equal(t, "application/json", getHeaderRaw(req.Header, "Accept"))
+	require.Equal(t, "gzip, deflate, br, zstd", getHeaderRaw(req.Header, "Accept-Encoding"))
+	require.Equal(t, "stream", getHeaderRaw(req.Header, "x-stainless-helper-method"))
+	require.NotEmpty(t, getHeaderRaw(req.Header, "x-client-request-id"))
 }
 
 func TestMergeAnthropicBetaDropping_PreservesIncomingRedactThinking(t *testing.T) {

@@ -47,3 +47,28 @@ func TestSettingService_GetClaudeOAuthSystemPromptInjectionSettings(t *testing.T
 		require.Equal(t, customBlocks, blocks)
 	})
 }
+
+func TestSettingService_GetClaudeMimicryRuntimeSettings(t *testing.T) {
+	t.Run("defaults to captured profile and warn guard", func(t *testing.T) {
+		resetGatewayForwardingSettingsCacheForTest(t)
+		svc := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, &config.Config{})
+
+		settings := svc.GetClaudeMimicryRuntimeSettings(context.Background())
+
+		require.Equal(t, "cc-2.1.195-sdk-cli-macos-arm64", settings.ProfileID)
+		require.Equal(t, "warn", settings.GuardMode)
+	})
+
+	t.Run("uses configured profile and guard mode", func(t *testing.T) {
+		resetGatewayForwardingSettingsCacheForTest(t)
+		svc := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+			SettingKeyClaudeCodeMimicryProfile: "cc-2.1.195-sdk-cli-macos-arm64",
+			SettingKeyClaudeMimicryGuardMode:   "block",
+		}}, &config.Config{})
+
+		settings := svc.GetClaudeMimicryRuntimeSettings(context.Background())
+
+		require.Equal(t, "cc-2.1.195-sdk-cli-macos-arm64", settings.ProfileID)
+		require.Equal(t, "block", settings.GuardMode)
+	})
+}
