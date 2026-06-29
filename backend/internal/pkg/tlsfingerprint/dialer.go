@@ -29,7 +29,7 @@ type Profile struct {
 	SupportedVersions   []uint16 // Empty uses [TLS1.3, TLS1.2]
 	KeyShareGroups      []uint16 // Empty uses [X25519]
 	PSKModes            []uint16 // Empty uses [psk_dhe_ke]
-	Extensions          []uint16 // Extension type IDs in order; empty uses default Node.js 24.x order
+	Extensions          []uint16 // Extension type IDs in order; empty uses default Claude Code 2.1.195 order
 }
 
 // Dialer creates TLS connections with custom fingerprints.
@@ -52,12 +52,11 @@ type SOCKS5ProxyDialer struct {
 	proxyURL *url.URL
 }
 
-// Default TLS fingerprint values captured from Claude Code (Node.js 24.x)
-// Captured via tls-fingerprint-web capture server
-// JA3 Hash: 44f88fca027f27bab4bb08d4af15f23e
-// JA4:      t13d1714h1_5b57614c22b0_7baf387fc6ff
+// Default TLS fingerprint values captured from Claude Code 2.1.195
+// on macOS/arm64 through an HTTP CONNECT tunnel.
+// JA3 Hash: d871d02cecbde59abbf8f4806134addf
 var (
-	// defaultCipherSuites contains the 17 cipher suites from Node.js 24.x
+	// defaultCipherSuites contains the 17 cipher suites from Claude Code 2.1.195
 	// Order is critical for JA3 fingerprint matching
 	defaultCipherSuites = []uint16{
 		// TLS 1.3 cipher suites
@@ -90,19 +89,19 @@ var (
 		0x0035, // TLS_RSA_WITH_AES_256_CBC_SHA
 	}
 
-	// defaultCurves contains the 3 supported groups from Node.js 24.x
+	// defaultCurves contains the 3 supported groups from Claude Code 2.1.195
 	defaultCurves = []utls.CurveID{
 		utls.X25519,    // 0x001d
 		utls.CurveP256, // 0x0017 (secp256r1)
 		utls.CurveP384, // 0x0018 (secp384r1)
 	}
 
-	// defaultPointFormats contains point formats from Node.js 24.x
+	// defaultPointFormats contains point formats from Claude Code 2.1.195
 	defaultPointFormats = []uint16{
 		0, // uncompressed
 	}
 
-	// defaultSignatureAlgorithms contains the 9 signature algorithms from Node.js 24.x
+	// defaultSignatureAlgorithms contains the 9 signature algorithms from Claude Code 2.1.195
 	defaultSignatureAlgorithms = []utls.SignatureScheme{
 		0x0403, // ecdsa_secp256r1_sha256
 		0x0804, // rsa_pss_rsae_sha256
@@ -114,6 +113,8 @@ var (
 		0x0601, // rsa_pkcs1_sha512
 		0x0201, // rsa_pkcs1_sha1
 	}
+
+	defaultClaudeCodePaddingLen = 231
 )
 
 // NewDialer creates a new TLS fingerprint dialer.
@@ -307,11 +308,10 @@ func toUTLSCurves(curves []uint16) []utls.CurveID {
 	return result
 }
 
-// defaultExtensionOrder is the Node.js 24.x extension order.
+// defaultExtensionOrder is the Claude Code 2.1.195 extension order.
 // Used when Profile.Extensions is empty.
 var defaultExtensionOrder = []uint16{
 	0,     // server_name
-	65037, // encrypted_client_hello
 	23,    // extended_master_secret
 	65281, // renegotiation_info
 	10,    // supported_groups
@@ -324,6 +324,7 @@ var defaultExtensionOrder = []uint16{
 	51,    // key_share
 	45,    // psk_key_exchange_modes
 	43,    // supported_versions
+	21,    // padding
 }
 
 // isGREASEValue checks if a uint16 value matches the TLS GREASE pattern (0x?a?a).
@@ -416,6 +417,8 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 			extensions = append(extensions, &utls.ALPNExtension{AlpnProtocols: alpnProtocols})
 		case 18: // signed_certificate_timestamp
 			extensions = append(extensions, &utls.SCTExtension{})
+		case 21: // padding
+			extensions = append(extensions, &utls.UtlsPaddingExtension{PaddingLen: defaultClaudeCodePaddingLen, WillPad: true})
 		case 23: // extended_master_secret
 			extensions = append(extensions, &utls.ExtendedMasterSecretExtension{})
 		case 35: // session_ticket

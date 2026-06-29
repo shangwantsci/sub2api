@@ -17,9 +17,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 // TestDialerBasicConnection tests that the dialer can establish TLS connections.
@@ -55,8 +58,7 @@ func TestDialerBasicConnection(t *testing.T) {
 
 // TestJA3Fingerprint verifies the JA3/JA4 fingerprint matches expected value.
 // This test uses tls.peet.ws to verify the fingerprint.
-// Expected JA3 hash: 44f88fca027f27bab4bb08d4af15f23e (Node.js 24.x)
-// Expected JA4: t13d1714h1_5b57614c22b0_7baf387fc6ff
+// Expected JA3 hash: d871d02cecbde59abbf8f4806134addf (Claude Code 2.1.195)
 func TestJA3Fingerprint(t *testing.T) {
 	skipNetworkTest(t)
 
@@ -81,7 +83,7 @@ func TestJA3Fingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
-	req.Header.Set("User-Agent", "Claude Code/2.0.0 Node.js/24.3.0")
+	req.Header.Set("User-Agent", "claude-cli/2.1.195 (external, sdk-cli)")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -107,8 +109,8 @@ func TestJA3Fingerprint(t *testing.T) {
 	t.Logf("PeetPrint: %s", fpResp.TLS.PeetPrint)
 	t.Logf("PeetPrint Hash: %s", fpResp.TLS.PeetPrintHash)
 
-	// Verify JA3 hash matches expected value (Node.js 24.x default)
-	expectedJA3Hash := "44f88fca027f27bab4bb08d4af15f23e"
+	// Verify JA3 hash matches expected value (Claude Code 2.1.195 default)
+	expectedJA3Hash := "d871d02cecbde59abbf8f4806134addf"
 	if fpResp.TLS.JA3Hash == expectedJA3Hash {
 		t.Logf("✓ JA3 hash matches expected value: %s", expectedJA3Hash)
 	} else {
@@ -143,8 +145,8 @@ func TestJA3Fingerprint(t *testing.T) {
 		t.Logf("Warning: JA3 does not contain expected TLS 1.3 cipher suites")
 	}
 
-	// Verify extension list (14 extensions, Node.js 24.x order)
-	expectedExtensions := "0-65037-23-65281-10-11-35-16-5-13-18-51-45-43"
+	// Verify extension list (14 extensions, Claude Code 2.1.195 order)
+	expectedExtensions := "0-23-65281-10-11-35-16-5-13-18-51-45-43-21"
 	if strings.Contains(fpResp.TLS.JA3, expectedExtensions) {
 		t.Logf("✓ JA3 contains expected extension list: %s", expectedExtensions)
 	} else {
@@ -264,6 +266,82 @@ func TestBuildClientHelloSpec(t *testing.T) {
 	}
 }
 
+func TestDefaultProfileMatchesClaudeCode2195ClientHello(t *testing.T) {
+	const expectedPaddingLen = 231
+
+	expectedCipherSuites := []uint16{
+		4865, 4866, 4867, 49195, 49199, 49196, 49200, 52393, 52392,
+		49161, 49171, 49162, 49172, 156, 157, 47, 53,
+	}
+	if !reflect.DeepEqual(defaultCipherSuites, expectedCipherSuites) {
+		t.Fatalf("defaultCipherSuites mismatch:\n got %v\nwant %v", defaultCipherSuites, expectedCipherSuites)
+	}
+
+	expectedExtensions := []uint16{0, 23, 65281, 10, 11, 35, 16, 5, 13, 18, 51, 45, 43, 21}
+	if !reflect.DeepEqual(defaultExtensionOrder, expectedExtensions) {
+		t.Fatalf("defaultExtensionOrder mismatch:\n got %v\nwant %v", defaultExtensionOrder, expectedExtensions)
+	}
+
+	spec := buildClientHelloSpecFromProfile(nil)
+	actualExtensions := clientHelloSpecExtensionIDs(spec.Extensions)
+	if !reflect.DeepEqual(actualExtensions, expectedExtensions) {
+		t.Fatalf("spec extension order mismatch:\n got %v\nwant %v", actualExtensions, expectedExtensions)
+	}
+
+	padding, ok := spec.Extensions[len(spec.Extensions)-1].(*utls.UtlsPaddingExtension)
+	if !ok {
+		t.Fatalf("last extension = %T, want *utls.UtlsPaddingExtension", spec.Extensions[len(spec.Extensions)-1])
+	}
+	if !padding.WillPad || padding.PaddingLen != expectedPaddingLen {
+		t.Fatalf("padding extension: WillPad=%v PaddingLen=%d, want WillPad=true PaddingLen=%d", padding.WillPad, padding.PaddingLen, expectedPaddingLen)
+	}
+}
+
+func clientHelloSpecExtensionIDs(extensions []utls.TLSExtension) []uint16 {
+	ids := make([]uint16, 0, len(extensions))
+	for _, ext := range extensions {
+		switch e := ext.(type) {
+		case *utls.SNIExtension:
+			ids = append(ids, 0)
+		case *utls.StatusRequestExtension:
+			ids = append(ids, 5)
+		case *utls.SupportedCurvesExtension:
+			ids = append(ids, 10)
+		case *utls.SupportedPointsExtension:
+			ids = append(ids, 11)
+		case *utls.SignatureAlgorithmsExtension:
+			ids = append(ids, 13)
+		case *utls.ALPNExtension:
+			ids = append(ids, 16)
+		case *utls.SCTExtension:
+			ids = append(ids, 18)
+		case *utls.UtlsPaddingExtension:
+			ids = append(ids, 21)
+		case *utls.ExtendedMasterSecretExtension:
+			ids = append(ids, 23)
+		case *utls.SessionTicketExtension:
+			ids = append(ids, 35)
+		case *utls.SupportedVersionsExtension:
+			ids = append(ids, 43)
+		case *utls.PSKKeyExchangeModesExtension:
+			ids = append(ids, 45)
+		case *utls.SignatureAlgorithmsCertExtension:
+			ids = append(ids, 50)
+		case *utls.KeyShareExtension:
+			ids = append(ids, 51)
+		case *utls.GREASEEncryptedClientHelloExtension:
+			ids = append(ids, 65037)
+		case *utls.RenegotiationInfoExtension:
+			ids = append(ids, 65281)
+		case *utls.GenericExtension:
+			ids = append(ids, e.Id)
+		default:
+			ids = append(ids, 0xffff)
+		}
+	}
+	return ids
+}
+
 // TestToUTLSCurves tests curve ID conversion.
 func TestToUTLSCurves(t *testing.T) {
 	input := []uint16{0x001d, 0x0017, 0x0018}
@@ -296,11 +374,10 @@ func TestAllProfiles(t *testing.T) {
 
 	profiles := []TestProfileExpectation{
 		{
-			// Default profile (Node.js 24.x)
-			// JA3 Hash: 44f88fca027f27bab4bb08d4af15f23e
-			// JA4: t13d1714h1_5b57614c22b0_7baf387fc6ff
+			// Default profile (Claude Code 2.1.195)
+			// JA3 Hash: d871d02cecbde59abbf8f4806134addf
 			Profile: &Profile{
-				Name:         "default_node_v24",
+				Name:         "default_claude_code_2195",
 				EnableGREASE: false,
 			},
 			JA4CipherHash: "5b57614c22b0",
