@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -182,6 +184,143 @@ func TestBuildUpstreamRequest_OAuthMimicRepairsInvalidMetadataUserID(t *testing.
 	require.True(t, parsed.IsNewFormat)
 	require.Equal(t, "acc-uuid", parsed.AccountUUID)
 	require.Equal(t, parsed.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+}
+
+func TestBuildUpstreamRequest_OAuthMimicThirdPartyUAUsesMimicProfileMetadata(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	svc := &GatewayService{
+		cfg:             &config.Config{},
+		settingService:  NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, &config.Config{}),
+		identityService: NewIdentityService(&identityCacheStub{}),
+	}
+	account := &Account{
+		ID:       503,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"account_uuid":               "123e4567-e89b-12d3-a456-426614174000",
+			"session_id_masking_enabled": true,
+		},
+	}
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	c.Request.Header.Set("User-Agent", "opencode/0.6.4")
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello"}]}`)
+
+	req, wireBody, err := svc.buildUpstreamRequest(
+		context.Background(),
+		c,
+		account,
+		body,
+		"oauth-token",
+		"oauth",
+		"claude-sonnet-4-6",
+		true,
+		true,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(req.Header, "User-Agent"))
+	userID := gjson.GetBytes(wireBody, "metadata.user_id").String()
+	parsed := ParseMetadataUserID(userID)
+	require.NotNil(t, parsed)
+	require.True(t, parsed.IsNewFormat)
+	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", parsed.AccountUUID)
+	require.Equal(t, parsed.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+}
+
+func TestBuildCountTokensRequest_OAuthMimicThirdPartyUAUsesMimicProfileMetadata(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	svc := &GatewayService{
+		cfg:             &config.Config{},
+		settingService:  NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, &config.Config{}),
+		identityService: NewIdentityService(&identityCacheStub{}),
+	}
+	account := &Account{
+		ID:       504,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"account_uuid":               "123e4567-e89b-12d3-a456-426614174000",
+			"session_id_masking_enabled": true,
+		},
+	}
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages/count_tokens")
+	c.Request.Header.Set("User-Agent", "opencode/0.6.4")
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"count me"}]}`)
+
+	req, wireBody, err := svc.buildCountTokensRequest(
+		context.Background(),
+		c,
+		account,
+		body,
+		"oauth-token",
+		"oauth",
+		"claude-sonnet-4-6",
+		true,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(req.Header, "User-Agent"))
+	userID := gjson.GetBytes(wireBody, "metadata.user_id").String()
+	parsed := ParseMetadataUserID(userID)
+	require.NotNil(t, parsed)
+	require.True(t, parsed.IsNewFormat)
+	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", parsed.AccountUUID)
+	require.Equal(t, parsed.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+	beta := getHeaderRaw(req.Header, "anthropic-beta")
+	require.Contains(t, beta, claude.BetaTokenCounting)
+	require.NotContains(t, beta, claude.BetaOAuth)
+}
+
+func TestBuildUpstreamRequest_OAuthMimicThirdPartyClaudeUAKeepsBillingProfileVersion(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	svc := &GatewayService{
+		cfg:             &config.Config{},
+		settingService:  NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{}}, &config.Config{}),
+		identityService: NewIdentityService(&identityCacheStub{}),
+	}
+	account := &Account{
+		ID:       505,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"account_uuid":               "123e4567-e89b-12d3-a456-426614174000",
+			"session_id_masking_enabled": true,
+		},
+	}
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	c.Request.Header.Set("User-Agent", "claude-cli/0.6.4 (third-party)")
+	body := rewriteSystemForNonClaudeCodeWithPromptBlocks(
+		[]byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello billing"}]}`),
+		"project rules",
+		"",
+		"",
+	)
+
+	_, wireBody, err := svc.buildUpstreamRequest(
+		context.Background(),
+		c,
+		account,
+		body,
+		"oauth-token",
+		"oauth",
+		"claude-sonnet-4-6",
+		true,
+		true,
+	)
+
+	require.NoError(t, err)
+	billingText := ""
+	gjson.GetBytes(wireBody, "system").ForEach(func(_, block gjson.Result) bool {
+		text := block.Get("text").String()
+		if strings.Contains(text, "x-anthropic-billing-header:") {
+			billingText = text
+			return false
+		}
+		return true
+	})
+	require.Contains(t, billingText, "cc_version=2.1.195.")
+	require.NotContains(t, billingText, "cc_version=0.6.4.")
 }
 
 func ginContextForOAuthMetadataTest(t *testing.T, method, target string) *gin.Context {

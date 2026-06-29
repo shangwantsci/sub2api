@@ -1407,6 +1407,22 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
 }
 
+func claudeCodeMimicryFingerprint(fp *Fingerprint) *Fingerprint {
+	if fp == nil {
+		return nil
+	}
+	out := *fp
+	headers := claude.DefaultClaudeCodeMimicryProfile().Headers
+	out.UserAgent = headers["User-Agent"]
+	out.StainlessLang = headers["X-Stainless-Lang"]
+	out.StainlessPackageVersion = headers["X-Stainless-Package-Version"]
+	out.StainlessOS = headers["X-Stainless-OS"]
+	out.StainlessArch = headers["X-Stainless-Arch"]
+	out.StainlessRuntime = headers["X-Stainless-Runtime"]
+	out.StainlessRuntimeVersion = headers["X-Stainless-Runtime-Version"]
+	return &out
+}
+
 // applyClaudeCodeOAuthMimicryToBody 将"非 Claude Code 客户端 + Claude OAuth 账号"
 // 路径上原本只在 /v1/messages 里做的完整伪装应用到任意 body 上。
 //
@@ -1447,12 +1463,13 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 
 	if s.identityService != nil && c != nil && c.Request != nil {
 		if fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header); err == nil && fp != nil {
+			metadataFP := claudeCodeMimicryFingerprint(fp)
 			mimicMPT := false
 			if s.settingService != nil {
 				_, mimicMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 			}
 			if !mimicMPT {
-				if uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body); uid != "" {
+				if uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, metadataFP, body); uid != "" {
 					normalizeOpts.injectMetadata = true
 					normalizeOpts.metadataUserID = uid
 				}
@@ -1548,6 +1565,7 @@ func (s *GatewayService) ensureClaudeOAuthMimicMetadata(
 			fp = got
 		}
 	}
+	fp = claudeCodeMimicryFingerprint(fp)
 
 	uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body)
 	next, changed := ensureClaudeOAuthMetadataUserID(body, uid)
@@ -5364,10 +5382,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if s.identityService != nil {
 			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
 			if err == nil && fp != nil {
+				metadataFP := claudeCodeMimicryFingerprint(fp)
 				// metadata 透传开启时跳过 metadata 注入
 				_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)
 				if !mimicMPT {
-					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, fp); metadataUserID != "" {
+					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, metadataFP); metadataUserID != "" {
 						normalizeOpts.injectMetadata = true
 						normalizeOpts.metadataUserID = metadataUserID
 					}
@@ -7186,6 +7205,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// OAuth账号：应用统一指纹和metadata重写（受设置开关控制）
 	var fingerprint *Fingerprint
 	var metadataFingerprint *Fingerprint
+	billingUserAgent := ""
 	enableFP, enableMPT := true, false
 	if s.settingService != nil {
 		enableFP, enableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
@@ -7199,16 +7219,25 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		} else {
 			if enableFP {
 				fingerprint = fp
+				billingUserAgent = fp.UserAgent
 			}
 			metadataFingerprint = fp
+			rewriteFingerprint := fp
+			if mimicClaudeCode {
+				rewriteFingerprint = claudeCodeMimicryFingerprint(fp)
+				metadataFingerprint = rewriteFingerprint
+				if rewriteFingerprint != nil {
+					billingUserAgent = rewriteFingerprint.UserAgent
+				}
+			}
 
 			// 2. 重写metadata.user_id（需要指纹中的ClientID和账号的account_uuid）
 			// 如果启用了会话ID伪装，会在重写后替换 session 部分为固定值
 			// 当 metadata 透传开启时跳过重写
 			if !enableMPT {
 				accountUUID := account.GetExtraString("account_uuid")
-				if accountUUID != "" && fp.ClientID != "" {
-					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
+				if accountUUID != "" && rewriteFingerprint != nil && rewriteFingerprint.ClientID != "" {
+					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, rewriteFingerprint.ClientID, rewriteFingerprint.UserAgent); err == nil && len(newBody) > 0 {
 						body = newBody
 					}
 				}
@@ -7220,8 +7249,8 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 
 	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
-	if fingerprint != nil {
-		body = syncBillingHeaderVersion(body, fingerprint.UserAgent)
+	if billingUserAgent != "" {
+		body = syncBillingHeaderVersion(body, billingUserAgent)
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
@@ -10858,15 +10887,27 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 	var ctFingerprint *Fingerprint
 	var ctMetadataFingerprint *Fingerprint
+	ctBillingUserAgent := ""
 	if account.IsOAuth() && s.identityService != nil {
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
 		if err == nil {
-			ctFingerprint = fp
+			if ctEnableFP {
+				ctFingerprint = fp
+				ctBillingUserAgent = fp.UserAgent
+			}
 			ctMetadataFingerprint = fp
+			ctRewriteFingerprint := fp
+			if mimicClaudeCode {
+				ctRewriteFingerprint = claudeCodeMimicryFingerprint(fp)
+				ctMetadataFingerprint = ctRewriteFingerprint
+				if ctRewriteFingerprint != nil {
+					ctBillingUserAgent = ctRewriteFingerprint.UserAgent
+				}
+			}
 			if !ctEnableMPT {
 				accountUUID := account.GetExtraString("account_uuid")
-				if accountUUID != "" && fp.ClientID != "" {
-					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
+				if accountUUID != "" && ctRewriteFingerprint != nil && ctRewriteFingerprint.ClientID != "" {
+					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, ctRewriteFingerprint.ClientID, ctRewriteFingerprint.UserAgent); err == nil && len(newBody) > 0 {
 						body = newBody
 					}
 				}
@@ -10881,8 +10922,8 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
-	if ctFingerprint != nil && ctEnableFP {
-		body = syncBillingHeaderVersion(body, ctFingerprint.UserAgent)
+	if ctBillingUserAgent != "" {
+		body = syncBillingHeaderVersion(body, ctBillingUserAgent)
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
