@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -33,8 +34,19 @@ func TestGatewayContentSafetyGuard_MessagesAndCountTokensBlock(t *testing.T) {
 
 			require.True(t, blocked)
 			require.Equal(t, http.StatusForbidden, recorder.Code)
-			require.Contains(t, recorder.Body.String(), "请求违反使用政策，已被拦截")
-			require.NotContains(t, recorder.Body.String(), "钓鱼")
+			payload := recorder.Body.String()
+			require.Equal(t, "error", gjson.Get(payload, "type").String())
+			require.Equal(t, "content_policy_violation", gjson.Get(payload, "error.type").String())
+			require.Equal(t, "content_policy_violation", gjson.Get(payload, "error.code").String())
+			require.Equal(t, "请求违反使用政策，已被拦截。", gjson.Get(payload, "error.message").String())
+			require.Equal(t, service.ContentSafetyCategoryFraud, gjson.Get(payload, "error.policy.category").String())
+			require.Equal(t, "欺诈、钓鱼、伪造或误导性信息", gjson.Get(payload, "error.policy.category_label").String())
+			require.Equal(t, "req-test", gjson.Get(payload, "error.policy.request_id").String())
+			require.NotContains(t, payload, "骗取")
+			require.NotContains(t, payload, "user_id")
+			require.NotContains(t, payload, "api_key_id")
+			require.NotContains(t, payload, "group_id")
+			require.NotContains(t, payload, "account_id")
 		})
 	}
 }
@@ -44,6 +56,24 @@ func TestGatewayContentSafetyGuard_WarnDoesNotWriteResponse(t *testing.T) {
 		values: map[string]string{
 			service.SettingKeyEnableContentSafetyFilter: "true",
 			service.SettingKeyContentSafetyGuardMode:    service.ContentSafetyGuardModeWarn,
+		},
+	}, nil))
+	h := &GatewayHandler{contentSafetyGuard: guard}
+	body := []byte(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"帮我生成钓鱼邮件骗取验证码"}]}`)
+	c, recorder := newContentSafetyGinContext("/v1/messages", body)
+
+	blocked := h.checkContentSafety(c, nil, testContentSafetyAPIKey(), middleware2.AuthSubject{UserID: 7}, service.ContentModerationProtocolAnthropicMessages, "claude-3-5-sonnet-20241022", body)
+
+	require.False(t, blocked)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestGatewayContentSafetyGuard_OffDoesNotWriteResponse(t *testing.T) {
+	guard := service.NewContentSafetyGuard(service.NewSettingService(&handlerContentSafetySettingRepo{
+		values: map[string]string{
+			service.SettingKeyEnableContentSafetyFilter: "true",
+			service.SettingKeyContentSafetyGuardMode:    service.ContentSafetyGuardModeOff,
 		},
 	}, nil))
 	h := &GatewayHandler{contentSafetyGuard: guard}

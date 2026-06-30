@@ -37,7 +37,7 @@ const (
 )
 
 const (
-	contentSafetyBlockMessage     = "请求违反使用政策，已被拦截"
+	contentSafetyBlockMessage     = "请求违反使用政策，已被拦截。"
 	contentSafetySettingsCacheTTL = 10 * time.Second
 )
 
@@ -111,6 +111,33 @@ func NormalizeContentSafetyGuardMode(mode string) string {
 		return ContentSafetyGuardModeBlock
 	default:
 		return ContentSafetyGuardModeBlock
+	}
+}
+
+func ContentSafetyCategoryLabel(category string) string {
+	switch category {
+	case ContentSafetyCategoryIllegalActivity:
+		return "违法活动或受管制交易"
+	case ContentSafetyCategoryCyberAbuse:
+		return "未授权网络攻击或恶意代码"
+	case ContentSafetyCategoryWeapons:
+		return "武器、爆炸物或危险材料"
+	case ContentSafetyCategoryViolenceHate:
+		return "暴力、仇恨或极端主义"
+	case ContentSafetyCategoryPrivacyAbuse:
+		return "隐私侵犯、身份滥用或冒充"
+	case ContentSafetyCategoryChildSafety:
+		return "未成年人安全风险"
+	case ContentSafetyCategorySelfHarm:
+		return "自伤、自杀或有害身心行为"
+	case ContentSafetyCategoryFraud:
+		return "欺诈、钓鱼、伪造或误导性信息"
+	case ContentSafetyCategorySexualExplicit:
+		return "露骨性内容"
+	case ContentSafetyCategoryPolicyBypass:
+		return "规避安全策略或平台限制"
+	default:
+		return "内容安全风险"
 	}
 }
 
@@ -229,8 +256,10 @@ func (g *ContentSafetyGuard) loadCachedContentSafetyGuardSettings() (contentSafe
 }
 
 func EvaluateContentSafety(input ContentSafetyInput) *ContentSafetyDecision {
-	text := ExtractContentSafetyText(input.Protocol, input.Body)
-	findings := classifyContentSafetyText(text)
+	var findings []ContentSafetyFinding
+	for _, text := range ExtractContentSafetyTextFragments(input.Protocol, input.Body) {
+		findings = mergeContentSafetyFindings(findings, classifyContentSafetyText(text))
+	}
 	decision := &ContentSafetyDecision{
 		Allowed:  true,
 		Action:   ContentSafetyActionAllow,
@@ -255,8 +284,12 @@ func EvaluateContentSafety(input ContentSafetyInput) *ContentSafetyDecision {
 }
 
 func ExtractContentSafetyText(protocol string, body []byte) string {
+	return normalizeContentModerationText(strings.Join(ExtractContentSafetyTextFragments(protocol, body), "\n"))
+}
+
+func ExtractContentSafetyTextFragments(protocol string, body []byte) []string {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
-		return ""
+		return nil
 	}
 	var parts []string
 	switch protocol {
@@ -275,7 +308,30 @@ func ExtractContentSafetyText(protocol string, body []byte) string {
 		collectOpenAIChatContentSafetyMessages(gjson.GetBytes(body, "messages"), &parts)
 		collectResponsesContentSafetyInput(gjson.GetBytes(body, "input"), &parts)
 	}
-	return normalizeContentModerationText(strings.Join(parts, "\n"))
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = normalizeContentModerationText(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func mergeContentSafetyFindings(existing []ContentSafetyFinding, additions []ContentSafetyFinding) []ContentSafetyFinding {
+	for _, addition := range additions {
+		seen := false
+		for _, current := range existing {
+			if current.Category == addition.Category {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			existing = append(existing, addition)
+		}
+	}
+	return existing
 }
 
 func collectAnthropicContentSafetyMessages(messages gjson.Result, parts *[]string) {
@@ -425,8 +481,13 @@ func hasChildSexualSafetyRisk(text string) bool {
 }
 
 func hasPolicyBypassRisk(text string) bool {
-	return containsAny(text, []string{"绕过", "越狱", "忽略", "禁用", "bypass", "jailbreak", "ignore", "disable"}) &&
-		containsAny(text, []string{"使用政策", "安全限制", "安全规则", "平台规则", "anthropic", "claude", "policy", "safety", "guardrail", "moderation"})
+	for _, window := range contentSafetyWindowsAround(text, []string{"绕过", "越狱", "忽略", "禁用", "无视", "bypass", "jailbreak", "ignore", "disable", "override", "circumvent"}, 80, 120) {
+		if containsAny(window, []string{"使用政策", "安全策略", "安全限制", "安全规则", "平台规则", "usage policy", "content policy", "platform policy", "model policy", "anthropic policy", "claude policy", "acceptable use", "safety policy", "safety rule", "guardrail", "moderation"}) &&
+			containsAny(window, []string{"请", "帮我", "教我", "如何", "怎么", "怎样", "输出", "回答", "不要遵守", "不遵守", "无视", "忽略", "禁用", "help me", "how to", "tell me", "show me", "reveal", "output", "answer", "do not follow", "don't follow", "ignore", "disable", "override"}) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSexualExplicitRisk(text string) bool {
@@ -445,12 +506,17 @@ func hasIllegalActivityRisk(text string) bool {
 }
 
 func hasCyberAbuseRisk(text string) bool {
-	if containsAny(text, []string{"勒索软件", "恶意软件", "木马", "僵尸网络", "钓鱼套件", "ransomware", "malware", "trojan", "botnet", "credential stealer", "phishing kit"}) &&
-		containsAny(text, []string{"帮我写", "帮我生成", "生成", "制作", "开发", "编写", "payload", "窃取", "加密目标", "感染", "传播", "投放", "免杀", "绕过杀软", "持久化", "write", "generate", "build", "create", "develop", "deploy", "steal", "encrypt files", "evade antivirus", "persistence"}) {
-		return true
+	for _, window := range contentSafetyWindowsAround(text, []string{"勒索软件", "恶意软件", "木马", "僵尸网络", "钓鱼套件", "ransomware", "malware", "trojan", "botnet", "credential stealer", "phishing kit"}, 80, 140) {
+		if containsAny(window, []string{"帮我写", "帮我生成", "生成", "制作", "开发", "编写", "payload", "窃取", "加密目标", "感染", "传播", "投放", "免杀", "绕过杀软", "持久化", "write", "generate", "build", "create", "develop", "deploy", "steal", "encrypt files", "evade antivirus", "persistence"}) {
+			return true
+		}
 	}
-	return containsAny(text, []string{"漏洞", "exploit", "payload", "ddos", "sql注入", "sql injection", "xss", "webshell", "后门", "backdoor"}) &&
-		containsAny(text, []string{"未授权", "入侵", "攻击", "绕过", "窃取", "批量扫描", "自动入侵", "利用", "unauthorized", "hack", "attack", "bypass", "steal", "exfiltrate", "mass scan"})
+	for _, window := range contentSafetyWindowsAround(text, []string{"漏洞", "exploit", "payload", "ddos", "sql注入", "sql injection", "xss", "webshell", "后门", "backdoor"}, 80, 140) {
+		if containsAny(window, []string{"未授权", "入侵", "攻击", "绕过", "窃取", "批量扫描", "自动入侵", "利用", "unauthorized", "hack", "attack", "bypass", "steal", "exfiltrate", "mass scan"}) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasWeaponsRisk(text string) bool {
@@ -485,12 +551,12 @@ func hasDefensiveCyberContext(text string) bool {
 }
 
 func hasBenignAnalysisContext(text string) bool {
-	return containsAny(text, []string{"新闻", "历史", "分析", "研究", "合规", "法律", "科普", "预防", "识别", "防范", "news", "history", "analysis", "research", "compliance", "legal", "educational", "prevent", "identify"}) &&
+	return containsAny(text, []string{"新闻", "历史", "分析", "研究", "合规", "法律", "科普", "预防", "识别", "防范", "检测", "规则", "训练", "样例", "测试", "news", "history", "analysis", "research", "compliance", "legal", "educational", "prevent", "identify", "detect", "detection", "rule", "training", "sample", "test"}) &&
 		!containsAny(text, []string{"帮我制作", "帮我生成", "教我制作", "购买", "出售", "骗取", "入侵", "build me", "create a", "steal", "buy", "sell"})
 }
 
 func hasBenignPrivacyContext(text string) bool {
-	return containsAny(text, []string{"隐私合规", "数据保护", "防止", "识别", "privacy compliance", "data protection", "prevent", "detect"}) &&
+	return containsAny(text, []string{"隐私合规", "数据保护", "防止", "识别", "脱敏", "校验", "验证", "测试", "privacy compliance", "data protection", "prevent", "detect", "mask", "redact", "validate", "validation", "test"}) &&
 		!containsAny(text, []string{"盗取", "冒充", "监控", "steal", "impersonate", "spy"})
 }
 
@@ -506,6 +572,32 @@ func containsAny(text string, needles []string) bool {
 		}
 	}
 	return false
+}
+
+func contentSafetyWindowsAround(text string, needles []string, before int, after int) []string {
+	var windows []string
+	for _, needle := range needles {
+		needle = strings.ToLower(needle)
+		offset := 0
+		for {
+			idx := strings.Index(text[offset:], needle)
+			if idx < 0 {
+				break
+			}
+			idx += offset
+			start := idx - before
+			if start < 0 {
+				start = 0
+			}
+			end := idx + len(needle) + after
+			if end > len(text) {
+				end = len(text)
+			}
+			windows = append(windows, text[start:end])
+			offset = idx + len(needle)
+		}
+	}
+	return windows
 }
 
 func contentSafetySeverityRank(severity string) int {

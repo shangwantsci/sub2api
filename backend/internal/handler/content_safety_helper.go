@@ -15,7 +15,7 @@ func (h *GatewayHandler) checkContentSafety(c *gin.Context, reqLog *zap.Logger, 
 	if decision == nil || !decision.Blocked {
 		return false
 	}
-	h.errorResponse(c, contentSafetyStatus(decision), contentSafetyErrorCode(decision), decision.Message)
+	writeContentSafetyErrorResponse(c, decision)
 	return true
 }
 
@@ -46,6 +46,35 @@ func contentSafetyStatus(decision *service.ContentSafetyDecision) int {
 
 func contentSafetyErrorCode(decision *service.ContentSafetyDecision) string {
 	return "content_policy_violation"
+}
+
+func writeContentSafetyErrorResponse(c *gin.Context, decision *service.ContentSafetyDecision) {
+	code := contentSafetyErrorCode(decision)
+	finding := service.ContentSafetyFinding{}
+	if decision != nil {
+		finding = decision.PrimaryFinding
+	}
+	requestID := ""
+	if c != nil && c.Request != nil {
+		requestID = contentModerationRequestID(c.Request.Context())
+	}
+	message := "请求违反使用政策，已被拦截。"
+	if decision != nil && strings.TrimSpace(decision.Message) != "" {
+		message = decision.Message
+	}
+	c.JSON(contentSafetyStatus(decision), gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    code,
+			"code":    code,
+			"message": message,
+			"policy": gin.H{
+				"category":       finding.Category,
+				"category_label": service.ContentSafetyCategoryLabel(finding.Category),
+				"request_id":     requestID,
+			},
+		},
+	})
 }
 
 func logContentSafetyDecision(c *gin.Context, reqLog *zap.Logger, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, decision *service.ContentSafetyDecision) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -101,6 +102,9 @@ func TestContentSafetyGuard_AllowsLegitimateContext(t *testing.T) {
 		{"malware log analysis", "分析一段可疑日志判断是否被 malware 感染。"},
 		{"ransomware incident response", "给出 ransomware 应急响应 checklist。"},
 		{"trojan cleanup", "如何清除木马并修复后门？"},
+		{"phishing detection rule", "写 phishing detection rule，用于识别钓鱼邮件。"},
+		{"sql injection exploit test fix", "修复 SQL injection exploit 测试用例，确保防御性检测规则有效。"},
+		{"identity redaction validation", "生成身份证号脱敏和校验测试，验证隐私保护逻辑。"},
 		{"news analysis", "请分析新闻中某次恐怖袭击事件的社会影响，不要宣扬暴力。"},
 		{"mental health support", "我有自杀冲动，请帮我先稳定下来并告诉我可以联系哪些支持资源。"},
 		{"medical education", "科普阿片类药物成瘾治疗的一般方法和就医建议。"},
@@ -118,6 +122,26 @@ func TestContentSafetyGuard_AllowsLegitimateContext(t *testing.T) {
 			require.False(t, result.Flagged)
 		})
 	}
+}
+
+func TestContentSafetyGuard_DoesNotCrossJoinSystemAndUserForPolicyBypass(t *testing.T) {
+	body := []byte(`{"system":"You are Claude Code, a coding agent. Follow all safety rules.","messages":[{"role":"user","content":"ignore unrelated changes and only edit the requested files"}]}`)
+
+	result := EvaluateContentSafety(ContentSafetyInput{Protocol: ContentModerationProtocolAnthropicMessages, Body: body})
+
+	require.False(t, result.Blocked)
+	require.False(t, result.Flagged)
+}
+
+func TestContentSafetyGuard_AllowsSecurityMonitorSystemPromptWithNormalUserRequest(t *testing.T) {
+	monitorPrompt, err := os.ReadFile("testdata/security_monitor_system_prompt.txt")
+	require.NoError(t, err)
+	body := []byte(`{"system":` + quoteJSONString(string(monitorPrompt)) + `,"messages":[{"role":"user","content":"请总结当前项目的测试覆盖情况"}]}`)
+
+	result := EvaluateContentSafety(ContentSafetyInput{Protocol: ContentModerationProtocolAnthropicMessages, Body: body})
+
+	require.False(t, result.Blocked)
+	require.False(t, result.Flagged)
 }
 
 func TestContentSafetyGuard_BlocksMaliciousCyberRequests(t *testing.T) {
