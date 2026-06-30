@@ -2949,6 +2949,7 @@
         :show-access-token-option="false"
         :show-codex-session-import-option="form.platform === 'openai'"
         :default-input-method="isAnthropicSessionImportMode ? 'cookie' : 'manual'"
+        :anthropic-session-bulk-import="isAnthropicSessionImportMode"
         :show-codex-pat-option="form.platform === 'openai'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
@@ -5968,7 +5969,7 @@ const handleCookieAuth = async (sessionKey: string) => {
       return
     }
 
-    if (form.platform === 'anthropic' && addMethod.value === 'setup-token') {
+    if (isAnthropicSessionImportMode.value) {
       oauth.loading.value = false
       await handleAnthropicSessionBulkImport(sessionKey)
       return

@@ -743,6 +743,7 @@ interface Props {
   showAccessTokenOption?: boolean
   showCodexSessionImportOption?: boolean
   defaultInputMethod?: AuthInputMethod
+  anthropicSessionBulkImport?: boolean
   showCodexPatOption?: boolean
   platform?: AccountPlatform // Platform type for different UI/text
   showProjectId?: boolean // New prop to control project ID visibility
@@ -764,6 +765,7 @@ const props = withDefaults(defineProps<Props>(), {
   showAccessTokenOption: false,
   showCodexSessionImportOption: false,
   defaultInputMethod: 'manual',
+  anthropicSessionBulkImport: false,
   showCodexPatOption: false,
   platform: 'anthropic',
   showProjectId: true
@@ -785,7 +787,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const isAnthropicSessionBulkImport = computed(() =>
-  props.platform === 'anthropic' && props.addMethod === 'setup-token'
+  props.platform === 'anthropic' && props.addMethod === 'setup-token' && props.anthropicSessionBulkImport
 )
 const showLocalCallbackNotice = computed(() => props.platform === 'openai' || props.platform === 'grok')
 
