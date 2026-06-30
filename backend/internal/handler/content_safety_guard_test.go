@@ -12,6 +12,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestGatewayContentSafetyGuard_MessagesAndCountTokensBlock(t *testing.T) {
@@ -53,6 +55,42 @@ func TestGatewayContentSafetyGuard_WarnDoesNotWriteResponse(t *testing.T) {
 	require.False(t, blocked)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Empty(t, recorder.Body.String())
+}
+
+func TestContentSafetyGuardLogOmitsPlainUserAndKeyIdentifiers(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	reqLog := zap.New(core)
+	c, _ := newContentSafetyGinContext("/v1/messages", []byte(`{}`))
+	decision := &service.ContentSafetyDecision{
+		Flagged: true,
+		Blocked: true,
+		Mode:    service.ContentSafetyGuardModeBlock,
+		Action:  service.ContentSafetyActionBlock,
+		PrimaryFinding: service.ContentSafetyFinding{
+			Category: service.ContentSafetyCategoryFraud,
+			Severity: service.ContentSafetySeverityHigh,
+		},
+		Findings: []service.ContentSafetyFinding{{
+			Category: service.ContentSafetyCategoryFraud,
+			Severity: service.ContentSafetySeverityHigh,
+		}},
+	}
+
+	logContentSafetyDecision(c, reqLog, testContentSafetyAPIKey(), middleware2.AuthSubject{UserID: 7}, service.ContentModerationProtocolAnthropicMessages, "claude-3-5-sonnet-20241022", decision)
+
+	entries := logs.All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	for _, key := range []string{
+		"request_id", "endpoint", "protocol", "model", "category", "severity", "mode", "action", "blocked", "finding_count",
+	} {
+		require.Contains(t, fields, key)
+	}
+	for _, key := range []string{
+		"user_id", "api_key_id", "group_id", "group_name", "account_id", "account_hash", "api_key", "api_key_hash", "user_hash",
+	} {
+		require.NotContains(t, fields, key)
+	}
 }
 
 func newContentSafetyGinContext(path string, body []byte) (*gin.Context, *httptest.ResponseRecorder) {

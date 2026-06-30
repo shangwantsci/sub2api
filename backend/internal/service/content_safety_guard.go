@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/tidwall/gjson"
 )
@@ -33,7 +36,10 @@ const (
 	ContentSafetyCategoryPolicyBypass    = "policy_bypass"
 )
 
-const contentSafetyBlockMessage = "请求违反使用政策，已被拦截"
+const (
+	contentSafetyBlockMessage     = "请求违反使用政策，已被拦截"
+	contentSafetySettingsCacheTTL = 10 * time.Second
+)
 
 type ContentSafetyGuardSettings struct {
 	Enabled bool
@@ -41,7 +47,16 @@ type ContentSafetyGuardSettings struct {
 }
 
 type ContentSafetyGuard struct {
-	settingService *SettingService
+	settingService   *SettingService
+	settingsCache    atomic.Value
+	settingsMu       sync.Mutex
+	settingsCacheTTL time.Duration
+	now              func() time.Time
+}
+
+type contentSafetySettingsCacheEntry struct {
+	settings  ContentSafetyGuardSettings
+	expiresAt time.Time
 }
 
 type ContentSafetyInput struct {
@@ -72,7 +87,11 @@ type ContentSafetyDecision struct {
 }
 
 func NewContentSafetyGuard(settingService *SettingService) *ContentSafetyGuard {
-	return &ContentSafetyGuard{settingService: settingService}
+	return &ContentSafetyGuard{
+		settingService:   settingService,
+		settingsCacheTTL: contentSafetySettingsCacheTTL,
+		now:              time.Now,
+	}
 }
 
 func DefaultContentSafetyGuardSettings() ContentSafetyGuardSettings {
@@ -96,32 +115,37 @@ func NormalizeContentSafetyGuardMode(mode string) string {
 }
 
 func (s *SettingService) GetContentSafetyGuardSettings(ctx context.Context) ContentSafetyGuardSettings {
+	settings, err := s.loadContentSafetyGuardSettings(ctx)
+	if err != nil {
+		return DefaultContentSafetyGuardSettings()
+	}
+	return settings
+}
+
+func (s *SettingService) loadContentSafetyGuardSettings(ctx context.Context) (ContentSafetyGuardSettings, error) {
 	settings := DefaultContentSafetyGuardSettings()
 	if s == nil || s.settingRepo == nil {
-		return settings
+		return settings, nil
 	}
 	values, err := s.settingRepo.GetMultiple(ctx, []string{
 		SettingKeyEnableContentSafetyFilter,
 		SettingKeyContentSafetyGuardMode,
 	})
 	if err != nil {
-		return settings
+		return settings, err
 	}
 	if raw, ok := values[SettingKeyEnableContentSafetyFilter]; ok && strings.TrimSpace(raw) != "" {
 		settings.Enabled = strings.TrimSpace(raw) == "true"
 	}
 	settings.Mode = NormalizeContentSafetyGuardMode(values[SettingKeyContentSafetyGuardMode])
-	return settings
+	return settings, nil
 }
 
 func (g *ContentSafetyGuard) Check(ctx context.Context, input ContentSafetyCheckInput) *ContentSafetyDecision {
 	if g == nil {
 		return &ContentSafetyDecision{Allowed: true, Action: ContentSafetyActionSkip}
 	}
-	settings := DefaultContentSafetyGuardSettings()
-	if g.settingService != nil {
-		settings = g.settingService.GetContentSafetyGuardSettings(ctx)
-	}
+	settings := g.cachedContentSafetyGuardSettings(ctx)
 	settings.Mode = NormalizeContentSafetyGuardMode(settings.Mode)
 	if !settings.Enabled || settings.Mode == ContentSafetyGuardModeOff {
 		return &ContentSafetyDecision{Allowed: true, Action: ContentSafetyActionSkip, Mode: settings.Mode}
@@ -146,6 +170,62 @@ func (g *ContentSafetyGuard) Check(ctx context.Context, input ContentSafetyCheck
 	decision.Blocked = true
 	decision.Message = contentSafetyBlockMessage
 	return decision
+}
+
+func (g *ContentSafetyGuard) cachedContentSafetyGuardSettings(ctx context.Context) ContentSafetyGuardSettings {
+	if g == nil {
+		return DefaultContentSafetyGuardSettings()
+	}
+	now := time.Now
+	if g.now != nil {
+		now = g.now
+	}
+	currentTime := now()
+	if cached, ok := g.loadCachedContentSafetyGuardSettings(); ok && currentTime.Before(cached.expiresAt) {
+		return cached.settings
+	}
+
+	g.settingsMu.Lock()
+	defer g.settingsMu.Unlock()
+
+	if cached, ok := g.loadCachedContentSafetyGuardSettings(); ok && currentTime.Before(cached.expiresAt) {
+		return cached.settings
+	}
+
+	settings := DefaultContentSafetyGuardSettings()
+	var err error
+	if g.settingService != nil {
+		settings, err = g.settingService.loadContentSafetyGuardSettings(ctx)
+	}
+	if err != nil {
+		if cached, ok := g.loadCachedContentSafetyGuardSettings(); ok {
+			return cached.settings
+		}
+		return DefaultContentSafetyGuardSettings()
+	}
+	settings.Mode = NormalizeContentSafetyGuardMode(settings.Mode)
+
+	ttl := g.settingsCacheTTL
+	if ttl <= 0 {
+		ttl = contentSafetySettingsCacheTTL
+	}
+	g.settingsCache.Store(contentSafetySettingsCacheEntry{
+		settings:  settings,
+		expiresAt: currentTime.Add(ttl),
+	})
+	return settings
+}
+
+func (g *ContentSafetyGuard) loadCachedContentSafetyGuardSettings() (contentSafetySettingsCacheEntry, bool) {
+	if g == nil {
+		return contentSafetySettingsCacheEntry{}, false
+	}
+	raw := g.settingsCache.Load()
+	if raw == nil {
+		return contentSafetySettingsCacheEntry{}, false
+	}
+	cached, ok := raw.(contentSafetySettingsCacheEntry)
+	return cached, ok
 }
 
 func EvaluateContentSafety(input ContentSafetyInput) *ContentSafetyDecision {
@@ -365,7 +445,8 @@ func hasIllegalActivityRisk(text string) bool {
 }
 
 func hasCyberAbuseRisk(text string) bool {
-	if containsAny(text, []string{"勒索软件", "恶意软件", "木马", "僵尸网络", "钓鱼套件", "ransomware", "malware", "trojan", "botnet", "credential stealer", "phishing kit"}) {
+	if containsAny(text, []string{"勒索软件", "恶意软件", "木马", "僵尸网络", "钓鱼套件", "ransomware", "malware", "trojan", "botnet", "credential stealer", "phishing kit"}) &&
+		containsAny(text, []string{"帮我写", "帮我生成", "生成", "制作", "开发", "编写", "payload", "窃取", "加密目标", "感染", "传播", "投放", "免杀", "绕过杀软", "持久化", "write", "generate", "build", "create", "develop", "deploy", "steal", "encrypt files", "evade antivirus", "persistence"}) {
 		return true
 	}
 	return containsAny(text, []string{"漏洞", "exploit", "payload", "ddos", "sql注入", "sql injection", "xss", "webshell", "后门", "backdoor"}) &&
@@ -399,8 +480,8 @@ func hasLegitimateSexualEducationContext(text string) bool {
 }
 
 func hasDefensiveCyberContext(text string) bool {
-	return containsAny(text, []string{"防御", "修复", "检测", "加固", "审计", "防护", "缓解", "日志分析", "defensive", "fix", "patch", "detect", "mitigate", "hardening", "audit", "blue team"}) &&
-		!containsAny(text, []string{"未授权", "自动入侵", "骗取", "勒索软件", "恶意软件", "unauthorized", "steal", "ransomware", "malware"})
+	return containsAny(text, []string{"防御", "修复", "检测", "加固", "审计", "防护", "缓解", "日志分析", "应急响应", "清除", "分析", "防范", "defensive", "fix", "patch", "detect", "mitigate", "hardening", "audit", "blue team", "incident response", "checklist", "clean", "remove", "forensics", "analyze"}) &&
+		!containsAny(text, []string{"未授权", "自动入侵", "骗取", "窃取", "绕过杀软", "免杀", "持久化", "unauthorized", "steal", "evade antivirus", "persistence"})
 }
 
 func hasBenignAnalysisContext(text string) bool {

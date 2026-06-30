@@ -56,18 +56,6 @@ func logContentSafetyDecision(c *gin.Context, reqLog *zap.Logger, apiKey *servic
 	if endpoint == "" && c != nil && c.Request != nil && c.Request.URL != nil {
 		endpoint = c.Request.URL.Path
 	}
-	groupID := int64(0)
-	groupName := ""
-	apiKeyID := int64(0)
-	if apiKey != nil {
-		apiKeyID = apiKey.ID
-		if apiKey.GroupID != nil {
-			groupID = *apiKey.GroupID
-		}
-		if apiKey.Group != nil {
-			groupName = apiKey.Group.Name
-		}
-	}
 	finding := decision.PrimaryFinding
 	fields := []zap.Field{
 		zap.String("request_id", contentModerationRequestID(c.Request.Context())),
@@ -76,12 +64,6 @@ func logContentSafetyDecision(c *gin.Context, reqLog *zap.Logger, apiKey *servic
 		zap.String("endpoint", endpoint),
 		zap.String("protocol", protocol),
 		zap.String("model", strings.TrimSpace(model)),
-		zap.Int64("user_id", subject.UserID),
-		zap.Int64("api_key_id", apiKeyID),
-		zap.Int64("group_id", groupID),
-		zap.String("group_name", groupName),
-		zap.Int64("account_id", 0),
-		zap.String("account_hash", ""),
 		zap.String("mode", decision.Mode),
 		zap.String("action", decision.Action),
 		zap.Bool("blocked", decision.Blocked),
