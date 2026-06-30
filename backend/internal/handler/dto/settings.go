@@ -256,6 +256,10 @@ type SystemSettings struct {
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
+	// 本地内容安全过滤
+	EnableContentSafetyFilter bool   `json:"enable_content_safety_filter"`
+	ContentSafetyGuardMode    string `json:"content_safety_guard_mode"`
+
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    bool `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds int  `json:"cyber_session_block_ttl_seconds"`

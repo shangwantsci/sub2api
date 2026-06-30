@@ -2181,6 +2181,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
+	updates[SettingKeyEnableContentSafetyFilter] = strconv.FormatBool(settings.EnableContentSafetyFilter)
+	updates[SettingKeyContentSafetyGuardMode] = NormalizeContentSafetyGuardMode(settings.ContentSafetyGuardMode)
 
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
@@ -3202,7 +3204,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAffiliateEnabled: "false",
 
 		// 风控中心功能（默认关闭，显式启用）
-		SettingKeyRiskControlEnabled: "false",
+		SettingKeyRiskControlEnabled:        "false",
+		SettingKeyEnableContentSafetyFilter: "true",
+		SettingKeyContentSafetyGuardMode:    ContentSafetyGuardModeBlock,
 
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:    "false",
@@ -3726,6 +3730,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
+	if v, ok := settings[SettingKeyEnableContentSafetyFilter]; ok && strings.TrimSpace(v) != "" {
+		result.EnableContentSafetyFilter = v == "true"
+	} else {
+		result.EnableContentSafetyFilter = true
+	}
+	result.ContentSafetyGuardMode = NormalizeContentSafetyGuardMode(settings[SettingKeyContentSafetyGuardMode])
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"
