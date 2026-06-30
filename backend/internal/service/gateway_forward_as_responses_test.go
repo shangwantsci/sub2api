@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -95,4 +97,55 @@ func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *tes
 	require.Equal(t, 11, result.Usage.CacheReadInputTokens)
 	require.Equal(t, 4, result.Usage.CacheCreationInputTokens)
 	require.Contains(t, rec.Body.String(), `response.completed`)
+}
+
+func TestForwardAsResponses_AnthropicOAuthSyntheticMimicUsesDefaultTLSProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+				`event: message_start`,
+				`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":"","usage":{"input_tokens":1,"output_tokens":0}}}`,
+				``,
+				`event: content_block_start`,
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}`,
+				``,
+				`event: message_delta`,
+				`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+				``,
+			}, "\n"))),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		tlsFPProfileService:  &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          531,
+		Name:        "anthropic-oauth-responses-compat-tls",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	body := []byte(`{"model":"claude-sonnet-4-6","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"stream":false}`)
+
+	result, err := svc.ForwardAsResponses(context.Background(), c, account, body, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
 }

@@ -51,7 +51,7 @@ func TestClaudeCodeValidator_MessagesWithoutProbeStillNeedStrictValidation(t *te
 	require.False(t, ok)
 }
 
-func TestClaudeCodeValidator_CountTokensPathUAOnly(t *testing.T) {
+func TestClaudeCodeValidator_CountTokensPathUAOnlyIsNotEnough(t *testing.T) {
 	validator := NewClaudeCodeValidator()
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages/count_tokens", nil)
 	req.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
@@ -59,7 +59,7 @@ func TestClaudeCodeValidator_CountTokensPathUAOnly(t *testing.T) {
 	ok := validator.Validate(req, map[string]any{
 		"model": "claude-opus-4-8",
 	})
-	require.True(t, ok)
+	require.False(t, ok)
 }
 
 func TestClaudeCodeValidator_CountTokensPathRequiresUA(t *testing.T) {
@@ -69,6 +69,42 @@ func TestClaudeCodeValidator_CountTokensPathRequiresUA(t *testing.T) {
 
 	ok := validator.Validate(req, map[string]any{
 		"model": "claude-opus-4-8",
+	})
+	require.False(t, ok)
+}
+
+func TestClaudeCodeValidator_CountTokensPathFullValid(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages/count_tokens", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	req.Header.Set("X-App", "claude-code")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("X-Claude-Code-Session-Id", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-opus-4-8",
+		"metadata": map[string]any{
+			"user_id": claudeCodeMetadataUserIDJSON,
+		},
+	})
+	require.True(t, ok)
+}
+
+func TestClaudeCodeValidator_CountTokensPathRejectsSessionHeaderMismatch(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages/count_tokens", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	req.Header.Set("X-App", "claude-code")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("X-Claude-Code-Session-Id", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	ok := validator.Validate(req, map[string]any{
+		"model": "claude-opus-4-8",
+		"metadata": map[string]any{
+			"user_id": claudeCodeMetadataUserIDJSON,
+		},
 	})
 	require.False(t, ok)
 }

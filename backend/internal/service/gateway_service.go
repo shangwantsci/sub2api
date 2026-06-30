@@ -1091,6 +1091,7 @@ type claudeOAuthNormalizeOptions struct {
 	injectMetadata          bool
 	metadataUserID          string
 	stripSystemCacheControl bool
+	ensureMimicBodyDefaults bool
 }
 
 // sanitizeSystemText rewrites only the fixed OpenCode identity sentence (if present).
@@ -1329,6 +1330,40 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
+	if opts.ensureMimicBodyDefaults {
+		thinking := gjson.GetBytes(out, "thinking")
+		thinkingRaw := strings.TrimSpace(thinking.Raw)
+		thinkingIsObject := thinking.Exists() && strings.HasPrefix(thinkingRaw, "{")
+		switch {
+		case !thinking.Exists():
+			if next, ok := setJSONRawBytes(out, "thinking", []byte(`{"type":"adaptive"}`)); ok {
+				out = next
+				modified = true
+			}
+		case thinkingIsObject && !gjson.GetBytes(out, "thinking.type").Exists():
+			if next, ok := setJSONValueBytes(out, "thinking.type", "adaptive"); ok {
+				out = next
+				modified = true
+			}
+		}
+
+		outputConfig := gjson.GetBytes(out, "output_config")
+		outputConfigRaw := strings.TrimSpace(outputConfig.Raw)
+		outputConfigIsObject := outputConfig.Exists() && strings.HasPrefix(outputConfigRaw, "{")
+		switch {
+		case !outputConfig.Exists():
+			if next, ok := setJSONRawBytes(out, "output_config", []byte(`{"effort":"high"}`)); ok {
+				out = next
+				modified = true
+			}
+		case outputConfigIsObject && !gjson.GetBytes(out, "output_config.effort").Exists():
+			if next, ok := setJSONValueBytes(out, "output_config.effort", "high"); ok {
+				out = next
+				modified = true
+			}
+		}
+	}
+
 	// context_management：thinking.type 为 enabled/adaptive 时，真实 CLI 会自动
 	// 附带 {"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}。
 	// 客户端显式传了就透传；否则按 CLI 行为补齐。
@@ -1338,13 +1373,40 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	// 对称约束由 sanitizeAnthropicBodyForBetaTokens 在 buildUpstreamRequest /
 	// buildCountTokensRequest 层统一执行，与 Bedrock 路径的
 	// sanitizeBedrockFieldsForBetaTokens 对称。
-	if !gjson.GetBytes(out, "context_management").Exists() {
-		thinkingType := gjson.GetBytes(out, "thinking.type").String()
-		if thinkingType == "enabled" || thinkingType == "adaptive" {
-			const cmDefault = `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}`
+	thinkingType := gjson.GetBytes(out, "thinking.type").String()
+	if thinkingType == "enabled" || thinkingType == "adaptive" {
+		const cmDefault = `{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}`
+		const cmEditDefault = `{"type":"clear_thinking_20251015","keep":"all"}`
+		contextManagement := gjson.GetBytes(out, "context_management")
+		if !contextManagement.Exists() {
 			if next, ok := setJSONRawBytes(out, "context_management", []byte(cmDefault)); ok {
 				out = next
 				modified = true
+			}
+		} else if opts.ensureMimicBodyDefaults && strings.HasPrefix(strings.TrimSpace(contextManagement.Raw), "{") {
+			edits := gjson.GetBytes(out, "context_management.edits")
+			hasClearThinkingEdit := false
+			if edits.IsArray() {
+				edits.ForEach(func(_, edit gjson.Result) bool {
+					if edit.Get("type").String() == "clear_thinking_20251015" {
+						hasClearThinkingEdit = true
+						return false
+					}
+					return true
+				})
+			}
+			if !hasClearThinkingEdit {
+				if edits.IsArray() {
+					if next, ok := setJSONRawBytes(out, "context_management.edits.-1", []byte(cmEditDefault)); ok {
+						out = next
+						modified = true
+					}
+				} else if !edits.Exists() {
+					if next, ok := setJSONRawBytes(out, "context_management.edits", []byte("["+cmEditDefault+"]")); ok {
+						out = next
+						modified = true
+					}
+				}
 			}
 		}
 	}
@@ -4496,14 +4558,17 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// isClaudeCodeClient 判断请求是否来自真正的 Claude Code 客户端。
-// 判定条件：
+// isClaudeCodeClient 是 UA/metadata 级别的宽松兼容辅助，不能用于决定是否跳过
+// synthetic mimic；真实 Claude Code 判定必须信任 handler strict validator 写入的
+// IsClaudeCodeClient(ctx)。
+//
+// 宽松判定条件：
 //  1. User-Agent 匹配 claude-cli/X.Y.Z（大小写不敏感）
 //  2. metadata.user_id 符合 Claude Code 格式（legacy 或 JSON 格式）
 //
 // 只检查 metadata.user_id 非空不够严格：第三方工具（opencode 等）可能伪造 UA
-// 并附带任意 metadata.user_id 字符串，从而绕过 mimicry。必须通过 ParseMetadataUserID
-// 验证格式才能确认是真正的 Claude Code 客户端。
+// 并附带任意 metadata.user_id 字符串。ParseMetadataUserID 只能提高宽松信号质量，
+// 不能把 UA/metadata 组合提升为真实 Claude Code 判定。
 func isClaudeCodeClient(userAgent string, metadataUserID string) bool {
 	if !claudeCliUserAgentRe.MatchString(userAgent) {
 		return false
@@ -5349,14 +5414,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		})
 	}
 
-	// Claude Code 客户端判定：UA 匹配 claude-cli/* 且携带 metadata.user_id。
+	// Claude Code 客户端判定只信 handler 严格 validator 写入的 context。
 	// 真正的 Claude Code 客户端自带完整的 system prompt、cache_control 断点和 header，
 	// 不需要代理做任何 body 级别的 mimicry；强行替换反而会破坏客户端的缓存策略
 	// （长 system prompt 被替换为 ~45 tokens 的短 prompt，低于 Anthropic 1024 token
 	// 最低缓存门槛，导致系统级缓存失效）。
 	//
-	// 对于非 Claude Code 的第三方客户端（opencode 等），仍然走完整 mimicry。
-	isClaudeCode := IsClaudeCodeClient(ctx) || isClaudeCodeClient(c.GetHeader("User-Agent"), parsed.MetadataUserID)
+	// 对于非 Claude Code 的第三方客户端（opencode 等），即使伪造 claude-cli/*
+	// UA 和合法 metadata.user_id，仍然走完整 mimicry。
+	isClaudeCode := IsClaudeCodeClient(ctx)
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
 
 	if shouldMimicClaudeCode {
@@ -5378,7 +5444,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// system 被重写时，原始 system 的 cache_control 会随指令消息迁移；
 		// 未重写时（haiku / 注入开关关闭）保留客户端明确声明的 system cache_control。
 		// 两种情况下 enforceCacheControlLimit 都会兜底处理上限。
-		normalizeOpts := claudeOAuthNormalizeOptions{}
+		normalizeOpts := claudeOAuthNormalizeOptions{
+			ensureMimicBodyDefaults: account.IsAnthropicOAuthOrSetupToken(),
+		}
 		if s.identityService != nil {
 			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
 			if err == nil && fp != nil {
@@ -5484,7 +5552,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// 解析 TLS 指纹 profile（同一请求生命周期内不变，避免重试循环中重复解析）
-	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
+	tlsProfile := s.tlsFPProfileService.ResolveTLSProfileForClaudeMimic(account, shouldMimicClaudeCode)
 
 	// 调试日志：记录即将转发的账号信息
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
@@ -6799,6 +6867,9 @@ func (s *GatewayService) ApplyBedrockCCCompat(c *gin.Context, body []byte, model
 
 // isBedrockCCCompatEnabled 检查渠道是否启用了 Bedrock CC 兼容模式
 func (s *GatewayService) isBedrockCCCompatEnabled(ctx context.Context, account *Account, groupID *int64) bool {
+	if account == nil || !account.IsBedrock() {
+		return false
+	}
 	if groupID == nil || s.channelService == nil {
 		return false
 	}
@@ -10484,11 +10555,13 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return err
 	}
 
-	isClaudeCodeCT := IsClaudeCodeClient(ctx) || isClaudeCodeClient(c.GetHeader("User-Agent"), parsed.MetadataUserID)
+	isClaudeCodeCT := IsClaudeCodeClient(ctx)
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCodeCT
 
 	if shouldMimicClaudeCode {
-		normalizeOpts := claudeOAuthNormalizeOptions{}
+		normalizeOpts := claudeOAuthNormalizeOptions{
+			ensureMimicBodyDefaults: account.IsAnthropicOAuthOrSetupToken(),
+		}
 		var normalizedBody []byte
 		normalizedBody, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
 		if err := replaceBody(normalizedBody); err != nil {
@@ -10570,8 +10643,10 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		}
 	}
 
+	tlsProfile := s.tlsFPProfileService.ResolveTLSProfileForClaudeMimic(account, shouldMimicClaudeCode)
+
 	// 发送请求
-	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
@@ -10598,7 +10673,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 		retryReq, retryWireBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
-			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 			if retryErr == nil {
 				if retryResp.StatusCode < 400 {
 					// count_tokens 签名重试成功后记录最终 wire body，错误响应仍保留原 body 便于后续处理。

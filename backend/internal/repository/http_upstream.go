@@ -266,8 +266,9 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, upstreamProfile)
 	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
-	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
-	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":tls"
+	profileKey := tlsProfileCacheKey(profile)
+	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault) + "|profile:" + profileKey
+	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":tls:" + profileKey
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -724,6 +725,13 @@ func buildCacheKey(isolation, proxyKey string, accountID int64, protocolMode str
 		base += "|proto:" + protocolMode
 	}
 	return base
+}
+
+func tlsProfileCacheKey(profile *tlsfingerprint.Profile) string {
+	if profile == nil {
+		return "nil"
+	}
+	return fmt.Sprintf("%#v", *profile)
 }
 
 func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {

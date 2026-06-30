@@ -132,6 +132,28 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileTLSFingerprintDoesNotInheritGeneric
 	require.Equal(s.T(), time.Duration(0), transport.ResponseHeaderTimeout, "OpenAI TLS path should not inherit generic header timeout")
 }
 
+func (s *HTTPUpstreamSuite) TestTLSFingerprintDifferentProfilesUseDifferentCacheEntries() {
+	s.cfg.Gateway = config.GatewayConfig{ConnectionPoolIsolation: config.ConnectionPoolIsolationAccount}
+	svc := s.newService()
+
+	entry1, err := svc.getClientEntryWithTLS("", 1, 1, &tlsfingerprint.Profile{
+		Name:          "claude-code-profile-a",
+		CipherSuites:  []uint16{0x1301},
+		ALPNProtocols: []string{"http/1.1"},
+	}, service.HTTPUpstreamProfileDefault, false, false)
+	require.NoError(s.T(), err)
+
+	entry2, err := svc.getClientEntryWithTLS("", 1, 1, &tlsfingerprint.Profile{
+		Name:          "claude-code-profile-b",
+		CipherSuites:  []uint16{0x1302},
+		ALPNProtocols: []string{"h2", "http/1.1"},
+	}, service.HTTPUpstreamProfileDefault, false, false)
+	require.NoError(s.T(), err)
+
+	require.NotSame(s.T(), entry1, entry2, "不同 TLS profile 不应复用同一个 client entry")
+	require.Equal(s.T(), 2, len(svc.clients), "TLS client cache key 应区分 profile")
+}
+
 func (s *HTTPUpstreamSuite) TestOpenAIProfileHTTP2DisabledUsesHTTP1Transport() {
 	s.cfg.Gateway = config.GatewayConfig{
 		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: false},

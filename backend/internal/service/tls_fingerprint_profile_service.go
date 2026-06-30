@@ -11,6 +11,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
+const builtInClaudeCodeTLSProfileName = "Built-in Default (Claude Code 2.1.195)"
+
 // TLSFingerprintProfileRepository 定义 TLS 指纹模板的数据访问接口
 type TLSFingerprintProfileRepository interface {
 	List(ctx context.Context) ([]*model.TLSFingerprintProfile, error)
@@ -178,7 +180,14 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 	if account == nil || !account.IsTLSFingerprintEnabled() {
 		return nil
 	}
+	return s.resolveConfiguredTLSProfile(account)
+}
+
+func (s *TLSFingerprintProfileService) resolveConfiguredTLSProfile(account *Account) *tlsfingerprint.Profile {
 	id := account.GetTLSFingerprintProfileID()
+	if s == nil {
+		return builtInClaudeCodeTLSProfile()
+	}
 	if id > 0 {
 		if p := s.GetProfileByID(id); p != nil {
 			return p
@@ -191,7 +200,43 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 		}
 	}
 	// TLS 启用但无绑定 profile → 空 Profile → dialer 使用内置默认值
-	return &tlsfingerprint.Profile{Name: "Built-in Default (Claude Code 2.1.195)"}
+	return builtInClaudeCodeTLSProfile()
+}
+
+// ResolveTLSProfileForClaudeMimic 为 Anthropic OAuth/SetupToken 的 synthetic Claude Code
+// mimic 路径解析 TLS profile。显式账号配置优先生效；未配置时仅 synthetic mimic
+// 默认启用内置 Claude Code 2.1.195 TLS profile。
+func (s *TLSFingerprintProfileService) ResolveTLSProfileForClaudeMimic(account *Account, mimicClaudeCode bool) *tlsfingerprint.Profile {
+	if account == nil {
+		return nil
+	}
+	if accountHasExplicitTLSFingerprintNonTrue(account) {
+		return nil
+	}
+	id := account.GetTLSFingerprintProfileID()
+	if account.IsTLSFingerprintEnabled() || id > 0 || id == -1 {
+		return s.resolveConfiguredTLSProfile(account)
+	}
+	if mimicClaudeCode && account.IsAnthropicOAuthOrSetupToken() {
+		return builtInClaudeCodeTLSProfile()
+	}
+	return nil
+}
+
+func accountHasExplicitTLSFingerprintNonTrue(account *Account) bool {
+	if account == nil || account.Extra == nil {
+		return false
+	}
+	v, ok := account.Extra["enable_tls_fingerprint"]
+	if !ok {
+		return false
+	}
+	enabled, ok := v.(bool)
+	return !ok || !enabled
+}
+
+func builtInClaudeCodeTLSProfile() *tlsfingerprint.Profile {
+	return &tlsfingerprint.Profile{Name: builtInClaudeCodeTLSProfileName}
 }
 
 // --- 缓存管理 ---

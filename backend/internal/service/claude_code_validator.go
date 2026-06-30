@@ -68,10 +68,11 @@ func NewClaudeCodeValidator() *ClaudeCodeValidator {
 // 采用与 claude-relay-service 完全一致的验证策略：
 //
 //	Step 1: User-Agent 检查 (必需) - 必须是 claude-cli/x.x.x
-//	Step 2: 对于非 messages 路径和 /messages/count_tokens，只要 UA 匹配就通过
+//	Step 2: 对于非 messages 路径，只要 UA 匹配就通过
 //	Step 3: 检查 max_tokens=1 + haiku 探测请求绕过（UA 已验证）
-//	Step 4: 对于 messages 路径，进行严格验证：
-//	        - System prompt 相似度检查
+//	Step 4: 对于 messages/count_tokens 路径，进行严格验证：
+//	        - count_tokens 使用轻量严格验证（headers + metadata，不要求 system）
+//	        - 普通 messages 路径使用 System prompt 相似度检查
 //	        - X-App header 检查
 //	        - anthropic-beta header 检查
 //	        - anthropic-version header 检查
@@ -89,15 +90,14 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return true
 	}
 
-	// count_tokens 是 Claude Code 官方辅助请求，通常不携带完整 messages system prompt。
-	if isMessagesCountTokensPath(path) {
-		return true
-	}
-
 	// Step 3: 检查 max_tokens=1 + haiku 探测请求绕过
 	// 这类请求用于 Claude Code 验证 API 连通性，不携带 system prompt
 	if isMaxTokensOneHaiku, ok := IsMaxTokensOneHaikuRequestFromContext(r.Context()); ok && isMaxTokensOneHaiku {
 		return true // 绕过 system prompt 检查，UA 已在 Step 1 验证
+	}
+
+	if strings.HasSuffix(path, "/messages/count_tokens") {
+		return v.validateClaudeCodeHeadersAndMetadata(r, body)
 	}
 
 	// Step 4: messages 路径，进行严格验证
@@ -107,7 +107,10 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return false
 	}
 
-	// 4.2 检查必需的 headers（值不为空即可）
+	return v.validateClaudeCodeHeadersAndMetadata(r, body)
+}
+
+func (v *ClaudeCodeValidator) validateClaudeCodeHeadersAndMetadata(r *http.Request, body map[string]any) bool {
 	xApp := r.Header.Get("X-App")
 	if xApp == "" {
 		return false
@@ -138,15 +141,16 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return false
 	}
 
-	if ParseMetadataUserID(userID) == nil {
+	parsed := ParseMetadataUserID(userID)
+	if parsed == nil {
+		return false
+	}
+
+	if sessionID := strings.TrimSpace(r.Header.Get("X-Claude-Code-Session-Id")); sessionID != "" && sessionID != parsed.SessionID {
 		return false
 	}
 
 	return true
-}
-
-func isMessagesCountTokensPath(path string) bool {
-	return strings.HasSuffix(path, "/messages/count_tokens")
 }
 
 // hasClaudeCodeSystemPrompt 检查请求是否包含 Claude Code 系统提示词

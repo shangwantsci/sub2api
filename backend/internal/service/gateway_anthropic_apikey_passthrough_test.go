@@ -22,10 +22,11 @@ import (
 )
 
 type anthropicHTTPUpstreamRecorder struct {
-	lastReq  *http.Request
-	lastBody []byte
-	resp     *http.Response
-	err      error
+	lastReq        *http.Request
+	lastBody       []byte
+	lastTLSProfile *tlsfingerprint.Profile
+	resp           *http.Response
+	err            error
 }
 
 func newAnthropicAPIKeyAccountForTest() *Account {
@@ -62,6 +63,7 @@ func (u *anthropicHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, a
 }
 
 func (u *anthropicHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	u.lastTLSProfile = profile
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 

@@ -195,6 +195,30 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		SetClaudeCodeClientContext(c, []byte(`{"model":"x"}`), nil)
 		require.False(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
+
+	t.Run("cli_count_tokens_path_fake_metadata_sets_false", func(t *testing.T) {
+		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages/count_tokens")
+		c.Request.Header.Set("User-Agent", "claude-cli/2.1.195 (external, cli)")
+
+		body := []byte(`{"model":"claude-sonnet-4-6","metadata":{"user_id":"{\"device_id\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"account_uuid\":\"fake-account\",\"session_id\":\"11111111-2222-4333-8444-555555555555\"}"}}`)
+
+		SetClaudeCodeClientContext(c, body, nil)
+		require.False(t, service.IsClaudeCodeClient(c.Request.Context()))
+	})
+
+	t.Run("cli_count_tokens_path_valid_headers_and_metadata_sets_true_without_system", func(t *testing.T) {
+		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages/count_tokens")
+		c.Request.Header.Set("User-Agent", "claude-cli/2.1.195 (external, cli)")
+		c.Request.Header.Set("X-App", "claude-code")
+		c.Request.Header.Set("anthropic-beta", "claude-code-20250219")
+		c.Request.Header.Set("anthropic-version", "2023-06-01")
+		c.Request.Header.Set("X-Claude-Code-Session-Id", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+		body := []byte(`{"model":"claude-sonnet-4-6","metadata":{"user_id":"{\"device_id\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"}"}}`)
+
+		SetClaudeCodeClientContext(c, body, nil)
+		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
+	})
 }
 
 func TestSetClaudeCodeClientContext_ReuseParsedRequest(t *testing.T) {

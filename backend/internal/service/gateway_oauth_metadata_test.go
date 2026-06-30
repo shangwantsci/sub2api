@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -270,6 +272,850 @@ func TestBuildCountTokensRequest_OAuthMimicThirdPartyUAUsesMimicProfileMetadata(
 	beta := getHeaderRaw(req.Header, "anthropic-beta")
 	require.Contains(t, beta, claude.BetaTokenCounting)
 	require.NotContains(t, beta, claude.BetaOAuth)
+}
+
+func TestGatewayService_AnthropicOAuthFakeClaudeCodeMetadataStillMimics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "claude-cli/2.1.195 (external, cli)")
+
+	fakeUserID := FormatMetadataUserID(
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"fake-account",
+		"11111111-2222-4333-8444-555555555555",
+		"2.1.195",
+	)
+	body := []byte(`{"model":"claude-sonnet-4-6","metadata":{"user_id":` + strconvQuote(fakeUserID) + `},"system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          506,
+		Name:        "anthropic-oauth-fake-cc",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
+
+	system := gjson.GetBytes(upstream.lastBody, "system")
+	require.True(t, system.IsArray())
+	require.Len(t, system.Array(), 3)
+	require.Contains(t, system.Array()[0].Get("text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, system.Array()[1].Get("text").String())
+	require.Equal(t, claudeCodeSystemPromptExpansion, system.Array()[2].Get("text").String())
+}
+
+func TestGatewayService_AnthropicOAuthCountTokensFakeClaudeCodeMetadataStillMimics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	c.Request.Header.Set("User-Agent", "claude-cli/2.1.195 (external, cli)")
+
+	fakeUserID := FormatMetadataUserID(
+		"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+		"fake-account",
+		"22222222-3333-4444-8555-666666666666",
+		"2.1.195",
+	)
+	body := []byte(`{"model":"claude-sonnet-4-6","metadata":{"user_id":` + strconvQuote(fakeUserID) + `},"system":"project rules","messages":[{"role":"user","content":"count me"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"input_tokens":42}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+		deferredService:  &DeferredService{},
+	}
+	account := &Account{
+		ID:          507,
+		Name:        "anthropic-oauth-count-tokens-fake-cc",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	err = svc.ForwardCountTokens(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
+	beta := getHeaderRaw(upstream.lastReq.Header, "anthropic-beta")
+	require.Contains(t, beta, claude.BetaTokenCounting)
+	require.Contains(t, beta, claude.BetaContextManagement)
+
+	system := gjson.GetBytes(upstream.lastBody, "system")
+	require.True(t, system.IsArray())
+	require.Len(t, system.Array(), 3)
+	require.Contains(t, system.Array()[0].Get("text").String(), "x-anthropic-billing-header:")
+}
+
+func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_MessagesMissingFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          508,
+		Name:        "anthropic-oauth-mimic-body-defaults",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+	require.Equal(t, "clear_thinking_20251015",
+		gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
+	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+}
+
+func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_PreservesExplicitFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}],"thinking":{"type":"disabled","budget_tokens":777},"context_management":{"edits":[{"type":"client_strategy","keep":"client"}]},"output_config":{"effort":"medium","extra":true},"stream":false}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          509,
+		Name:        "anthropic-oauth-mimic-body-defaults-explicit",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "disabled", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+	require.Equal(t, float64(777), gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Float())
+	require.Equal(t, "client_strategy", gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
+	require.Equal(t, "client", gjson.GetBytes(upstream.lastBody, "context_management.edits.0.keep").String())
+	require.Len(t, gjson.GetBytes(upstream.lastBody, "context_management.edits").Array(), 1)
+	require.Equal(t, "medium", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "output_config.extra").Bool())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+}
+
+func TestNormalizeClaudeOAuthMetadataClaudeMimicBodyDefaults_AppendsMissingClearThinkingEdit(t *testing.T) {
+	tests := []struct {
+		name            string
+		body            string
+		wantEdits       int
+		wantFirstType   string
+		wantSecondType  string
+		wantSecondKeep  string
+		wantClearCopies int
+	}{
+		{
+			name:            "empty context_management gets clear thinking edit",
+			body:            `{"model":"claude-sonnet-4-6","thinking":{"type":"adaptive"},"context_management":{},"messages":[]}`,
+			wantEdits:       1,
+			wantFirstType:   "clear_thinking_20251015",
+			wantClearCopies: 1,
+		},
+		{
+			name:            "existing edits are preserved and clear thinking edit is appended",
+			body:            `{"model":"claude-sonnet-4-6","thinking":{"type":"adaptive"},"context_management":{"edits":[{"type":"client_strategy","keep":"client"}]},"messages":[]}`,
+			wantEdits:       2,
+			wantFirstType:   "client_strategy",
+			wantSecondType:  "clear_thinking_20251015",
+			wantSecondKeep:  "all",
+			wantClearCopies: 1,
+		},
+		{
+			name:            "existing clear thinking edit is not duplicated",
+			body:            `{"model":"claude-sonnet-4-6","thinking":{"type":"adaptive"},"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"client"}]},"messages":[]}`,
+			wantEdits:       1,
+			wantFirstType:   "clear_thinking_20251015",
+			wantClearCopies: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _ := normalizeClaudeOAuthRequestBody([]byte(tt.body), "claude-sonnet-4-6", claudeOAuthNormalizeOptions{
+				ensureMimicBodyDefaults: true,
+			})
+
+			edits := gjson.GetBytes(out, "context_management.edits").Array()
+			require.Len(t, edits, tt.wantEdits)
+			require.Equal(t, tt.wantFirstType, edits[0].Get("type").String())
+			if tt.wantSecondType != "" {
+				require.Equal(t, tt.wantSecondType, edits[1].Get("type").String())
+				require.Equal(t, tt.wantSecondKeep, edits[1].Get("keep").String())
+			}
+
+			clearCopies := 0
+			for _, edit := range edits {
+				if edit.Get("type").String() == "clear_thinking_20251015" {
+					clearCopies++
+				}
+			}
+			require.Equal(t, tt.wantClearCopies, clearCopies)
+		})
+	}
+}
+
+func TestNormalizeClaudeOAuthMetadataClaudeMimicBodyDefaults_PreservesExplicitNonObjectFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		assert func(t *testing.T, out []byte)
+	}{
+		{
+			name: "thinking null stays null",
+			body: `{"model":"claude-sonnet-4-6","thinking":null,"messages":[]}`,
+			assert: func(t *testing.T, out []byte) {
+				require.Equal(t, gjson.Null, gjson.GetBytes(out, "thinking").Type)
+				require.False(t, gjson.GetBytes(out, "thinking.type").Exists())
+				require.False(t, gjson.GetBytes(out, "context_management").Exists())
+			},
+		},
+		{
+			name: "context management edits string stays string",
+			body: `{"model":"claude-sonnet-4-6","thinking":{"type":"adaptive"},"context_management":{"edits":"client-value"},"messages":[]}`,
+			assert: func(t *testing.T, out []byte) {
+				require.Equal(t, "adaptive", gjson.GetBytes(out, "thinking.type").String())
+				require.Equal(t, "client-value", gjson.GetBytes(out, "context_management.edits").String())
+			},
+		},
+		{
+			name: "output config null stays null",
+			body: `{"model":"claude-sonnet-4-6","output_config":null,"messages":[]}`,
+			assert: func(t *testing.T, out []byte) {
+				require.Equal(t, gjson.Null, gjson.GetBytes(out, "output_config").Type)
+				require.False(t, gjson.GetBytes(out, "output_config.effort").Exists())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _ := normalizeClaudeOAuthRequestBody([]byte(tt.body), "claude-sonnet-4-6", claudeOAuthNormalizeOptions{
+				ensureMimicBodyDefaults: true,
+			})
+			tt.assert(t, out)
+		})
+	}
+}
+
+func TestGatewayService_AnthropicOAuthRealClaudeCodeForwardDoesNotForceMimicBodyDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	c.Request.Header.Set("User-Agent", "claude-cli/2.1.195 (external, cli)")
+
+	account := &Account{
+		ID:          510,
+		Name:        "anthropic-oauth-real-cc-forward",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"real claude code system","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	ctx := SetClaudeCodeClient(context.Background(), true)
+
+	result, err := svc.Forward(ctx, c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+
+	system := gjson.GetBytes(upstream.lastBody, "system")
+	require.False(t, system.IsArray())
+	require.Equal(t, "real claude code system", system.String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "thinking").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "output_config").Exists())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_DefaultsForSyntheticMimic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService:  &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          520,
+		Name:        "anthropic-oauth-synthetic-tls-default",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_DoesNotDefaultForAPIKeyPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService:  &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          521,
+		Name:        "anthropic-apikey-no-tls-default",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-key"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, upstream.lastTLSProfile)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_DoesNotDefaultForRealClaudeCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"real claude code system","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService:  &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          522,
+		Name:        "anthropic-oauth-real-cc-no-tls-default",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	ctx := SetClaudeCodeClient(context.Background(), true)
+
+	result, err := svc.Forward(ctx, c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, upstream.lastTLSProfile)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_ExplicitFalseDisablesDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService:  &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          523,
+		Name:        "anthropic-oauth-explicit-false-no-tls-default",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra:       map[string]any{"enable_tls_fingerprint": false},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, upstream.lastTLSProfile)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_ExplicitTrueUsesConfiguredDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService:  &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          524,
+		Name:        "anthropic-oauth-explicit-true-tls-default",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra:       map[string]any{"enable_tls_fingerprint": true},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_ProfileIDWithoutEnableUsesBoundProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService: &TLSFingerprintProfileService{
+			localCache: map[int64]*model.TLSFingerprintProfile{
+				42: {
+					ID:            42,
+					Name:          "bound-profile",
+					CipherSuites:  []uint16{0x1302},
+					ALPNProtocols: []string{"h2", "http/1.1"},
+				},
+			},
+		},
+	}
+	account := &Account{
+		ID:          526,
+		Name:        "anthropic-oauth-profile-id-without-enable",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra:       map[string]any{"tls_fingerprint_profile_id": 42},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, "bound-profile", upstream.lastTLSProfile.Name)
+	require.Equal(t, []uint16{0x1302}, upstream.lastTLSProfile.CipherSuites)
+	require.Equal(t, []string{"h2", "http/1.1"}, upstream.lastTLSProfile.ALPNProtocols)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_RealClaudeCodeProfileIDWithoutEnableUsesBoundProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"real claude code system","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		tlsFPProfileService: &TLSFingerprintProfileService{
+			localCache: map[int64]*model.TLSFingerprintProfile{
+				42: {
+					ID:            42,
+					Name:          "bound-profile",
+					CipherSuites:  []uint16{0x1302},
+					ALPNProtocols: []string{"h2", "http/1.1"},
+				},
+			},
+		},
+	}
+	account := &Account{
+		ID:          527,
+		Name:        "anthropic-oauth-real-cc-profile-id-without-enable",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra:       map[string]any{"tls_fingerprint_profile_id": 42},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	ctx := SetClaudeCodeClient(context.Background(), true)
+
+	result, err := svc.Forward(ctx, c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, "bound-profile", upstream.lastTLSProfile.Name)
+	require.Equal(t, []uint16{0x1302}, upstream.lastTLSProfile.CipherSuites)
+	require.Equal(t, []string{"h2", "http/1.1"}, upstream.lastTLSProfile.ALPNProtocols)
+}
+
+func TestGatewayService_ClaudeMimicTLSProfile_DefaultsForCountTokensSyntheticMimic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages/count_tokens")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"input_tokens":42}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                 cfg,
+		httpUpstream:        upstream,
+		rateLimitService:    &RateLimitService{},
+		deferredService:     &DeferredService{},
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+	account := &Account{
+		ID:          525,
+		Name:        "anthropic-oauth-count-tokens-synthetic-tls-default",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	err = svc.ForwardCountTokens(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+}
+
+func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsMatchMessages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	messageBody := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	messageParsed, err := ParseGatewayRequest(NewRequestBodyRef(messageBody), PlatformAnthropic)
+	require.NoError(t, err)
+	messageUpstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	messageSvc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         messageUpstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          511,
+		Name:        "anthropic-oauth-mimic-body-defaults-both",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	messageCtx := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages")
+
+	_, err = messageSvc.Forward(context.Background(), messageCtx, account, messageParsed)
+	require.NoError(t, err)
+	require.NotNil(t, messageUpstream.lastReq)
+
+	countBody := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	countParsed, err := ParseGatewayRequest(NewRequestBodyRef(countBody), PlatformAnthropic)
+	require.NoError(t, err)
+	countUpstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"input_tokens":42}`)),
+		},
+	}
+	countSvc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     countUpstream,
+		rateLimitService: &RateLimitService{},
+		deferredService:  &DeferredService{},
+	}
+	countCtx := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages/count_tokens")
+
+	err = countSvc.ForwardCountTokens(context.Background(), countCtx, account, countParsed)
+	require.NoError(t, err)
+	require.NotNil(t, countUpstream.lastReq)
+
+	for _, got := range [][]byte{messageUpstream.lastBody, countUpstream.lastBody} {
+		require.Equal(t, "adaptive", gjson.GetBytes(got, "thinking.type").String())
+		require.Equal(t, "clear_thinking_20251015",
+			gjson.GetBytes(got, "context_management.edits.0.type").String())
+		require.Equal(t, "high", gjson.GetBytes(got, "output_config.effort").String())
+	}
+}
+
+func TestGatewayService_AnthropicOAuthCountTokensRealClaudeCodeDoesNotForceMimicDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages/count_tokens")
+	c.Request.Header.Set("User-Agent", "claude-cli/2.1.195 (external, cli)")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"real claude code system","messages":[{"role":"user","content":"count me"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"input_tokens":42}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+		deferredService:  &DeferredService{},
+	}
+	account := &Account{
+		ID:          512,
+		Name:        "anthropic-oauth-real-cc-count-tokens",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	ctx := SetClaudeCodeClient(context.Background(), true)
+
+	err = svc.ForwardCountTokens(ctx, c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "real claude code system", gjson.GetBytes(upstream.lastBody, "system").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "thinking").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "output_config").Exists())
 }
 
 func TestBuildUpstreamRequest_OAuthMimicThirdPartyClaudeUAKeepsBillingProfileVersion(t *testing.T) {
