@@ -435,8 +435,156 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_MessagesMissingFie
 	require.Equal(t, "clear_thinking_20251015",
 		gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
 	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
+	require.Equal(t, int64(64000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+}
+
+func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_HaikuUsesCapturedModelDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-haiku-4-5-20251001","system":"project rules","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          518,
+		Name:        "anthropic-oauth-mimic-body-defaults-haiku",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "enabled", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+	require.Equal(t, int64(31999), gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Int())
+	require.Equal(t, int64(32000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+	require.Equal(t, "clear_thinking_20251015",
+		gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "output_config").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+}
+
+func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_RemovesInvalidTemperatureWhenThinkingIsOn(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-opus-4-8","system":"project rules","messages":[{"role":"user","content":"hello"}],"temperature":0.4,"stream":false}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          519,
+		Name:        "anthropic-oauth-mimic-invalid-temperature",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
+}
+
+func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_HaikuRewritesAdaptiveThinking(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-haiku-4-5-20251001","system":"project rules","messages":[{"role":"user","content":"hello"}],"thinking":{"type":"adaptive"},"stream":false}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+	}
+	account := &Account{
+		ID:          525,
+		Name:        "anthropic-oauth-mimic-haiku-adaptive",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "enabled", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+	require.Equal(t, int64(31999), gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "output_config").Exists())
 }
 
 func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_PreservesExplicitFields(t *testing.T) {
@@ -446,7 +594,7 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_PreservesExplicitF
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
-	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}],"thinking":{"type":"disabled","budget_tokens":777},"context_management":{"edits":[{"type":"client_strategy","keep":"client"}]},"output_config":{"effort":"medium","extra":true},"stream":false}`)
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}],"thinking":{"type":"disabled","budget_tokens":777},"context_management":{"edits":[{"type":"client_strategy","keep":"client"}]},"output_config":{"effort":"medium","extra":true},"max_tokens":1234,"temperature":0.4,"stream":false}`)
 	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
 	require.NoError(t, err)
 
@@ -488,6 +636,8 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_PreservesExplicitF
 	require.Len(t, gjson.GetBytes(upstream.lastBody, "context_management.edits").Array(), 1)
 	require.Equal(t, "medium", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "output_config.extra").Bool())
+	require.Equal(t, int64(1234), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+	require.Equal(t, 0.4, gjson.GetBytes(upstream.lastBody, "temperature").Float())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 }
@@ -1165,7 +1315,7 @@ func TestBuildUpstreamRequest_OAuthMimicThirdPartyClaudeUAKeepsBillingProfileVer
 		}
 		return true
 	})
-	require.Contains(t, billingText, "cc_version=2.1.195.")
+	require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+".")
 	require.NotContains(t, billingText, "cc_version=0.6.4.")
 }
 

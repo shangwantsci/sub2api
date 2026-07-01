@@ -5969,7 +5969,7 @@ export default {
         cchSigning: 'CCH 签名',
         cchSigningHint: '对转发请求的 billing header 进行 CCH 哈希签名。关闭时保留原始占位符。',
         claudeCodeMimicryProfile: 'Claude Code 伪装 Profile',
-        claudeCodeMimicryProfile2195: 'Claude Code 2.1.195 / macOS arm64',
+        claudeCodeMimicryProfile2197: 'Claude Code 2.1.197 / macOS arm64',
         claudeCodeMimicryProfileHint: '控制 OAuth mimic 路径使用的 User-Agent、X-Stainless 头、beta 集合与 billing entrypoint。',
         claudeMimicryGuardMode: '伪装审计模式',
         claudeMimicryGuardModeHint: 'warn 只记录异常；block 会拒绝明显破坏伪装的合成请求；off 关闭审计。',

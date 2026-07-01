@@ -7797,8 +7797,8 @@ const claudeOAuthSystemPromptCacheTTLOptions = computed(() => [
 
 const claudeCodeMimicryProfileOptions = computed(() => [
   {
-    value: "cc-2.1.195-sdk-cli-macos-arm64",
-    label: t("admin.settings.gatewayForwarding.claudeCodeMimicryProfile2195"),
+    value: "cc-2.1.197-sdk-cli-macos-arm64",
+    label: t("admin.settings.gatewayForwarding.claudeCodeMimicryProfile2197"),
   },
 ]);
 
@@ -8138,7 +8138,7 @@ const form = reactive<SettingsForm>({
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
-  claude_code_mimicry_profile: "cc-2.1.195-sdk-cli-macos-arm64",
+  claude_code_mimicry_profile: "cc-2.1.197-sdk-cli-macos-arm64",
   claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
@@ -9356,7 +9356,7 @@ async function saveSettings() {
       enable_cch_signing: form.enable_cch_signing,
       claude_code_mimicry_profile:
         form.claude_code_mimicry_profile?.trim() ||
-        "cc-2.1.195-sdk-cli-macos-arm64",
+        "cc-2.1.197-sdk-cli-macos-arm64",
       claude_mimicry_guard_mode: form.claude_mimicry_guard_mode || "warn",
       enable_claude_oauth_system_prompt_injection:
         form.enable_claude_oauth_system_prompt_injection,

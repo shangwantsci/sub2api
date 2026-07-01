@@ -48,7 +48,7 @@ const (
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
 	stickySessionTTL        = time.Hour // 粘性会话TTL
 	defaultMaxLineSize      = 500 * 1024 * 1024
-	// Canonical Claude Agent SDK identity block from Claude Code CLI 2.1.195.
+	// Canonical Claude Agent SDK identity block from Claude Code CLI 2.1.197.
 	// Keep it EXACT (no trailing whitespace/newlines) to match captured traffic.
 	claudeCodeSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 	// claudeCodeSystemPromptExpansion 是真实 Claude Code 主系统提示词中"与具体工具无关"
@@ -1296,6 +1296,7 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 			modelID = normalized
 		}
 	}
+	modelProfile := claude.ResolveClaudeCodeMimicryModelProfile(modelID)
 
 	// 确保 tools 字段存在（即使为空数组）
 	if !gjson.GetBytes(out, "tools").Exists() {
@@ -1312,19 +1313,8 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
-	// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
-	// 策略：客户端传了什么就透传；没传则补默认 1。
-	if !gjson.GetBytes(out, "temperature").Exists() {
-		if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
-			out = next
-			modified = true
-		}
-	}
-
-	// max_tokens：真实 CLI 的默认值是 128000。缺失时补齐以对齐指纹。
-	if !gjson.GetBytes(out, "max_tokens").Exists() {
-		if next, ok := setJSONValueBytes(out, "max_tokens", 128000); ok {
+	if !gjson.GetBytes(out, "max_tokens").Exists() && modelProfile.DefaultMaxTokens > 0 {
+		if next, ok := setJSONValueBytes(out, "max_tokens", modelProfile.DefaultMaxTokens); ok {
 			out = next
 			modified = true
 		}
@@ -1335,31 +1325,66 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		thinkingRaw := strings.TrimSpace(thinking.Raw)
 		thinkingIsObject := thinking.Exists() && strings.HasPrefix(thinkingRaw, "{")
 		switch {
-		case !thinking.Exists():
-			if next, ok := setJSONRawBytes(out, "thinking", []byte(`{"type":"adaptive"}`)); ok {
+		case !thinking.Exists() && modelProfile.DefaultThinkingType != "":
+			raw := fmt.Sprintf(`{"type":%q}`, modelProfile.DefaultThinkingType)
+			if modelProfile.DefaultThinkingBudgetTokens > 0 {
+				raw = fmt.Sprintf(`{"type":%q,"budget_tokens":%d}`, modelProfile.DefaultThinkingType, modelProfile.DefaultThinkingBudgetTokens)
+			}
+			if next, ok := setJSONRawBytes(out, "thinking", []byte(raw)); ok {
 				out = next
 				modified = true
 			}
-		case thinkingIsObject && !gjson.GetBytes(out, "thinking.type").Exists():
-			if next, ok := setJSONValueBytes(out, "thinking.type", "adaptive"); ok {
+		case thinkingIsObject && !gjson.GetBytes(out, "thinking.type").Exists() && modelProfile.DefaultThinkingType != "":
+			if next, ok := setJSONValueBytes(out, "thinking.type", modelProfile.DefaultThinkingType); ok {
 				out = next
 				modified = true
 			}
 		}
-
-		outputConfig := gjson.GetBytes(out, "output_config")
-		outputConfigRaw := strings.TrimSpace(outputConfig.Raw)
-		outputConfigIsObject := outputConfig.Exists() && strings.HasPrefix(outputConfigRaw, "{")
-		switch {
-		case !outputConfig.Exists():
-			if next, ok := setJSONRawBytes(out, "output_config", []byte(`{"effort":"high"}`)); ok {
-				out = next
-				modified = true
+		if thinkingIsObject || !thinking.Exists() {
+			thinkingType := gjson.GetBytes(out, "thinking.type").String()
+			if modelProfile.ID == "haiku" && thinkingType == "adaptive" {
+				if next, ok := setJSONValueBytes(out, "thinking.type", modelProfile.DefaultThinkingType); ok {
+					out = next
+					modified = true
+					thinkingType = modelProfile.DefaultThinkingType
+				}
 			}
-		case outputConfigIsObject && !gjson.GetBytes(out, "output_config.effort").Exists():
-			if next, ok := setJSONValueBytes(out, "output_config.effort", "high"); ok {
-				out = next
-				modified = true
+			if modelProfile.DefaultThinkingBudgetTokens > 0 &&
+				thinkingType == modelProfile.DefaultThinkingType &&
+				!gjson.GetBytes(out, "thinking.budget_tokens").Exists() {
+				if next, ok := setJSONValueBytes(out, "thinking.budget_tokens", modelProfile.DefaultThinkingBudgetTokens); ok {
+					out = next
+					modified = true
+				}
+			}
+		}
+
+		finalThinkingType := gjson.GetBytes(out, "thinking.type").String()
+		if finalThinkingType == "enabled" || finalThinkingType == "adaptive" {
+			temperature := gjson.GetBytes(out, "temperature")
+			if temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
+				if next, ok := deleteJSONPathBytes(out, "temperature"); ok {
+					out = next
+					modified = true
+				}
+			}
+		}
+
+		if modelProfile.DefaultOutputConfigEffort != "" {
+			outputConfig := gjson.GetBytes(out, "output_config")
+			outputConfigRaw := strings.TrimSpace(outputConfig.Raw)
+			outputConfigIsObject := outputConfig.Exists() && strings.HasPrefix(outputConfigRaw, "{")
+			switch {
+			case !outputConfig.Exists():
+				if next, ok := setJSONRawBytes(out, "output_config", []byte(fmt.Sprintf(`{"effort":%q}`, modelProfile.DefaultOutputConfigEffort))); ok {
+					out = next
+					modified = true
+				}
+			case outputConfigIsObject && !gjson.GetBytes(out, "output_config.effort").Exists():
+				if next, ok := setJSONValueBytes(out, "output_config.effort", modelProfile.DefaultOutputConfigEffort); ok {
+					out = next
+					modified = true
+				}
 			}
 		}
 	}
@@ -5431,18 +5456,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// Code..." system prompt 但缺少 billing attribution block，导致 Anthropic
 		// 检测到"有 CC prompt 但无 billing block"的不一致而判为 third-party。
 		// Parrot 的 transform_request 从不检查客户端 system 内容，直接覆盖。
-		if !strings.Contains(strings.ToLower(reqModel), "haiku") {
-			systemRaw, _ := parsed.SystemValue()
-			systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
-			if systemPromptInjectionEnabled {
-				if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
-					return nil, err
-				}
+		systemRaw, _ := parsed.SystemValue()
+		systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+		if systemPromptInjectionEnabled {
+			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
+				return nil, err
 			}
 		}
 
 		// system 被重写时，原始 system 的 cache_control 会随指令消息迁移；
-		// 未重写时（haiku / 注入开关关闭）保留客户端明确声明的 system cache_control。
+		// 未重写时（注入开关关闭）保留客户端明确声明的 system cache_control。
 		// 两种情况下 enforceCacheControlLimit 都会兜底处理上限。
 		normalizeOpts := claudeOAuthNormalizeOptions{
 			ensureMimicBodyDefaults: account.IsAnthropicOAuthOrSetupToken(),
@@ -7392,7 +7415,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
-	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
+	// （user-agent/x-stainless-*/x-app/Accept/x-client-request-id）
 	if tokenType == "oauth" && mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(req, reqStream)
 	}
@@ -7443,6 +7466,11 @@ func (s *GatewayService) enforceClaudeMimicryGuard(ctx context.Context, req *htt
 		runtimeSettings := s.settingService.GetClaudeMimicryRuntimeSettings(ctx)
 		profile = claude.ResolveClaudeCodeMimicryProfile(runtimeSettings.ProfileID)
 		guardMode = normalizeClaudeMimicryGuardMode(runtimeSettings.GuardMode)
+	}
+	modelProfile := claude.ResolveClaudeCodeMimicryModelProfile(gjson.GetBytes(body, "model").String())
+	profile.MessageBetas = modelProfile.MessageBetas
+	if req != nil && req.URL != nil && strings.Contains(req.URL.Path, "count_tokens") {
+		profile.MessageBetas = modelProfile.CountTokensBetas
 	}
 	audit := evaluateClaudeMimicryGuard(req, body, profile, guardMode)
 	if !audit.OK {
@@ -7592,7 +7620,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 }
 
 // getBetaHeader 处理 anthropic-beta header。
-// 真实 Claude Code CLI 2.1.195 默认不携带 oauth-2025-04-20；该函数不再自动追加它。
+// 真实 Claude Code CLI 2.1.197 默认不携带 oauth-2025-04-20；该函数不再自动追加它。
 func (s *GatewayService) getBetaHeader(modelID string, clientBetaHeader string) string {
 	if strings.TrimSpace(clientBetaHeader) != "" {
 		return clientBetaHeader
@@ -7782,7 +7810,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
 			// mimic 路径强制使用当前 Claude Code profile beta，不透传客户端 beta。
-			requiredBetas := claude.FullClaudeCodeMimicryBetas()
+			requiredBetas := claude.ClaudeCodeMimicryMessageBetasForModel(modelID)
 			if needsExtendedCacheTTL {
 				requiredBetas = append(requiredBetas, claude.BetaExtendedCacheTTL)
 			}
@@ -7820,8 +7848,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 // 计算纯函数。语义与 computeFinalAnthropicBeta 对齐，但备份了 count_tokens 独有的
 // 两条特殊规则：
 //
-//   - OAuth mimic：requiredBetas 为 FullClaudeCodeMimicryBetas + BetaTokenCounting
-//     （与 messages 不同的是：不按 haiku 排除；count_tokens 始终携带 token-counting beta）
+//   - OAuth mimic：requiredBetas 为对应模型的 Claude Code profile betas + BetaTokenCounting
 //   - OAuth 透传 + 客户端未传 anthropic-beta：补齐 CountTokensBetaHeader
 //   - OAuth 透传 + 客户端传了：补齐 BetaTokenCounting（如果未含）
 //
@@ -7842,7 +7869,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
-			requiredBetas := claude.DefaultClaudeCodeMimicryProfile().CountTokensBetas
+			requiredBetas := claude.ClaudeCodeMimicryCountTokensBetasForModel(modelID)
 			if needsExtendedCacheTTL {
 				requiredBetas = append(requiredBetas, claude.BetaExtendedCacheTTL)
 			}
@@ -8156,7 +8183,7 @@ var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream
 // headers when using Claude Code-scoped OAuth credentials.
-func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
+func applyClaudeCodeMimicHeaders(req *http.Request, _ bool) {
 	if req == nil {
 		return
 	}
@@ -8173,9 +8200,6 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
 	// Real Claude CLI uses Accept: application/json (even for streaming).
 	setHeaderRaw(req.Header, "Accept", "application/json")
 	setHeaderRaw(req.Header, "Accept-Encoding", "gzip, deflate, br, zstd")
-	if isStream {
-		setHeaderRaw(req.Header, "x-stainless-helper-method", "stream")
-	}
 	// Real Claude CLI 每个请求都会生成一个新的 UUID 放在 x-client-request-id。
 	// 上游会以此作为会话/请求指纹的一部分，缺失或重复都可能触发第三方判定。
 	if getHeaderRaw(req.Header, "x-client-request-id") == "" {

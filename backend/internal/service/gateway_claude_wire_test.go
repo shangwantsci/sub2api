@@ -67,23 +67,34 @@ func (r *sequentialClaudeWireRecorder) DoWithTLS(req *http.Request, _ string, _ 
 	return r.responses[idx], nil
 }
 
-func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequest(t *testing.T) {
+func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestUsesModelProfiles(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	recorder := &sequentialClaudeWireRecorder{
-		responses: []*http.Response{claudeWireMessageOKResponse()},
+	for _, model := range []string{
+		"claude-opus-4-8",
+		"claude-sonnet-5",
+		"claude-haiku-4-5-20251001",
+		"claude-fable-5",
+	} {
+		t.Run(model, func(t *testing.T) {
+			recorder := &sequentialClaudeWireRecorder{
+				responses: []*http.Response{claudeWireMessageOKResponse()},
+			}
+			svc := newClaudeWireGatewayService(t, recorder)
+			account := claudeWireOAuthAccount()
+			c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages?beta=true")
+			body := []byte(fmt.Sprintf(`{"model":%q,"system":"project rules","messages":[{"role":"user","content":"hello"}],"stream":false}`, model))
+			parsed := mustParseClaudeWireRequest(t, body)
+
+			result, err := svc.Forward(context.Background(), c, account, parsed)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, recorder.requests, 1)
+			assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+			require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
+			require.False(t, gjson.GetBytes(recorder.requests[0].body, "fallbacks").Exists())
+		})
 	}
-	svc := newClaudeWireGatewayService(t, recorder)
-	account := claudeWireOAuthAccount()
-	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages?beta=true")
-	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	parsed := mustParseClaudeWireRequest(t, body)
-
-	result, err := svc.Forward(context.Background(), c, account, parsed)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, recorder.requests, 1)
-	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
 }
 
 func TestGatewayService_ClaudeOAuthSyntheticMimicCountTokensWireRequest(t *testing.T) {
@@ -102,6 +113,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicCountTokensWireRequest(t *testi
 	require.NoError(t, err)
 	require.Len(t, recorder.requests, 1)
 	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages/count_tokens?beta=true", true, "", true, false)
+	require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
 }
 
 // This lightweight recorder covers service-level retry/rebuild wire requests.
@@ -282,21 +294,22 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 	}
 	require.Equal(t, "application/json", getHeaderRaw(got.req.Header, "Accept"))
 	require.Contains(t, getHeaderRaw(got.req.Header, "Accept-Encoding"), "gzip, deflate, br, zstd")
+	require.Empty(t, getHeaderRaw(got.req.Header, "x-stainless-helper-method"))
 
-	profile := claude.DefaultClaudeCodeMimicryProfile()
-	wantBetas := profile.MessageBetas
+	modelProfile := claude.ResolveClaudeCodeMimicryModelProfile(gjson.GetBytes(got.body, "model").String())
+	wantBetas := modelProfile.MessageBetas
 	if wantTokenCounting {
-		wantBetas = profile.CountTokensBetas
+		wantBetas = modelProfile.CountTokensBetas
 	}
 	gotBetas := parseClaudeWireBetaTokens(getHeaderRaw(got.req.Header, "anthropic-beta"))
-	require.ElementsMatch(t, wantBetas, gotBetas)
+	require.Equal(t, wantBetas, gotBetas)
 	require.NotContains(t, gotBetas, claude.BetaOAuth)
 
 	system := gjson.GetBytes(got.body, "system")
 	require.True(t, system.IsArray(), "system should be an array: %s", string(got.body))
 	require.Len(t, system.Array(), 3)
 	billingText := findClaudeWireBillingText(system)
-	require.Contains(t, billingText, "cc_version=2.1.195.")
+	require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+".")
 	require.Contains(t, billingText, "cc_entrypoint=sdk-cli")
 	require.NotContains(t, billingText, "cch=")
 
@@ -312,13 +325,22 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 	require.Equal(t, parsedUserID.SessionID, getHeaderRaw(got.req.Header, "X-Claude-Code-Session-Id"))
 
 	if wantThinkingDefaults {
-		require.JSONEq(t, `{"type":"adaptive"}`, gjson.GetBytes(got.body, "thinking").Raw)
+		if modelProfile.DefaultThinkingBudgetTokens > 0 {
+			require.JSONEq(t, fmt.Sprintf(`{"type":%q,"budget_tokens":%d}`, modelProfile.DefaultThinkingType, modelProfile.DefaultThinkingBudgetTokens), gjson.GetBytes(got.body, "thinking").Raw)
+		} else {
+			require.JSONEq(t, fmt.Sprintf(`{"type":%q}`, modelProfile.DefaultThinkingType), gjson.GetBytes(got.body, "thinking").Raw)
+		}
 		edits := gjson.GetBytes(got.body, "context_management.edits")
 		require.True(t, edits.IsArray())
 		require.Len(t, edits.Array(), 1)
 		require.JSONEq(t, `[{"type":"clear_thinking_20251015","keep":"all"}]`, edits.Raw)
 	}
-	require.JSONEq(t, `{"effort":"high"}`, gjson.GetBytes(got.body, "output_config").Raw)
+	require.Equal(t, int64(modelProfile.DefaultMaxTokens), gjson.GetBytes(got.body, "max_tokens").Int())
+	if modelProfile.DefaultOutputConfigEffort != "" {
+		require.JSONEq(t, fmt.Sprintf(`{"effort":%q}`, modelProfile.DefaultOutputConfigEffort), gjson.GetBytes(got.body, "output_config").Raw)
+	} else {
+		require.False(t, gjson.GetBytes(got.body, "output_config").Exists())
+	}
 	if wantStreamFalse {
 		require.True(t, gjson.GetBytes(got.body, "stream").Exists())
 		require.False(t, gjson.GetBytes(got.body, "stream").Bool())

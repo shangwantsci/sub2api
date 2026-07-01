@@ -528,7 +528,7 @@ func TestRewriteSystemForNonClaudeCode_UsesCapturedAgentSDKIdentity(t *testing.T
 
 	system := gjson.GetBytes(result, "system")
 	require.True(t, system.IsArray())
-	require.Contains(t, system.Array()[0].Get("text").String(), "cc_version=2.1.195.")
+	require.Contains(t, system.Array()[0].Get("text").String(), "cc_version="+claude.CLICurrentVersion+".")
 	require.Contains(t, system.Array()[0].Get("text").String(), "cc_entrypoint=sdk-cli")
 	require.NotContains(t, system.Array()[0].Get("text").String(), "cch=")
 	require.Equal(t, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", system.Array()[1].Get("text").String())

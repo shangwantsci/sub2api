@@ -129,6 +129,27 @@ func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {
 	require.InDelta(t, 5e-7, got.CacheReadInputTokenCost, 1e-12)
 }
 
+func TestDefaultPricingIncludesClaudeSonnet5StableSonnetPricing(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	svc := &PricingService{}
+	pricingData, err := svc.parsePricingData(data)
+	require.NoError(t, err)
+	svc.pricingData = pricingData
+
+	got := svc.GetModelPricing("claude-sonnet-5")
+	require.NotNil(t, got)
+	require.Equal(t, "anthropic", got.LiteLLMProvider)
+	require.Equal(t, "chat", got.Mode)
+	require.InDelta(t, 3e-6, got.InputCostPerToken, 1e-12)
+	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 3.75e-6, got.CacheCreationInputTokenCost, 1e-12)
+	require.InDelta(t, 6e-6, got.CacheCreationInputTokenCostAbove1hr, 1e-12)
+	require.InDelta(t, 3e-7, got.CacheReadInputTokenCost, 1e-12)
+	require.True(t, got.SupportsPromptCaching)
+}
+
 func TestGetModelPricing_Gpt54MiniUsesDedicatedStaticFallbackWhenRemoteMissing(t *testing.T) {
 	svc := &PricingService{
 		pricingData: map[string]*LiteLLMModelPricing{

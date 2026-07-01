@@ -151,7 +151,7 @@ func TestComputeFinalAnthropicBeta_OAuthMimic_Haiku_UsesCapturedProfileBetas(t *
 	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-haiku-4-5", http.Header{}, []byte(`{}`), nil)
 	require.True(t, ok)
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaContextManagement),
-		"OAuth mimic 始终合成 Claude Code 2.1.195 profile beta")
+		"OAuth mimic 始终合成 Claude Code 2.1.197 profile beta")
 	require.False(t, anthropicBetaTokensContains(final, claude.BetaOAuth))
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaInterleavedThinking))
 }
@@ -416,7 +416,7 @@ func TestBuildUpstreamRequest_OAuthMimicHaiku_PreservesContextManagementEndToEnd
 		Status:      StatusActive,
 		Schedulable: true,
 	}
-	// synthetic mimic 始终使用 Claude Code 2.1.195 profile beta，haiku 也保留 context-management。
+	// synthetic mimic 始终使用 Claude Code 2.1.197 profile beta，haiku 也保留 context-management。
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
 	req, _, err := svc.buildUpstreamRequest(

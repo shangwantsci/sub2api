@@ -843,7 +843,7 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 	}
 }
 
-func TestGatewayService_AnthropicOAuthMimicHaiku_PreservesSystemCacheControlTTLAndBeta(t *testing.T) {
+func TestGatewayService_AnthropicOAuthMimicHaiku_RewritesSystemAndMigratesCacheControlTTL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -896,8 +896,12 @@ func TestGatewayService_AnthropicOAuthMimicHaiku_PreservesSystemCacheControlTTLA
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
 
-	require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, "system.0.cache_control.type").String())
-	require.Equal(t, "1h", gjson.GetBytes(upstream.lastBody, "system.0.cache_control.ttl").String())
+	system := gjson.GetBytes(upstream.lastBody, "system")
+	require.True(t, system.IsArray())
+	require.Len(t, system.Array(), 3)
+	require.Equal(t, "ephemeral", gjson.GetBytes(upstream.lastBody, "messages.0.content.0.cache_control.type").String())
+	require.Equal(t, "1h", gjson.GetBytes(upstream.lastBody, "messages.0.content.0.cache_control.ttl").String())
+	require.Contains(t, gjson.GetBytes(upstream.lastBody, "messages.0.content.0.text").String(), "Cached project instructions")
 	require.Contains(t, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"), claude.BetaExtendedCacheTTL)
 }
 

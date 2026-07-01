@@ -7,7 +7,7 @@ import "strings"
 
 // Beta header 常量
 //
-// 这里的默认组合对齐本机 Claude Code CLI 2.1.195 受控抓包结果。
+// 这里的默认组合对齐本机 Claude Code CLI 2.1.197 受控抓包结果。
 const (
 	BetaOAuth                    = "oauth-2025-04-20"
 	BetaClaudeCode               = "claude-code-20250219"
@@ -17,12 +17,16 @@ const (
 	BetaContext1M                = "context-1m-2025-08-07"
 	BetaFastMode                 = "fast-mode-2026-02-01"
 
-	BetaPromptCachingScope = "prompt-caching-scope-2026-01-05"
-	BetaEffort             = "effort-2025-11-24"
-	BetaRedactThinking     = "redact-thinking-2026-02-12"
-	BetaContextManagement  = "context-management-2025-06-27"
-	BetaExtendedCacheTTL   = "extended-cache-ttl-2025-04-11"
-	BetaThinkingTokenCount = "thinking-token-count-2026-05-13"
+	BetaPromptCachingScope    = "prompt-caching-scope-2026-01-05"
+	BetaEffort                = "effort-2025-11-24"
+	BetaRedactThinking        = "redact-thinking-2026-02-12"
+	BetaContextManagement     = "context-management-2025-06-27"
+	BetaExtendedCacheTTL      = "extended-cache-ttl-2025-04-11"
+	BetaThinkingTokenCount    = "thinking-token-count-2026-05-13"
+	BetaMidConversationSystem = "mid-conversation-system-2026-04-07"
+	BetaAdvancedToolUse       = "advanced-tool-use-2025-11-20"
+	BetaServerSideFallback    = "server-side-fallback-2026-06-01"
+	BetaFallbackCredit        = "fallback-credit-2026-06-01"
 )
 
 // DroppedBetas 是转发时需要从 anthropic-beta header 中移除的 beta token 列表。
@@ -30,7 +34,7 @@ const (
 var DroppedBetas = []string{}
 
 // DefaultBetaHeader Claude Code 客户端默认的 anthropic-beta header
-const DefaultBetaHeader = BetaClaudeCode + "," + BetaInterleavedThinking + "," + BetaThinkingTokenCount + "," + BetaContextManagement + "," + BetaPromptCachingScope + "," + BetaEffort
+const DefaultBetaHeader = BetaClaudeCode + "," + BetaInterleavedThinking + "," + BetaThinkingTokenCount + "," + BetaContextManagement + "," + BetaPromptCachingScope + "," + BetaMidConversationSystem + "," + BetaAdvancedToolUse + "," + BetaEffort
 
 // MessageBetaHeaderNoTools /v1/messages 在无工具时的 beta header
 //
@@ -45,8 +49,8 @@ const MessageBetaHeaderWithTools = BetaClaudeCode + "," + BetaInterleavedThinkin
 // CountTokensBetaHeader count_tokens 请求使用的 anthropic-beta header
 const CountTokensBetaHeader = DefaultBetaHeader + "," + BetaTokenCounting
 
-// HaikuBetaHeader Haiku 模型使用的 anthropic-beta header（不需要 claude-code beta）
-const HaikuBetaHeader = BetaInterleavedThinking
+// HaikuBetaHeader Haiku 模型使用的 anthropic-beta header。
+const HaikuBetaHeader = BetaInterleavedThinking + "," + BetaThinkingTokenCount + "," + BetaContextManagement + "," + BetaPromptCachingScope + "," + BetaClaudeCode + "," + BetaAdvancedToolUse
 
 // APIKeyBetaHeader API-key 账号建议使用的 anthropic-beta header（不包含 oauth）
 const APIKeyBetaHeader = BetaClaudeCode + "," + BetaInterleavedThinking + "," + BetaFineGrainedToolStreaming
@@ -62,11 +66,11 @@ const DefaultCacheControlTTL = "5m"
 // CLICurrentVersion 是 sub2api 当前对外伪装的 Claude Code CLI 版本号（三段 semver）。
 // 用于 billing attribution block 中的 cc_version=X.Y.Z.{fp} 前缀以及 fingerprint 计算。
 // 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
-const CLICurrentVersion = "2.1.195"
+const CLICurrentVersion = "2.1.197"
 
 const (
 	// DefaultClaudeCodeMimicryProfileID 是默认 Claude Code 伪装 profile。
-	DefaultClaudeCodeMimicryProfileID = "cc-2.1.195-sdk-cli-macos-arm64"
+	DefaultClaudeCodeMimicryProfileID = "cc-2.1.197-sdk-cli-macos-arm64"
 	defaultClaudeAgentSDKSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 )
 
@@ -79,6 +83,18 @@ type ClaudeCodeMimicryProfile struct {
 	Headers           map[string]string
 	MessageBetas      []string
 	CountTokensBetas  []string
+}
+
+// ClaudeCodeMimicryModelProfile 描述 Claude Code 2.1.197 对不同模型族的
+// beta/body 默认形态差异。
+type ClaudeCodeMimicryModelProfile struct {
+	ID                          string
+	MessageBetas                []string
+	CountTokensBetas            []string
+	DefaultMaxTokens            int
+	DefaultThinkingType         string
+	DefaultThinkingBudgetTokens int
+	DefaultOutputConfigEffort   string
 }
 
 var defaultClaudeCodeMimicryHeaders = map[string]string{
@@ -101,6 +117,8 @@ var defaultClaudeCodeMimicryMessageBetas = []string{
 	BetaThinkingTokenCount,
 	BetaContextManagement,
 	BetaPromptCachingScope,
+	BetaMidConversationSystem,
+	BetaAdvancedToolUse,
 	BetaEffort,
 }
 
@@ -110,8 +128,32 @@ var defaultClaudeCodeMimicryCountTokensBetas = []string{
 	BetaThinkingTokenCount,
 	BetaContextManagement,
 	BetaPromptCachingScope,
+	BetaMidConversationSystem,
+	BetaAdvancedToolUse,
 	BetaEffort,
 	BetaTokenCounting,
+}
+
+var claudeCodeMimicryHaikuMessageBetas = []string{
+	BetaInterleavedThinking,
+	BetaThinkingTokenCount,
+	BetaContextManagement,
+	BetaPromptCachingScope,
+	BetaClaudeCode,
+	BetaAdvancedToolUse,
+}
+
+var claudeCodeMimicryFableMessageBetas = []string{
+	BetaClaudeCode,
+	BetaInterleavedThinking,
+	BetaThinkingTokenCount,
+	BetaContextManagement,
+	BetaPromptCachingScope,
+	BetaMidConversationSystem,
+	BetaAdvancedToolUse,
+	BetaEffort,
+	BetaServerSideFallback,
+	BetaFallbackCredit,
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -126,7 +168,17 @@ func cloneStrings(values []string) []string {
 	return append([]string(nil), values...)
 }
 
-// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 2.1.195 profile。
+func withTokenCounting(values []string) []string {
+	out := cloneStrings(values)
+	for _, value := range out {
+		if value == BetaTokenCounting {
+			return out
+		}
+	}
+	return append(out, BetaTokenCounting)
+}
+
+// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 2.1.197 profile。
 func DefaultClaudeCodeMimicryProfile() ClaudeCodeMimicryProfile {
 	return ClaudeCodeMimicryProfile{
 		ID:                DefaultClaudeCodeMimicryProfileID,
@@ -149,17 +201,59 @@ func ResolveClaudeCodeMimicryProfile(id string) ClaudeCodeMimicryProfile {
 	}
 }
 
-// FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
-// 用于 OAuth 账号伪装成 Claude Code 时使用。
-// 顺序与真实 CLI 抓包一致。
+// ResolveClaudeCodeMimicryModelProfile 返回指定模型在 Claude Code 2.1.197
+// synthetic mimic 路径上的模型族 profile。未知模型保守按 Sonnet/Opus profile 处理。
+func ResolveClaudeCodeMimicryModelProfile(modelID string) ClaudeCodeMimicryModelProfile {
+	normalized := strings.ToLower(strings.TrimSpace(NormalizeModelID(modelID)))
+	switch {
+	case strings.Contains(normalized, "haiku"):
+		return ClaudeCodeMimicryModelProfile{
+			ID:                          "haiku",
+			MessageBetas:                cloneStrings(claudeCodeMimicryHaikuMessageBetas),
+			CountTokensBetas:            withTokenCounting(claudeCodeMimicryHaikuMessageBetas),
+			DefaultMaxTokens:            32000,
+			DefaultThinkingType:         "enabled",
+			DefaultThinkingBudgetTokens: 31999,
+		}
+	case strings.Contains(normalized, "fable"):
+		return ClaudeCodeMimicryModelProfile{
+			ID:                        "fable",
+			MessageBetas:              cloneStrings(claudeCodeMimicryFableMessageBetas),
+			CountTokensBetas:          withTokenCounting(claudeCodeMimicryFableMessageBetas),
+			DefaultMaxTokens:          64000,
+			DefaultThinkingType:       "adaptive",
+			DefaultOutputConfigEffort: "high",
+		}
+	default:
+		return ClaudeCodeMimicryModelProfile{
+			ID:                        "opus-sonnet",
+			MessageBetas:              cloneStrings(defaultClaudeCodeMimicryMessageBetas),
+			CountTokensBetas:          withTokenCounting(defaultClaudeCodeMimicryMessageBetas),
+			DefaultMaxTokens:          64000,
+			DefaultThinkingType:       "adaptive",
+			DefaultOutputConfigEffort: "high",
+		}
+	}
+}
+
+func ClaudeCodeMimicryMessageBetasForModel(modelID string) []string {
+	return ResolveClaudeCodeMimicryModelProfile(modelID).MessageBetas
+}
+
+func ClaudeCodeMimicryCountTokensBetasForModel(modelID string) []string {
+	return ResolveClaudeCodeMimicryModelProfile(modelID).CountTokensBetas
+}
+
+// FullClaudeCodeMimicryBetas 返回默认模型族最"像"真实 Claude Code CLI 的 beta 列表。
+// 新代码应优先使用 ClaudeCodeMimicryMessageBetasForModel，以便保留 Haiku/Fable
+// 等模型族的抓包差异。
 //
 // 使用建议：
-//   - OAuth 账号 + 非 haiku：追加这整份列表，再按需保留 client 带来的 beta。
-//   - OAuth 账号 + haiku：Anthropic 对 haiku 不做 third-party 判定，使用 HaikuBetaHeader 即可。
+//   - OAuth synthetic mimic：使用 ClaudeCodeMimicryMessageBetasForModel。
 //   - API-key 账号：不要使用本函数，参见 APIKeyBetaHeader。
 //   - 不默认加入 redact-thinking，避免上游抹除 thinking 内容；客户端显式传入时由合并逻辑保留。
 func FullClaudeCodeMimicryBetas() []string {
-	return cloneStrings(defaultClaudeCodeMimicryMessageBetas)
+	return ClaudeCodeMimicryMessageBetasForModel("")
 }
 
 // DefaultHeaders 是 Claude Code 客户端默认请求头。
@@ -180,6 +274,12 @@ var DefaultModels = []Model{
 		Type:        "model",
 		DisplayName: "Claude Fable 5",
 		CreatedAt:   "2026-06-09T00:00:00Z",
+	},
+	{
+		ID:          "claude-sonnet-5",
+		Type:        "model",
+		DisplayName: "Claude Sonnet 5",
+		CreatedAt:   "2026-06-30T00:00:00Z",
 	},
 	{
 		ID:          "claude-opus-4-5-20251101",

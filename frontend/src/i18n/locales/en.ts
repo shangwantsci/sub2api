@@ -5815,7 +5815,7 @@ export default {
         cchSigning: 'CCH Signing',
         cchSigningHint: 'Sign the billing header in forwarded requests with CCH hash. When disabled, the placeholder is preserved.',
         claudeCodeMimicryProfile: 'Claude Code Mimicry Profile',
-        claudeCodeMimicryProfile2195: 'Claude Code 2.1.195 / macOS arm64',
+        claudeCodeMimicryProfile2197: 'Claude Code 2.1.197 / macOS arm64',
         claudeCodeMimicryProfileHint: 'Controls the OAuth mimic path User-Agent, X-Stainless headers, beta set, and billing entrypoint.',
         claudeMimicryGuardMode: 'Mimicry Guard Mode',
         claudeMimicryGuardModeHint: 'warn logs anomalies; block rejects synthetic requests that clearly break mimicry; off disables the audit.',

@@ -138,15 +138,15 @@ func TestFullClaudeCodeMimicryBetas_DoesNotDefaultRedactThinking(t *testing.T) {
 	require.NotContains(t, required, claude.BetaFineGrainedToolStreaming)
 }
 
-func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2195Baseline(t *testing.T) {
+func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2197Baseline(t *testing.T) {
 	profile := claude.DefaultClaudeCodeMimicryProfile()
 
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, profile.ID)
-	require.Equal(t, "cc-2.1.195-sdk-cli-macos-arm64", profile.ID)
-	require.Equal(t, "2.1.195", profile.CLIVersion)
+	require.Equal(t, "cc-2.1.197-sdk-cli-macos-arm64", profile.ID)
+	require.Equal(t, "2.1.197", profile.CLIVersion)
 	require.Equal(t, "sdk-cli", profile.BillingEntrypoint)
 	require.Equal(t, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", profile.SystemPrompt)
-	require.Equal(t, "claude-cli/2.1.195 (external, sdk-cli)", profile.Headers["User-Agent"])
+	require.Equal(t, "claude-cli/2.1.197 (external, sdk-cli)", profile.Headers["User-Agent"])
 	require.Equal(t, "0.94.0", profile.Headers["X-Stainless-Package-Version"])
 	require.Equal(t, "v26.3.0", profile.Headers["X-Stainless-Runtime-Version"])
 	require.Equal(t, "MacOS", profile.Headers["X-Stainless-OS"])
@@ -156,14 +156,60 @@ func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2195Baseline(t *t
 
 func TestComputeFinalAnthropicBeta_OAuthMimicUsesCapturedProfileBetasWithoutOAuth(t *testing.T) {
 	svc := &GatewayService{}
-	profile := claude.DefaultClaudeCodeMimicryProfile()
+	profile := claude.ResolveClaudeCodeMimicryModelProfile("claude-sonnet-5")
 
-	got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", nil, []byte(`{"model":"claude-sonnet-4-6"}`), nil)
+	got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-5", nil, []byte(`{"model":"claude-sonnet-5"}`), nil)
 
 	require.True(t, shouldSet)
 	require.Equal(t, strings.Join(profile.MessageBetas, ","), got)
 	require.NotContains(t, got, claude.BetaOAuth)
 	require.Contains(t, got, claude.BetaThinkingTokenCount)
+	require.Contains(t, got, claude.BetaAdvancedToolUse)
+	require.Contains(t, got, claude.BetaMidConversationSystem)
+}
+
+func TestComputeFinalAnthropicBeta_OAuthMimicUsesModelSpecificProfileBetas(t *testing.T) {
+	svc := &GatewayService{}
+
+	tests := []struct {
+		name          string
+		model         string
+		wantContains  []string
+		wantNotTokens []string
+	}{
+		{
+			name:         "haiku",
+			model:        "claude-haiku-4-5-20251001",
+			wantContains: []string{claude.BetaAdvancedToolUse, claude.BetaContextManagement, claude.BetaClaudeCode},
+			wantNotTokens: []string{
+				claude.BetaEffort,
+				claude.BetaMidConversationSystem,
+			},
+		},
+		{
+			name:         "fable",
+			model:        "claude-fable-5",
+			wantContains: []string{claude.BetaServerSideFallback, claude.BetaFallbackCredit, claude.BetaEffort},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := claude.ResolveClaudeCodeMimicryModelProfile(tt.model)
+
+			got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil)
+
+			require.True(t, shouldSet)
+			require.Equal(t, strings.Join(profile.MessageBetas, ","), got)
+			require.NotContains(t, got, claude.BetaOAuth)
+			for _, token := range tt.wantContains {
+				require.Contains(t, got, token)
+			}
+			for _, token := range tt.wantNotTokens {
+				require.NotContains(t, got, token)
+			}
+		})
+	}
 }
 
 func TestComputeFinalAnthropicBeta_RealClaudeCodeDoesNotAppendOAuth(t *testing.T) {
@@ -196,7 +242,7 @@ func TestApplyClaudeCodeMimicHeaders_UsesCapturedProfileHeaders(t *testing.T) {
 	}
 	require.Equal(t, "application/json", getHeaderRaw(req.Header, "Accept"))
 	require.Equal(t, "gzip, deflate, br, zstd", getHeaderRaw(req.Header, "Accept-Encoding"))
-	require.Equal(t, "stream", getHeaderRaw(req.Header, "x-stainless-helper-method"))
+	require.Empty(t, getHeaderRaw(req.Header, "x-stainless-helper-method"))
 	require.NotEmpty(t, getHeaderRaw(req.Header, "x-client-request-id"))
 }
 
