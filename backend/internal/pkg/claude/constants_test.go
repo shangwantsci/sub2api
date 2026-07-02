@@ -18,7 +18,7 @@ func TestDefaultModelsContainsClaudeSonnet5(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, "model", got.Type)
 	require.Equal(t, "Claude Sonnet 5", got.DisplayName)
-	require.Equal(t, "2026-06-30T00:00:00Z", got.CreatedAt)
+	require.Equal(t, "2026-07-01T00:00:00Z", got.CreatedAt)
 	require.Contains(t, DefaultModelIDs(), "claude-sonnet-5")
 }
 

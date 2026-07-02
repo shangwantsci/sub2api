@@ -128,6 +128,21 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	require.Contains(t, resultStr, `"max_tokens":64000`)
 }
 
+func TestApplyClaudeCodeOAuthMimicryToBody_EnsuresModelAwareBodyDefaultsForCompatOAuth(t *testing.T) {
+	svc := &GatewayService{}
+	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"claude-sonnet-5","temperature":0.2,"messages":[{"role":"user","content":"hello"}]}`)
+
+	result := svc.applyClaudeCodeOAuthMimicryToBody(context.Background(), nil, account, body, nil, "claude-sonnet-5")
+
+	require.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
+	require.False(t, gjson.GetBytes(result, "thinking.budget_tokens").Exists())
+	require.Equal(t, "high", gjson.GetBytes(result, "output_config.effort").String())
+	require.Equal(t, "clear_thinking_20251015", gjson.GetBytes(result, "context_management.edits.0.type").String())
+	require.False(t, gjson.GetBytes(result, "temperature").Exists())
+	require.True(t, gjson.GetBytes(result, "tools").IsArray())
+}
+
 func TestInjectClaudeCodePrompt_PreservesFieldOrder(t *testing.T) {
 	body := []byte(`{"alpha":1,"system":[{"id":"block-1","type":"text","text":"Custom"}],"messages":[],"omega":2}`)
 
