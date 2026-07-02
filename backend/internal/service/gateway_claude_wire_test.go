@@ -91,10 +91,54 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestUsesModelPro
 			require.NotNil(t, result)
 			require.Len(t, recorder.requests, 1)
 			assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+			assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "project rules", "hello")
 			require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
 			require.False(t, gjson.GetBytes(recorder.requests[0].body, "fallbacks").Exists())
 		})
 	}
+}
+
+func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestWithoutSystemUsesFinalUserFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := &sequentialClaudeWireRecorder{
+		responses: []*http.Response{claudeWireMessageOKResponse()},
+	}
+	svc := newClaudeWireGatewayService(t, recorder)
+	account := claudeWireOAuthAccount()
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages?beta=true")
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello without system"}],"stream":false}`)
+	parsed := mustParseClaudeWireRequest(t, body)
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, recorder.requests, 1)
+	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+	assertClaudeWireUnmigratedFirstUser(t, recorder.requests[0].body, "hello without system")
+	require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
+}
+
+func TestGatewayService_ClaudeOAuthSyntheticMimicMigratesSystemCacheControlToInstructionMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := &sequentialClaudeWireRecorder{
+		responses: []*http.Response{claudeWireMessageOKResponse()},
+	}
+	svc := newClaudeWireGatewayService(t, recorder)
+	account := claudeWireOAuthAccount()
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages?beta=true")
+	body := []byte(`{"model":"claude-sonnet-4-6","system":[{"type":"text","text":"cached project rules","cache_control":{"type":"ephemeral","ttl":"5m"}}],"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	parsed := mustParseClaudeWireRequest(t, body)
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, recorder.requests, 1)
+	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "cached project rules", "hello")
+	require.Equal(t, "ephemeral", gjson.GetBytes(recorder.requests[0].body, "messages.0.content.0.cache_control.type").String())
+	require.Equal(t, "5m", gjson.GetBytes(recorder.requests[0].body, "messages.0.content.0.cache_control.ttl").String())
 }
 
 func TestGatewayService_ClaudeOAuthSyntheticMimicCountTokensWireRequest(t *testing.T) {
@@ -113,6 +157,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicCountTokensWireRequest(t *testi
 	require.NoError(t, err)
 	require.Len(t, recorder.requests, 1)
 	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages/count_tokens?beta=true", true, "", true, false)
+	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "project rules", "count me")
 	require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
 }
 
@@ -211,6 +256,7 @@ func TestGatewayService_ClaudeOAuthFakeClaudeCLIUserAgentStillUsesSyntheticMimic
 	require.NotNil(t, result)
 	require.Len(t, recorder.requests, 1)
 	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, fakeUserID, true, true)
+	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "fake claude code system", "hello")
 }
 
 func newClaudeWireGatewayService(t *testing.T, upstream HTTPUpstream) *GatewayService {
@@ -308,8 +354,13 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 	system := gjson.GetBytes(got.body, "system")
 	require.True(t, system.IsArray(), "system should be an array: %s", string(got.body))
 	require.Len(t, system.Array(), 3)
+	systemBlocks := system.Array()
+	require.Contains(t, systemBlocks[0].Get("text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, strings.TrimSpace(claudeCodeSystemPrompt), strings.TrimSpace(systemBlocks[1].Get("text").String()))
+	require.NotEmpty(t, strings.TrimSpace(systemBlocks[2].Get("text").String()))
+	require.Equal(t, "ephemeral", systemBlocks[2].Get("cache_control.type").String())
 	billingText := findClaudeWireBillingText(system)
-	require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+".")
+	require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+"."+computeClaudeCodeFingerprint(got.body, claude.CLICurrentVersion))
 	require.Contains(t, billingText, "cc_entrypoint=sdk-cli")
 	require.NotContains(t, billingText, "cch=")
 
@@ -346,7 +397,39 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 		require.False(t, gjson.GetBytes(got.body, "stream").Bool())
 	}
 	require.NotNil(t, got.tlsProfile)
-	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", got.tlsProfile.Name)
+	require.Equal(t, builtInClaudeCodeTLSProfileName, got.tlsProfile.Name)
+}
+
+func assertClaudeWireMigratedSystemMessages(t *testing.T, body []byte, originalSystem string, originalUser string) {
+	t.Helper()
+	require.Equal(t, "user", gjson.GetBytes(body, "messages.0.role").String())
+	require.Equal(t, "[System Instructions]\n"+originalSystem, claudeWireMessageFirstText(body, 0))
+	require.Equal(t, "assistant", gjson.GetBytes(body, "messages.1.role").String())
+	require.Equal(t, "Understood. I will follow these instructions.", claudeWireMessageFirstText(body, 1))
+	require.Equal(t, "user", gjson.GetBytes(body, "messages.2.role").String())
+	require.Equal(t, originalUser, claudeWireMessageFirstText(body, 2))
+}
+
+func assertClaudeWireUnmigratedFirstUser(t *testing.T, body []byte, originalUser string) {
+	t.Helper()
+	require.Equal(t, "user", gjson.GetBytes(body, "messages.0.role").String())
+	require.Equal(t, originalUser, claudeWireMessageFirstText(body, 0))
+	require.False(t, gjson.GetBytes(body, "messages.1.role").Exists())
+}
+
+func claudeWireMessageFirstText(body []byte, index int) string {
+	content := gjson.GetBytes(body, fmt.Sprintf("messages.%d.content", index))
+	if content.Type == gjson.String {
+		return content.String()
+	}
+	if content.IsArray() {
+		for _, block := range content.Array() {
+			if block.Get("type").String() == "text" {
+				return block.Get("text").String()
+			}
+		}
+	}
+	return ""
 }
 
 func findClaudeWireBillingText(system gjson.Result) string {

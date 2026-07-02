@@ -836,7 +836,7 @@ func TestGatewayService_ClaudeMimicTLSProfile_DefaultsForSyntheticMimic(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastTLSProfile)
-	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+	require.Equal(t, builtInClaudeCodeTLSProfileName, upstream.lastTLSProfile.Name)
 }
 
 func TestGatewayService_ClaudeMimicTLSProfile_DoesNotDefaultForAPIKeyPath(t *testing.T) {
@@ -1004,7 +1004,7 @@ func TestGatewayService_ClaudeMimicTLSProfile_ExplicitTrueUsesConfiguredDefault(
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastTLSProfile)
-	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+	require.Equal(t, builtInClaudeCodeTLSProfileName, upstream.lastTLSProfile.Name)
 }
 
 func TestGatewayService_ClaudeMimicTLSProfile_ProfileIDWithoutEnableUsesBoundProfile(t *testing.T) {
@@ -1153,7 +1153,7 @@ func TestGatewayService_ClaudeMimicTLSProfile_DefaultsForCountTokensSyntheticMim
 
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastTLSProfile)
-	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+	require.Equal(t, builtInClaudeCodeTLSProfileName, upstream.lastTLSProfile.Name)
 }
 
 func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsMatchMessages(t *testing.T) {

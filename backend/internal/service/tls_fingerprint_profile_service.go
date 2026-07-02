@@ -11,7 +11,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
-const builtInClaudeCodeTLSProfileName = "Built-in Default (Claude Code 2.1.195)"
+// 内置 Profile 名称保持版本中性：底层 uTLS 默认值最初来自 Claude Code 2.1.195；
+// 本轮真实抓包确认其中一个 Claude Code 2.1.197 官方 API ClientHello 仍与该
+// profile 一致。因同轮抓包也观测到官方 API 变体，名称不写死具体 CLI 版本。
+const builtInClaudeCodeTLSProfileName = "Built-in Default (Claude Code current observed profile)"
 
 // TLSFingerprintProfileRepository 定义 TLS 指纹模板的数据访问接口
 type TLSFingerprintProfileRepository interface {
@@ -205,7 +208,7 @@ func (s *TLSFingerprintProfileService) resolveConfiguredTLSProfile(account *Acco
 
 // ResolveTLSProfileForClaudeMimic 为 Anthropic OAuth/SetupToken 的 synthetic Claude Code
 // mimic 路径解析 TLS profile。显式账号配置优先生效；未配置时仅 synthetic mimic
-// 默认启用内置 Claude Code 2.1.195 TLS profile。
+// 默认启用内置 current observed Claude Code TLS profile。
 func (s *TLSFingerprintProfileService) ResolveTLSProfileForClaudeMimic(account *Account, mimicClaudeCode bool) *tlsfingerprint.Profile {
 	if account == nil {
 		return nil

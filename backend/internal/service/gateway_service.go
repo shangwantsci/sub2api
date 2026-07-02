@@ -5008,35 +5008,11 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	// 1. 提取原始 system prompt 文本及客户端声明的缓存断点。
 	originalSystemText, originalSystemCacheControl := extractSystemTextAndCacheControlForMigration(system)
 
-	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
-	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=sdk-cli;）
-	//    [1] "You are Claude Code..." 身份前缀 block（默认不带 cache_control）
-	//    [2] 工具无关的通用提示词扩充 block（带 cache_control 作为稳定缓存断点）
-	//
-	//    真实 CC 的 system 在身份前缀之后还有大段提示词，仅有 2 块会在块数/体量上明显
-	//    区别于真实 CLI。这里注入 claudeCodeSystemPromptExpansion（中性段落）把形态做到
-	//    接近真实，同时不注入会污染被代理用户行为的工具专属指令。
-	//
-	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
-	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
-	//    cch（见 buildBillingAttributionText）。
-	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
-	if blockErr != nil {
-		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
-		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "")
-	}
-	if blockErr != nil {
-		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
-		return body
-	}
-	out, ok := setJSONRawBytes(body, "system", buildJSONArrayRaw(systemBlocks))
-	if !ok {
-		logger.LegacyPrintf("service.gateway", "Warning: failed to set Claude Code system prompt")
-		return body
-	}
+	out := body
 
-	// 3. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头
-	//    模型仍通过 messages 接收完整指令，保留客户端功能
+	// 2. 先将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头。
+	//    billing attribution 的 fp 取决于最终 wire body 的第一条 user 文本，因此必须
+	//    先完成 messages 迁移，再构造 system blocks。
 	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
 	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
 		instructionBlock := map[string]any{
@@ -5058,7 +5034,7 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 		})
 		if err1 != nil || err2 != nil {
 			logger.LegacyPrintf("service.gateway", "Warning: failed to marshal system-to-messages injection")
-			return out
+			return body
 		}
 
 		// 重建 messages 数组：[instruction, ack, ...originalMessages]
@@ -5071,11 +5047,41 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 			})
 		}
 
-		if next, setOk := setJSONRawBytes(out, "messages", buildJSONArrayRaw(items)); setOk {
-			out = next
+		next, setOk := setJSONRawBytes(out, "messages", buildJSONArrayRaw(items))
+		if !setOk {
+			logger.LegacyPrintf("service.gateway", "Warning: failed to set system-to-messages injection")
+			return body
 		}
+		out = next
 	}
 
+	// 3. 基于最终 messages 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
+	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=sdk-cli;）
+	//    [1] "You are Claude Code..." 身份前缀 block（默认不带 cache_control）
+	//    [2] 工具无关的通用提示词扩充 block（带 cache_control 作为稳定缓存断点）
+	//
+	//    真实 CC 的 system 在身份前缀之后还有大段提示词，仅有 2 块会在块数/体量上明显
+	//    区别于真实 CLI。这里注入 claudeCodeSystemPromptExpansion（中性段落）把形态做到
+	//    接近真实，同时不注入会污染被代理用户行为的工具专属指令。
+	//
+	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
+	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
+	//    cch（见 buildBillingAttributionText）。
+	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(out, expansionPrompt, blocksConfig)
+	if blockErr != nil {
+		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
+		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(out, expansionPrompt, "")
+	}
+	if blockErr != nil {
+		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
+		return body
+	}
+	next, ok := setJSONRawBytes(out, "system", buildJSONArrayRaw(systemBlocks))
+	if !ok {
+		logger.LegacyPrintf("service.gateway", "Warning: failed to set Claude Code system prompt")
+		return body
+	}
+	out = next
 	return out
 }
 

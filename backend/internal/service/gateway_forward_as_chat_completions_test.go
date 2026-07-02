@@ -164,5 +164,5 @@ func TestForwardAsChatCompletions_AnthropicOAuthSyntheticMimicUsesDefaultTLSProf
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastTLSProfile)
-	require.Equal(t, "Built-in Default (Claude Code 2.1.195)", upstream.lastTLSProfile.Name)
+	require.Equal(t, builtInClaudeCodeTLSProfileName, upstream.lastTLSProfile.Name)
 }
