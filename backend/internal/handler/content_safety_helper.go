@@ -62,17 +62,25 @@ func writeContentSafetyErrorResponse(c *gin.Context, decision *service.ContentSa
 	if decision != nil && strings.TrimSpace(decision.Message) != "" {
 		message = decision.Message
 	}
+	policy := gin.H{
+		"category":       finding.Category,
+		"category_label": service.ContentSafetyCategoryLabel(finding.Category),
+		"request_id":     requestID,
+	}
+	if strings.TrimSpace(finding.Evidence.Excerpt) != "" {
+		policy["evidence"] = gin.H{
+			"source":  finding.Evidence.Source,
+			"excerpt": finding.Evidence.Excerpt,
+			"hash":    finding.Evidence.Hash,
+		}
+	}
 	c.JSON(contentSafetyStatus(decision), gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    code,
 			"code":    code,
 			"message": message,
-			"policy": gin.H{
-				"category":       finding.Category,
-				"category_label": service.ContentSafetyCategoryLabel(finding.Category),
-				"request_id":     requestID,
-			},
+			"policy":  policy,
 		},
 	})
 }
@@ -97,6 +105,13 @@ func logContentSafetyDecision(c *gin.Context, reqLog *zap.Logger, apiKey *servic
 		zap.String("action", decision.Action),
 		zap.Bool("blocked", decision.Blocked),
 		zap.Int("finding_count", len(decision.Findings)),
+	}
+	if decision.LogRedactedEvidence && strings.TrimSpace(finding.Evidence.Excerpt) != "" {
+		fields = append(fields,
+			zap.String("evidence_source", finding.Evidence.Source),
+			zap.String("evidence_excerpt", finding.Evidence.Excerpt),
+			zap.String("evidence_hash", finding.Evidence.Hash),
+		)
 	}
 	if decision.Blocked {
 		reqLog.Warn("content_safety_filter.blocked", fields...)

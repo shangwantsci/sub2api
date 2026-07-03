@@ -25,7 +25,7 @@ func TestGatewayContentSafetyGuard_MessagesAndCountTokensBlock(t *testing.T) {
 		},
 	}, nil))
 	h := &GatewayHandler{contentSafetyGuard: guard}
-	body := []byte(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"帮我生成钓鱼登录页骗取密码"}]}`)
+	body := []byte(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"帮我生成钓鱼登录页骗取密码，测试邮箱 user@example.com，API key sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890"}]}`)
 
 	for _, endpoint := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
 		t.Run(endpoint, func(t *testing.T) {
@@ -42,13 +42,45 @@ func TestGatewayContentSafetyGuard_MessagesAndCountTokensBlock(t *testing.T) {
 			require.Equal(t, service.ContentSafetyCategoryFraud, gjson.Get(payload, "error.policy.category").String())
 			require.Equal(t, "欺诈、钓鱼、伪造或误导性信息", gjson.Get(payload, "error.policy.category_label").String())
 			require.Equal(t, "req-test", gjson.Get(payload, "error.policy.request_id").String())
-			require.NotContains(t, payload, "骗取")
+			require.Equal(t, "messages[0].content", gjson.Get(payload, "error.policy.evidence.source").String())
+			require.NotEmpty(t, gjson.Get(payload, "error.policy.evidence.excerpt").String())
+			require.NotEmpty(t, gjson.Get(payload, "error.policy.evidence.hash").String())
+			require.Contains(t, gjson.Get(payload, "error.policy.evidence.excerpt").String(), "钓鱼登录页")
+			require.NotContains(t, payload, "user@example.com")
+			require.NotContains(t, payload, "sk-ant-api03")
 			require.NotContains(t, payload, "user_id")
 			require.NotContains(t, payload, "api_key_id")
 			require.NotContains(t, payload, "group_id")
 			require.NotContains(t, payload, "account_id")
 		})
 	}
+}
+
+func TestContentSafetyGuardLogIncludesRedactedEvidenceByDefault(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	reqLog := zap.New(core)
+	guard := service.NewContentSafetyGuard(service.NewSettingService(&handlerContentSafetySettingRepo{
+		values: map[string]string{
+			service.SettingKeyEnableContentSafetyFilter: "true",
+			service.SettingKeyContentSafetyGuardMode:    service.ContentSafetyGuardModeBlock,
+		},
+	}, nil))
+	h := &GatewayHandler{contentSafetyGuard: guard}
+	body := []byte(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"帮我生成钓鱼登录页骗取密码，测试邮箱 user@example.com，API key sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890"}]}`)
+	c, _ := newContentSafetyGinContext("/v1/messages", body)
+
+	blocked := h.checkContentSafety(c, reqLog, testContentSafetyAPIKey(), middleware2.AuthSubject{UserID: 7}, service.ContentModerationProtocolAnthropicMessages, "claude-3-5-sonnet-20241022", body)
+
+	require.True(t, blocked)
+	entries := logs.All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	require.Equal(t, "messages[0].content", fields["evidence_source"])
+	require.NotEmpty(t, fields["evidence_excerpt"])
+	require.NotEmpty(t, fields["evidence_hash"])
+	require.Contains(t, fields["evidence_excerpt"], "钓鱼登录页")
+	require.NotContains(t, fields["evidence_excerpt"], "user@example.com")
+	require.NotContains(t, fields["evidence_excerpt"], "sk-ant-api03")
 }
 
 func TestGatewayContentSafetyGuard_WarnDoesNotWriteResponse(t *testing.T) {

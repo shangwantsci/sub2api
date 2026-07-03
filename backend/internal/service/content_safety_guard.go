@@ -2,10 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tidwall/gjson"
 )
@@ -42,8 +47,9 @@ const (
 )
 
 type ContentSafetyGuardSettings struct {
-	Enabled bool
-	Mode    string
+	Enabled             bool
+	Mode                string
+	LogRedactedEvidence bool
 }
 
 type ContentSafetyGuard struct {
@@ -70,20 +76,33 @@ type ContentSafetyCheckInput struct {
 }
 
 type ContentSafetyFinding struct {
-	Category string `json:"category"`
-	Severity string `json:"severity"`
-	Reason   string `json:"reason"`
+	Category string                `json:"category"`
+	Severity string                `json:"severity"`
+	Reason   string                `json:"reason"`
+	Evidence ContentSafetyEvidence `json:"evidence,omitempty"`
+}
+
+type ContentSafetyEvidence struct {
+	Source  string `json:"source,omitempty"`
+	Excerpt string `json:"excerpt,omitempty"`
+	Hash    string `json:"hash,omitempty"`
 }
 
 type ContentSafetyDecision struct {
-	Allowed        bool                   `json:"allowed"`
-	Blocked        bool                   `json:"blocked"`
-	Flagged        bool                   `json:"flagged"`
-	Action         string                 `json:"action"`
-	Mode           string                 `json:"mode"`
-	Message        string                 `json:"message"`
-	PrimaryFinding ContentSafetyFinding   `json:"primary_finding"`
-	Findings       []ContentSafetyFinding `json:"findings"`
+	Allowed             bool                   `json:"allowed"`
+	Blocked             bool                   `json:"blocked"`
+	Flagged             bool                   `json:"flagged"`
+	Action              string                 `json:"action"`
+	Mode                string                 `json:"mode"`
+	Message             string                 `json:"message"`
+	PrimaryFinding      ContentSafetyFinding   `json:"primary_finding"`
+	Findings            []ContentSafetyFinding `json:"findings"`
+	LogRedactedEvidence bool                   `json:"-"`
+}
+
+type contentSafetyTextFragment struct {
+	Source string
+	Text   string
 }
 
 func NewContentSafetyGuard(settingService *SettingService) *ContentSafetyGuard {
@@ -96,8 +115,9 @@ func NewContentSafetyGuard(settingService *SettingService) *ContentSafetyGuard {
 
 func DefaultContentSafetyGuardSettings() ContentSafetyGuardSettings {
 	return ContentSafetyGuardSettings{
-		Enabled: true,
-		Mode:    ContentSafetyGuardModeBlock,
+		Enabled:             true,
+		Mode:                ContentSafetyGuardModeBlock,
+		LogRedactedEvidence: true,
 	}
 }
 
@@ -157,6 +177,7 @@ func (s *SettingService) loadContentSafetyGuardSettings(ctx context.Context) (Co
 	values, err := s.settingRepo.GetMultiple(ctx, []string{
 		SettingKeyEnableContentSafetyFilter,
 		SettingKeyContentSafetyGuardMode,
+		SettingKeyContentSafetyLogRedactedEvidence,
 	})
 	if err != nil {
 		return settings, err
@@ -165,6 +186,9 @@ func (s *SettingService) loadContentSafetyGuardSettings(ctx context.Context) (Co
 		settings.Enabled = strings.TrimSpace(raw) == "true"
 	}
 	settings.Mode = NormalizeContentSafetyGuardMode(values[SettingKeyContentSafetyGuardMode])
+	if raw, ok := values[SettingKeyContentSafetyLogRedactedEvidence]; ok && strings.TrimSpace(raw) != "" {
+		settings.LogRedactedEvidence = !isFalseSettingValue(raw)
+	}
 	return settings, nil
 }
 
@@ -179,6 +203,7 @@ func (g *ContentSafetyGuard) Check(ctx context.Context, input ContentSafetyCheck
 	}
 	decision := EvaluateContentSafety(ContentSafetyInput{Protocol: input.Protocol, Body: input.Body})
 	decision.Mode = settings.Mode
+	decision.LogRedactedEvidence = settings.LogRedactedEvidence
 	if !decision.Flagged {
 		decision.Action = ContentSafetyActionAllow
 		decision.Allowed = true
@@ -257,8 +282,8 @@ func (g *ContentSafetyGuard) loadCachedContentSafetyGuardSettings() (contentSafe
 
 func EvaluateContentSafety(input ContentSafetyInput) *ContentSafetyDecision {
 	var findings []ContentSafetyFinding
-	for _, text := range ExtractContentSafetyTextFragments(input.Protocol, input.Body) {
-		findings = mergeContentSafetyFindings(findings, classifyContentSafetyText(text))
+	for _, fragment := range extractContentSafetyTextFragments(input.Protocol, input.Body) {
+		findings = mergeContentSafetyFindings(findings, classifyContentSafetyFragment(fragment))
 	}
 	decision := &ContentSafetyDecision{
 		Allowed:  true,
@@ -288,30 +313,39 @@ func ExtractContentSafetyText(protocol string, body []byte) string {
 }
 
 func ExtractContentSafetyTextFragments(protocol string, body []byte) []string {
+	fragments := extractContentSafetyTextFragments(protocol, body)
+	out := make([]string, 0, len(fragments))
+	for _, fragment := range fragments {
+		out = append(out, fragment.Text)
+	}
+	return out
+}
+
+func extractContentSafetyTextFragments(protocol string, body []byte) []contentSafetyTextFragment {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return nil
 	}
-	var parts []string
+	var parts []contentSafetyTextFragment
 	switch protocol {
 	case ContentModerationProtocolAnthropicMessages:
-		collectContentSafetyValue(gjson.GetBytes(body, "system"), &parts)
+		collectContentSafetyValue(gjson.GetBytes(body, "system"), "system", &parts)
 		collectAnthropicContentSafetyMessages(gjson.GetBytes(body, "messages"), &parts)
 	case ContentModerationProtocolOpenAIChat:
 		collectOpenAIChatContentSafetyMessages(gjson.GetBytes(body, "messages"), &parts)
 	case ContentModerationProtocolOpenAIResponses:
-		collectContentSafetyValue(gjson.GetBytes(body, "instructions"), &parts)
+		collectContentSafetyValue(gjson.GetBytes(body, "instructions"), "instructions", &parts)
 		collectResponsesContentSafetyInput(gjson.GetBytes(body, "input"), &parts)
 	default:
-		collectContentSafetyValue(gjson.GetBytes(body, "system"), &parts)
-		collectContentSafetyValue(gjson.GetBytes(body, "instructions"), &parts)
+		collectContentSafetyValue(gjson.GetBytes(body, "system"), "system", &parts)
+		collectContentSafetyValue(gjson.GetBytes(body, "instructions"), "instructions", &parts)
 		collectAnthropicContentSafetyMessages(gjson.GetBytes(body, "messages"), &parts)
 		collectOpenAIChatContentSafetyMessages(gjson.GetBytes(body, "messages"), &parts)
 		collectResponsesContentSafetyInput(gjson.GetBytes(body, "input"), &parts)
 	}
-	out := make([]string, 0, len(parts))
+	out := make([]contentSafetyTextFragment, 0, len(parts))
 	for _, part := range parts {
-		part = normalizeContentModerationText(part)
-		if part != "" {
+		part.Text = normalizeContentModerationText(part.Text)
+		if part.Text != "" {
 			out = append(out, part)
 		}
 	}
@@ -334,50 +368,50 @@ func mergeContentSafetyFindings(existing []ContentSafetyFinding, additions []Con
 	return existing
 }
 
-func collectAnthropicContentSafetyMessages(messages gjson.Result, parts *[]string) {
+func collectAnthropicContentSafetyMessages(messages gjson.Result, parts *[]contentSafetyTextFragment) {
 	if !messages.IsArray() {
 		return
 	}
-	messages.ForEach(func(_, item gjson.Result) bool {
+	messages.ForEach(func(index, item gjson.Result) bool {
 		role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 		if role == "user" || role == "system" || role == "tool" {
-			collectContentSafetyValue(item.Get("content"), parts)
+			collectContentSafetyValue(item.Get("content"), fmt.Sprintf("messages[%s].content", index.String()), parts)
 		}
 		return true
 	})
 }
 
-func collectOpenAIChatContentSafetyMessages(messages gjson.Result, parts *[]string) {
+func collectOpenAIChatContentSafetyMessages(messages gjson.Result, parts *[]contentSafetyTextFragment) {
 	if !messages.IsArray() {
 		return
 	}
-	messages.ForEach(func(_, item gjson.Result) bool {
+	messages.ForEach(func(index, item gjson.Result) bool {
 		role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 		switch role {
 		case "user", "system", "developer", "tool":
-			collectContentSafetyValue(item.Get("content"), parts)
+			collectContentSafetyValue(item.Get("content"), fmt.Sprintf("messages[%s].content", index.String()), parts)
 		}
 		return true
 	})
 }
 
-func collectResponsesContentSafetyInput(input gjson.Result, parts *[]string) {
+func collectResponsesContentSafetyInput(input gjson.Result, parts *[]contentSafetyTextFragment) {
 	switch {
 	case !input.Exists():
 		return
 	case input.Type == gjson.String:
-		addContentSafetyText(parts, input.String())
+		addContentSafetyText(parts, "input", input.String())
 	case input.IsArray():
-		input.ForEach(func(_, item gjson.Result) bool {
-			collectResponsesContentSafetyItem(item, parts)
+		input.ForEach(func(index, item gjson.Result) bool {
+			collectResponsesContentSafetyItem(item, fmt.Sprintf("input[%s]", index.String()), parts)
 			return true
 		})
 	case input.IsObject():
-		collectResponsesContentSafetyItem(input, parts)
+		collectResponsesContentSafetyItem(input, "input", parts)
 	}
 }
 
-func collectResponsesContentSafetyItem(item gjson.Result, parts *[]string) {
+func collectResponsesContentSafetyItem(item gjson.Result, source string, parts *[]contentSafetyTextFragment) {
 	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 	typ := strings.ToLower(strings.TrimSpace(item.Get("type").String()))
 	if role == "assistant" {
@@ -386,20 +420,20 @@ func collectResponsesContentSafetyItem(item gjson.Result, parts *[]string) {
 	if role == "" && typ != "input_text" && typ != "message" && typ != "function_call_output" {
 		return
 	}
-	collectContentSafetyValue(item.Get("content"), parts)
-	collectContentSafetyValue(item.Get("text"), parts)
-	collectContentSafetyValue(item.Get("output"), parts)
+	collectContentSafetyValue(item.Get("content"), source+".content", parts)
+	collectContentSafetyValue(item.Get("text"), source+".text", parts)
+	collectContentSafetyValue(item.Get("output"), source+".output", parts)
 }
 
-func collectContentSafetyValue(value gjson.Result, parts *[]string) {
+func collectContentSafetyValue(value gjson.Result, source string, parts *[]contentSafetyTextFragment) {
 	switch {
 	case !value.Exists():
 		return
 	case value.Type == gjson.String:
-		addContentSafetyText(parts, value.String())
+		addContentSafetyText(parts, source, value.String())
 	case value.IsArray():
-		value.ForEach(func(_, item gjson.Result) bool {
-			collectContentSafetyValue(item, parts)
+		value.ForEach(func(index, item gjson.Result) bool {
+			collectContentSafetyValue(item, fmt.Sprintf("%s[%s]", source, index.String()), parts)
 			return true
 		})
 	case value.IsObject():
@@ -408,21 +442,26 @@ func collectContentSafetyValue(value gjson.Result, parts *[]string) {
 		case "image", "input_image", "image_url":
 			return
 		}
-		collectContentSafetyValue(value.Get("text"), parts)
-		collectContentSafetyValue(value.Get("content"), parts)
-		collectContentSafetyValue(value.Get("output"), parts)
+		collectContentSafetyValue(value.Get("text"), source+".text", parts)
+		collectContentSafetyValue(value.Get("content"), source+".content", parts)
+		collectContentSafetyValue(value.Get("output"), source+".output", parts)
 	}
 }
 
-func addContentSafetyText(parts *[]string, text string) {
+func addContentSafetyText(parts *[]contentSafetyTextFragment, source string, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" || isAnthropicSystemReminderText(text) {
 		return
 	}
-	*parts = append(*parts, text)
+	*parts = append(*parts, contentSafetyTextFragment{Source: source, Text: text})
 }
 
 func classifyContentSafetyText(text string) []ContentSafetyFinding {
+	return classifyContentSafetyFragment(contentSafetyTextFragment{Text: text})
+}
+
+func classifyContentSafetyFragment(fragment contentSafetyTextFragment) []ContentSafetyFinding {
+	text := fragment.Text
 	text = normalizeContentModerationText(text)
 	if text == "" {
 		return nil
@@ -435,7 +474,15 @@ func classifyContentSafetyText(text string) []ContentSafetyFinding {
 				return
 			}
 		}
-		findings = append(findings, ContentSafetyFinding{Category: category, Severity: severity, Reason: reason})
+		findings = append(findings, ContentSafetyFinding{
+			Category: category,
+			Severity: severity,
+			Reason:   reason,
+			Evidence: contentSafetyEvidenceForFragment(category, contentSafetyTextFragment{
+				Source: fragment.Source,
+				Text:   text,
+			}),
+		})
 	}
 
 	if hasChildSexualSafetyRisk(lower) {
@@ -563,6 +610,126 @@ func hasBenignPrivacyContext(text string) bool {
 func hasSelfHarmSupportContext(text string) bool {
 	return containsAny(text, []string{"求助", "帮我稳定", "支持资源", "热线", "不想伤害自己", "crisis", "support", "hotline", "help me stay safe", "resources"}) &&
 		!containsAny(text, []string{"方法", "步骤", "教程", "最快", "无痛", "method", "instructions", "painless"})
+}
+
+var (
+	contentSafetyEvidenceCredentialWithValuePattern = regexp.MustCompile(`(?i)\b(api\s*key|apikey|token|secret|authorization|bearer)\s+[\w./:+=-]{8,}`)
+	contentSafetyEvidenceAssignmentSecretPattern    = regexp.MustCompile(`(?i)\b(password|passwd|token|secret|api[_ -]?key|authorization)\s*[:=]\s*[^,\s，]+`)
+	contentSafetyEvidenceAPIKeyPattern              = regexp.MustCompile(`(?i)\b(sk-[a-z0-9][a-z0-9_-]{12,}|sk-ant-[a-z0-9_-]{12,})\b`)
+	contentSafetyEvidenceEmailPattern               = regexp.MustCompile(`(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b`)
+	contentSafetyEvidencePhonePattern               = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
+	contentSafetyEvidenceIDNumberPattern            = regexp.MustCompile(`\b\d{17}[\dXx]\b`)
+	contentSafetyEvidenceLongNumberPattern          = regexp.MustCompile(`\b\d{12,}\b`)
+	contentSafetyEvidenceURLQueryPattern            = regexp.MustCompile(`https?://[^\s?]+?\?[^\s，,]+`)
+)
+
+func contentSafetyEvidenceForFragment(category string, fragment contentSafetyTextFragment) ContentSafetyEvidence {
+	text := normalizeContentModerationText(fragment.Text)
+	if text == "" {
+		return ContentSafetyEvidence{}
+	}
+	sum := sha256.Sum256([]byte(fragment.Source + "\n" + text))
+	hash := hex.EncodeToString(sum[:])
+	return ContentSafetyEvidence{
+		Source:  strings.TrimSpace(fragment.Source),
+		Excerpt: redactContentSafetyEvidence(contentSafetyExcerptForCategory(category, text)),
+		Hash:    hash,
+	}
+}
+
+func contentSafetyExcerptForCategory(category string, text string) string {
+	text = normalizeContentModerationText(text)
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	for _, anchor := range contentSafetyEvidenceAnchors(category) {
+		idx := strings.Index(lower, strings.ToLower(anchor))
+		if idx < 0 {
+			continue
+		}
+		anchorRune := utf8.RuneCountInString(lower[:idx])
+		anchorLen := utf8.RuneCountInString(anchor)
+		return contentSafetySliceRunes(text, anchorRune-40, anchorRune+anchorLen+80)
+	}
+	return contentSafetySliceRunes(text, 0, 120)
+}
+
+func contentSafetyEvidenceAnchors(category string) []string {
+	switch category {
+	case ContentSafetyCategoryIllegalActivity:
+		return []string{"冰毒", "海洛因", "可卡因", "芬太尼", "贩毒", "人口贩卖", "卖淫", "嫖娼", "伪造护照", "伪造身份证", "洗钱", "meth", "heroin", "cocaine", "fentanyl", "trafficking", "prostitution", "money laundering", "fake passport"}
+	case ContentSafetyCategoryCyberAbuse:
+		return []string{"勒索软件", "恶意软件", "木马", "僵尸网络", "钓鱼套件", "漏洞", "sql注入", "后门", "ransomware", "malware", "trojan", "botnet", "credential stealer", "phishing kit", "exploit", "payload", "ddos", "sql injection", "backdoor"}
+	case ContentSafetyCategoryWeapons:
+		return []string{"炸弹", "爆炸物", "枪支", "武器", "毒气", "生物武器", "化学武器", "放射性", "核材料", "bomb", "explosive", "gun", "weapon", "chemical weapon", "biological weapon", "radioactive", "nuclear"}
+	case ContentSafetyCategoryViolenceHate:
+		return []string{"杀死", "屠杀", "灭绝", "袭击", "恐怖袭击", "加入isis", "圣战", "kill all", "exterminate", "massacre", "terror attack", "join isis", "jihad"}
+	case ContentSafetyCategoryPrivacyAbuse:
+		return []string{"盗取隐私", "开盒", "人肉", "窃取个人信息", "身份证号", "非法监控", "监控伴侣", "冒充", "dox", "doxx", "steal personal data", "impersonate", "illegal surveillance", "spy on"}
+	case ContentSafetyCategoryChildSafety:
+		return []string{"未成年", "未成年人", "儿童", "小孩", "幼女", "幼男", "萝莉", "正太", "child", "children", "minor", "underage", "teen"}
+	case ContentSafetyCategorySelfHarm:
+		return []string{"自杀", "自残", "割腕", "厌食", "暴食", "suicide", "self-harm", "kill myself", "cut myself", "eating disorder"}
+	case ContentSafetyCategoryFraud:
+		return []string{"钓鱼", "骗取", "诈骗", "欺诈", "伪造文件", "伪造证件", "虚假评论", "刷好评", "假评论", "phishing", "scam", "steal credentials", "fake review", "forge", "forged document"}
+	case ContentSafetyCategorySexualExplicit:
+		return []string{"色情", "性交", "做爱", "口交", "肛交", "乱伦", "兽交", "恋物", "性幻想", "露骨", "porn", "sex scene", "explicit sex", "incest", "bestiality", "fetish"}
+	case ContentSafetyCategoryPolicyBypass:
+		return []string{"绕过", "越狱", "忽略", "禁用", "无视", "bypass", "jailbreak", "ignore", "disable", "override", "circumvent"}
+	default:
+		return nil
+	}
+}
+
+func contentSafetySliceRunes(text string, start int, end int) string {
+	runes := []rune(text)
+	if start < 0 {
+		start = 0
+	}
+	if end > len(runes) {
+		end = len(runes)
+	}
+	if start >= end {
+		return ""
+	}
+	prefix := ""
+	if start > 0 {
+		prefix = "..."
+	}
+	suffix := ""
+	if end < len(runes) {
+		suffix = "..."
+	}
+	return prefix + string(runes[start:end]) + suffix
+}
+
+func redactContentSafetyEvidence(text string) string {
+	text = contentSafetyEvidenceURLQueryPattern.ReplaceAllStringFunc(text, func(value string) string {
+		if idx := strings.Index(value, "?"); idx >= 0 {
+			return value[:idx+1] + "****"
+		}
+		return "****"
+	})
+	text = contentSafetyEvidenceCredentialWithValuePattern.ReplaceAllStringFunc(text, func(value string) string {
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			return "****"
+		}
+		return strings.Join(fields[:len(fields)-1], " ") + " ****"
+	})
+	text = contentSafetyEvidenceAssignmentSecretPattern.ReplaceAllStringFunc(text, func(value string) string {
+		if idx := strings.IndexAny(value, ":="); idx >= 0 {
+			return strings.TrimSpace(value[:idx+1]) + "****"
+		}
+		return "****"
+	})
+	text = contentSafetyEvidenceAPIKeyPattern.ReplaceAllString(text, "****")
+	text = contentSafetyEvidenceEmailPattern.ReplaceAllString(text, "****")
+	text = contentSafetyEvidenceIDNumberPattern.ReplaceAllString(text, "****")
+	text = contentSafetyEvidencePhonePattern.ReplaceAllString(text, "****")
+	text = contentSafetyEvidenceLongNumberPattern.ReplaceAllString(text, "****")
+	return text
 }
 
 func containsAny(text string, needles []string) bool {
