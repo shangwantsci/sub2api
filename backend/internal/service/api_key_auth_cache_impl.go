@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 13 // v13: include Anthropic mixed type weight scheduling fields
+const apiKeyAuthSnapshotVersion = 14 // v14: include group peak rate and Anthropic mixed type weight fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -279,6 +279,10 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AnthropicMixedTypeWeightEnabled: apiKey.Group.AnthropicMixedTypeWeightEnabled,
 			AnthropicSetupTokenPoolWeight:   apiKey.Group.AnthropicSetupTokenPoolWeight,
 			AnthropicAPIKeyPoolWeight:       apiKey.Group.AnthropicAPIKeyPoolWeight,
+			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
+			PeakStart:                       apiKey.Group.PeakStart,
+			PeakEnd:                         apiKey.Group.PeakEnd,
+			PeakRateMultiplier:              apiKey.Group.PeakRateMultiplier,
 		}
 	}
 	return snapshot
@@ -355,6 +359,10 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AnthropicMixedTypeWeightEnabled: snapshot.Group.AnthropicMixedTypeWeightEnabled,
 			AnthropicSetupTokenPoolWeight:   snapshot.Group.AnthropicSetupTokenPoolWeight,
 			AnthropicAPIKeyPoolWeight:       snapshot.Group.AnthropicAPIKeyPoolWeight,
+			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
+			PeakStart:                       snapshot.Group.PeakStart,
+			PeakEnd:                         snapshot.Group.PeakEnd,
+			PeakRateMultiplier:              snapshot.Group.PeakRateMultiplier,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)

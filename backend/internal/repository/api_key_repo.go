@@ -197,6 +197,10 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldAnthropicMixedTypeWeightEnabled,
 				group.FieldAnthropicSetupTokenPoolWeight,
 				group.FieldAnthropicAPIKeyPoolWeight,
+				group.FieldPeakRateEnabled,
+				group.FieldPeakStart,
+				group.FieldPeakEnd,
+				group.FieldPeakRateMultiplier,
 			)
 		}).
 		Only(ctx)
@@ -820,6 +824,10 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		AnthropicMixedTypeWeightEnabled: g.AnthropicMixedTypeWeightEnabled,
 		AnthropicSetupTokenPoolWeight:   g.AnthropicSetupTokenPoolWeight,
 		AnthropicAPIKeyPoolWeight:       g.AnthropicAPIKeyPoolWeight,
+		PeakRateEnabled:                 g.PeakRateEnabled,
+		PeakStart:                       g.PeakStart,
+		PeakEnd:                         g.PeakEnd,
+		PeakRateMultiplier:              g.PeakRateMultiplier,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

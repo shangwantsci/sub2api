@@ -277,6 +277,46 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
 }
 
+func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *testing.T) {
+	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	groupID := int64(9)
+	apiKey := &APIKey{
+		ID:      1,
+		UserID:  2,
+		GroupID: &groupID,
+		Key:     "k-anthropic-mixed",
+		Name:    "Anthropic Mixed",
+		Status:  StatusActive,
+		User: &User{
+			ID:          2,
+			Status:      StatusActive,
+			Role:        RoleUser,
+			Balance:     10,
+			Concurrency: 3,
+		},
+		Group: &Group{
+			ID:                              groupID,
+			Name:                            "anthropic",
+			Platform:                        PlatformAnthropic,
+			Status:                          StatusActive,
+			SubscriptionType:                SubscriptionTypeStandard,
+			RateMultiplier:                  1,
+			AnthropicMixedTypeWeightEnabled: true,
+			AnthropicSetupTokenPoolWeight:   70,
+			AnthropicAPIKeyPoolWeight:       30,
+		},
+	}
+
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+	roundTrip := svc.snapshotToAPIKey(apiKey.Key, snapshot)
+
+	require.NotNil(t, roundTrip)
+	require.NotNil(t, roundTrip.Group)
+	require.True(t, roundTrip.Group.AnthropicMixedTypeWeightEnabled)
+	require.Equal(t, 70, roundTrip.Group.AnthropicSetupTokenPoolWeight)
+	require.Equal(t, 30, roundTrip.Group.AnthropicAPIKeyPoolWeight)
+}
+
 func TestAPIKeyService_GetByKey_IgnoresLegacyAuthCacheSnapshotWithoutMessagesDispatchConfig(t *testing.T) {
 	cache := &authCacheStub{}
 	var repoCalls int32
