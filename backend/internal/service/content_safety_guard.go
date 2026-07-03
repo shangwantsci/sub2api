@@ -20,10 +20,15 @@ const (
 	ContentSafetyGuardModeWarn  = "warn"
 	ContentSafetyGuardModeBlock = "block"
 
-	ContentSafetyActionSkip  = "skip"
-	ContentSafetyActionAllow = "allow"
-	ContentSafetyActionWarn  = "warn"
-	ContentSafetyActionBlock = "block"
+	ContentSafetyActionSkip    = "skip"
+	ContentSafetyActionAllow   = "allow"
+	ContentSafetyActionObserve = "observe"
+	ContentSafetyActionWarn    = "warn"
+	ContentSafetyActionBlock   = "block"
+
+	ContentSafetyConfidenceLow    = "low"
+	ContentSafetyConfidenceMedium = "medium"
+	ContentSafetyConfidenceHigh   = "high"
 
 	ContentSafetySeverityMedium   = "medium"
 	ContentSafetySeverityHigh     = "high"
@@ -76,10 +81,12 @@ type ContentSafetyCheckInput struct {
 }
 
 type ContentSafetyFinding struct {
-	Category string                `json:"category"`
-	Severity string                `json:"severity"`
-	Reason   string                `json:"reason"`
-	Evidence ContentSafetyEvidence `json:"evidence,omitempty"`
+	Category   string                `json:"category"`
+	Severity   string                `json:"severity"`
+	Confidence string                `json:"confidence,omitempty"`
+	Action     string                `json:"action,omitempty"`
+	Reason     string                `json:"reason"`
+	Evidence   ContentSafetyEvidence `json:"evidence,omitempty"`
 }
 
 type ContentSafetyEvidence struct {
@@ -202,25 +209,8 @@ func (g *ContentSafetyGuard) Check(ctx context.Context, input ContentSafetyCheck
 		return &ContentSafetyDecision{Allowed: true, Action: ContentSafetyActionSkip, Mode: settings.Mode}
 	}
 	decision := EvaluateContentSafety(ContentSafetyInput{Protocol: input.Protocol, Body: input.Body})
-	decision.Mode = settings.Mode
+	applyContentSafetyDecisionMode(decision, settings.Mode)
 	decision.LogRedactedEvidence = settings.LogRedactedEvidence
-	if !decision.Flagged {
-		decision.Action = ContentSafetyActionAllow
-		decision.Allowed = true
-		decision.Blocked = false
-		return decision
-	}
-	if settings.Mode == ContentSafetyGuardModeWarn {
-		decision.Action = ContentSafetyActionWarn
-		decision.Allowed = true
-		decision.Blocked = false
-		decision.Message = ""
-		return decision
-	}
-	decision.Action = ContentSafetyActionBlock
-	decision.Allowed = false
-	decision.Blocked = true
-	decision.Message = contentSafetyBlockMessage
 	return decision
 }
 
@@ -293,19 +283,66 @@ func EvaluateContentSafety(input ContentSafetyInput) *ContentSafetyDecision {
 	if len(findings) == 0 {
 		return decision
 	}
-	primary := findings[0]
-	for _, finding := range findings[1:] {
-		if contentSafetySeverityRank(finding.Severity) > contentSafetySeverityRank(primary.Severity) {
-			primary = finding
-		}
-	}
-	decision.Flagged = true
-	decision.Blocked = true
-	decision.Allowed = false
-	decision.Action = ContentSafetyActionBlock
-	decision.Message = contentSafetyBlockMessage
-	decision.PrimaryFinding = primary
+	applyContentSafetyDecisionMode(decision, ContentSafetyGuardModeBlock)
 	return decision
+}
+
+func applyContentSafetyDecisionMode(decision *ContentSafetyDecision, mode string) {
+	if decision == nil {
+		return
+	}
+	mode = NormalizeContentSafetyGuardMode(mode)
+	decision.Mode = mode
+	if len(decision.Findings) == 0 || mode == ContentSafetyGuardModeOff {
+		decision.Allowed = true
+		decision.Blocked = false
+		decision.Flagged = false
+		if mode == ContentSafetyGuardModeOff {
+			decision.Action = ContentSafetyActionSkip
+		} else {
+			decision.Action = ContentSafetyActionAllow
+		}
+		decision.Message = ""
+		decision.PrimaryFinding = ContentSafetyFinding{}
+		return
+	}
+
+	for i := range decision.Findings {
+		decision.Findings[i].Action = findingActionFor(mode, decision.Findings[i])
+	}
+	primary := primaryContentSafetyFinding(decision.Findings)
+	decision.PrimaryFinding = primary
+	decision.Flagged = true
+	decision.Action = primary.Action
+	decision.Blocked = primary.Action == ContentSafetyActionBlock
+	decision.Allowed = !decision.Blocked
+	if decision.Blocked {
+		decision.Message = contentSafetyBlockMessage
+	} else {
+		decision.Message = ""
+	}
+}
+
+func findingActionFor(mode string, finding ContentSafetyFinding) string {
+	if mode == ContentSafetyGuardModeOff {
+		return ContentSafetyActionSkip
+	}
+	switch finding.Confidence {
+	case ContentSafetyConfidenceLow:
+		return ContentSafetyActionObserve
+	case ContentSafetyConfidenceMedium:
+		return ContentSafetyActionWarn
+	case ContentSafetyConfidenceHigh:
+		if mode == ContentSafetyGuardModeWarn {
+			return ContentSafetyActionWarn
+		}
+		return ContentSafetyActionBlock
+	default:
+		if mode == ContentSafetyGuardModeWarn {
+			return ContentSafetyActionWarn
+		}
+		return ContentSafetyActionBlock
+	}
 }
 
 func ExtractContentSafetyText(protocol string, body []byte) string {
@@ -468,52 +505,63 @@ func classifyContentSafetyFragment(fragment contentSafetyTextFragment) []Content
 	}
 	lower := strings.ToLower(text)
 	findings := make([]ContentSafetyFinding, 0, 4)
-	add := func(category string, severity string, reason string) {
+	add := func(category string, severity string, confidence string, reason string) {
 		for _, existing := range findings {
 			if existing.Category == category {
 				return
 			}
 		}
-		findings = append(findings, ContentSafetyFinding{
-			Category: category,
-			Severity: severity,
-			Reason:   reason,
-			Evidence: contentSafetyEvidenceForFragment(category, contentSafetyTextFragment{
+		evidence := ContentSafetyEvidence{}
+		if confidence != ContentSafetyConfidenceLow {
+			evidence = contentSafetyEvidenceForFragment(category, contentSafetyTextFragment{
 				Source: fragment.Source,
 				Text:   text,
-			}),
+			})
+		}
+		findings = append(findings, ContentSafetyFinding{
+			Category:   category,
+			Severity:   severity,
+			Confidence: confidence,
+			Action:     findingActionFor(ContentSafetyGuardModeBlock, ContentSafetyFinding{Confidence: confidence}),
+			Reason:     reason,
+			Evidence:   evidence,
 		})
 	}
 
 	if hasChildSexualSafetyRisk(lower) {
-		add(ContentSafetyCategoryChildSafety, ContentSafetySeverityCritical, "child sexual exploitation or sexualization")
+		add(ContentSafetyCategoryChildSafety, ContentSafetySeverityCritical, ContentSafetyConfidenceHigh, "child sexual exploitation or sexualization")
+	} else if hasChildSexualSafetyObserveRisk(lower) {
+		add(ContentSafetyCategoryChildSafety, ContentSafetySeverityMedium, ContentSafetyConfidenceLow, "ambiguous child-safety term in benign technical context")
 	}
 	if hasPolicyBypassRisk(lower) {
-		add(ContentSafetyCategoryPolicyBypass, ContentSafetySeverityHigh, "platform or safety rule bypass request")
+		add(ContentSafetyCategoryPolicyBypass, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "platform or safety rule bypass request")
 	}
 	if hasSexualExplicitRisk(lower) && !hasLegitimateSexualEducationContext(lower) {
-		add(ContentSafetyCategorySexualExplicit, ContentSafetySeverityHigh, "explicit sexual generation request")
+		add(ContentSafetyCategorySexualExplicit, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "explicit sexual generation request")
 	}
-	if hasFraudRisk(lower) && !hasBenignAnalysisContext(lower) {
-		add(ContentSafetyCategoryFraud, ContentSafetySeverityHigh, "fraud, phishing, forgery, or coordinated deception")
+	if hasFraudWarningRisk(lower) {
+		add(ContentSafetyCategoryFraud, ContentSafetySeverityMedium, ContentSafetyConfidenceMedium, "ambiguous fraud or deception training context")
+	}
+	if hasFraudRisk(lower) && !hasBenignAnalysisContext(lower) && !hasFraudWarningRisk(lower) {
+		add(ContentSafetyCategoryFraud, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "fraud, phishing, forgery, or coordinated deception")
 	}
 	if hasIllegalActivityRisk(lower) && !hasBenignAnalysisContext(lower) {
-		add(ContentSafetyCategoryIllegalActivity, ContentSafetySeverityHigh, "illegal transaction or evasion request")
+		add(ContentSafetyCategoryIllegalActivity, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "illegal transaction or evasion request")
 	}
 	if hasCyberAbuseRisk(lower) && !hasDefensiveCyberContext(lower) {
-		add(ContentSafetyCategoryCyberAbuse, ContentSafetySeverityHigh, "unauthorized cyber abuse request")
+		add(ContentSafetyCategoryCyberAbuse, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "unauthorized cyber abuse request")
 	}
 	if hasWeaponsRisk(lower) && !hasBenignAnalysisContext(lower) {
-		add(ContentSafetyCategoryWeapons, ContentSafetySeverityHigh, "weapon or dangerous material instructions")
+		add(ContentSafetyCategoryWeapons, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "weapon or dangerous material instructions")
 	}
 	if hasPrivacyAbuseRisk(lower) && !hasBenignPrivacyContext(lower) {
-		add(ContentSafetyCategoryPrivacyAbuse, ContentSafetySeverityHigh, "privacy or identity abuse request")
+		add(ContentSafetyCategoryPrivacyAbuse, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "privacy or identity abuse request")
 	}
 	if hasSelfHarmRisk(lower) && !hasSelfHarmSupportContext(lower) {
-		add(ContentSafetyCategorySelfHarm, ContentSafetySeverityHigh, "self-harm encouragement or instructions")
+		add(ContentSafetyCategorySelfHarm, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "self-harm encouragement or instructions")
 	}
 	if hasViolenceHateRisk(lower) && !hasBenignAnalysisContext(lower) {
-		add(ContentSafetyCategoryViolenceHate, ContentSafetySeverityHigh, "violent, hateful, or extremist request")
+		add(ContentSafetyCategoryViolenceHate, ContentSafetySeverityHigh, ContentSafetyConfidenceHigh, "violent, hateful, or extremist request")
 	}
 
 	return findings
@@ -522,8 +570,22 @@ func classifyContentSafetyFragment(fragment contentSafetyTextFragment) []Content
 func hasChildSexualSafetyRisk(text string) bool {
 	childTerms := []string{"未成年", "未成年人", "儿童", "小孩", "幼女", "幼男", "萝莉", "正太", "child", "children", "minor", "underage", "teen", "teenage"}
 	sexualTerms := []string{"色情", "性化", "性行为", "性交", "裸照", "裸体", "露骨", "csam", "porn", "pornographic", "pornography", "sexual", "sexualized", "nude", "explicit sexual", "sexually explicit", "sexual content"}
-	for _, window := range contentSafetyWindowsAround(text, childTerms, 80, 140) {
-		if containsAny(window, sexualTerms) {
+	if containsAny(text, []string{"csam"}) {
+		return true
+	}
+	for _, window := range contentSafetyWindowsAroundWithTerms(text, childTerms, 80, 140) {
+		if containsAny(window.Text, sexualTerms) && !isBenignContext(ContentSafetyCategoryChildSafety, window.Term, window.Text) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasChildSexualSafetyObserveRisk(text string) bool {
+	childTerms := []string{"child", "children", "minor", "teen", "teenage"}
+	sexualTerms := []string{"sexual", "sexual content", "explicit sexual", "sexually explicit", "porn", "nude"}
+	for _, window := range contentSafetyWindowsAroundWithTerms(text, childTerms, 80, 140) {
+		if containsAny(window.Text, sexualTerms) && isBenignContext(ContentSafetyCategoryChildSafety, window.Term, window.Text) {
 			return true
 		}
 	}
@@ -556,6 +618,19 @@ func hasFraudRisk(text string) bool {
 	actionTerms := []string{"生成", "创建", "写", "制作", "骗取", "窃取", "批量", "帮我", "create", "creating", "generate", "generating", "write", "build", "building", "steal", "stealing", "trick"}
 	for _, window := range contentSafetyWindowsAround(text, fraudTerms, 80, 140) {
 		if containsAny(window, actionTerms) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFraudWarningRisk(text string) bool {
+	fraudTerms := []string{"虚假评论", "假评论", "fake review", "fake reviews", "forged document", "forged documents", "scam", "scams"}
+	trainingTerms := []string{"检测", "识别", "规则", "训练", "样例", "测试", "员工培训", "detection", "detect", "identify", "rule", "training", "sample", "samples", "test", "testing", "awareness"}
+	actionTerms := []string{"生成", "创建", "写", "制作", "create", "creating", "generate", "generating", "write", "build", "building"}
+	for _, window := range contentSafetyWindowsAround(text, fraudTerms, 80, 140) {
+		if containsAny(window, trainingTerms) && containsAny(window, actionTerms) &&
+			!containsAny(window, []string{"骗取", "窃取", "steal", "stealing", "capture credentials", "collect credentials"}) {
 			return true
 		}
 	}
@@ -655,6 +730,42 @@ func hasBenignPrivacyContext(text string) bool {
 func hasSelfHarmSupportContext(text string) bool {
 	return containsAny(text, []string{"求助", "帮我稳定", "支持资源", "热线", "不想伤害自己", "crisis", "support", "hotline", "help me stay safe", "resources"}) &&
 		!containsAny(text, []string{"方法", "步骤", "教程", "最快", "无痛", "method", "instructions", "painless"})
+}
+
+func isBenignContext(category string, matchedTerm string, window string) bool {
+	term := strings.ToLower(strings.TrimSpace(matchedTerm))
+	text := strings.ToLower(window)
+	switch category {
+	case ContentSafetyCategoryChildSafety:
+		switch term {
+		case "child", "children":
+			return containsAny(text, []string{"child process", "child_process", "parent/child process", "child thread", "child shell", "child pid", "child job"})
+		case "minor":
+			return containsAny(text, []string{"minor version", "minor versions", "minor release", "minor releases", "major/minor/patch", "semver", "semantic version", "upgrade"})
+		}
+	case ContentSafetyCategoryCyberAbuse:
+		if term == "payload" {
+			return containsAny(text, []string{"request payload", "response payload", "test payload", "marketing payload", "analytics payload"})
+		}
+	case ContentSafetyCategoryWeapons:
+		if term == "gun" {
+			return containsAny(text, []string{"gunicorn"})
+		}
+		if term == "bomb" {
+			return containsAny(text, []string{"bombastic"})
+		}
+	case ContentSafetyCategorySelfHarm, ContentSafetyCategoryViolenceHate:
+		return containsAny(text, []string{"kill process", "kill -9", "process killed", "job killed"})
+	case ContentSafetyCategoryPolicyBypass:
+		if term == "bypass" {
+			return containsAny(text, []string{"bypass cache", "bypass proxy", "bypass localhost"})
+		}
+	case ContentSafetyCategoryFraud:
+		if strings.HasPrefix(term, "forge") {
+			return containsAny(text, []string{"forge ahead"})
+		}
+	}
+	return false
 }
 
 var (
@@ -779,6 +890,19 @@ func containsAny(text string, needles []string) bool {
 
 func contentSafetyWindowsAround(text string, needles []string, before int, after int) []string {
 	var windows []string
+	for _, window := range contentSafetyWindowsAroundWithTerms(text, needles, before, after) {
+		windows = append(windows, window.Text)
+	}
+	return windows
+}
+
+type contentSafetyTermWindow struct {
+	Term string
+	Text string
+}
+
+func contentSafetyWindowsAroundWithTerms(text string, needles []string, before int, after int) []contentSafetyTermWindow {
+	var windows []contentSafetyTermWindow
 	for _, match := range findContentSafetyTermMatches(text, needles) {
 		start := match.Start - before
 		if start < 0 {
@@ -788,12 +912,13 @@ func contentSafetyWindowsAround(text string, needles []string, before int, after
 		if end > len(text) {
 			end = len(text)
 		}
-		windows = append(windows, text[start:end])
+		windows = append(windows, contentSafetyTermWindow{Term: match.Term, Text: text[start:end]})
 	}
 	return windows
 }
 
 type contentSafetyTermMatch struct {
+	Term  string
 	Start int
 	End   int
 }
@@ -827,7 +952,7 @@ func findContentSafetyTermMatches(text string, terms []string) []contentSafetyTe
 			start := offset + idx
 			end := start + len(term)
 			if contentSafetyTermHasBoundary(text, term, start, end) {
-				matches = append(matches, contentSafetyTermMatch{Start: start, End: end})
+				matches = append(matches, contentSafetyTermMatch{Term: term, Start: start, End: end})
 			}
 			offset = end
 		}
@@ -868,6 +993,49 @@ func contentSafetySeverityRank(severity string) int {
 	case ContentSafetySeverityHigh:
 		return 2
 	case ContentSafetySeverityMedium:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func primaryContentSafetyFinding(findings []ContentSafetyFinding) ContentSafetyFinding {
+	if len(findings) == 0 {
+		return ContentSafetyFinding{}
+	}
+	primary := findings[0]
+	for _, finding := range findings[1:] {
+		if contentSafetyFindingRank(finding) > contentSafetyFindingRank(primary) {
+			primary = finding
+		}
+	}
+	return primary
+}
+
+func contentSafetyFindingRank(finding ContentSafetyFinding) int {
+	return contentSafetyActionRank(finding.Action)*100 + contentSafetySeverityRank(finding.Severity)*10 + contentSafetyConfidenceRank(finding.Confidence)
+}
+
+func contentSafetyActionRank(action string) int {
+	switch action {
+	case ContentSafetyActionBlock:
+		return 3
+	case ContentSafetyActionWarn:
+		return 2
+	case ContentSafetyActionObserve:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func contentSafetyConfidenceRank(confidence string) int {
+	switch confidence {
+	case ContentSafetyConfidenceHigh:
+		return 3
+	case ContentSafetyConfidenceMedium:
+		return 2
+	case ContentSafetyConfidenceLow:
 		return 1
 	default:
 		return 0

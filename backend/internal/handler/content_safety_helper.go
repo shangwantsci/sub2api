@@ -65,6 +65,9 @@ func writeContentSafetyErrorResponse(c *gin.Context, decision *service.ContentSa
 	policy := gin.H{
 		"category":       finding.Category,
 		"category_label": service.ContentSafetyCategoryLabel(finding.Category),
+		"severity":       finding.Severity,
+		"confidence":     finding.Confidence,
+		"action":         finding.Action,
 		"request_id":     requestID,
 	}
 	if strings.TrimSpace(finding.Evidence.Excerpt) != "" {
@@ -98,6 +101,7 @@ func logContentSafetyDecision(c *gin.Context, reqLog *zap.Logger, apiKey *servic
 		zap.String("request_id", contentModerationRequestID(c.Request.Context())),
 		zap.String("category", finding.Category),
 		zap.String("severity", finding.Severity),
+		zap.String("confidence", finding.Confidence),
 		zap.String("endpoint", endpoint),
 		zap.String("protocol", protocol),
 		zap.String("model", strings.TrimSpace(model)),
@@ -115,6 +119,10 @@ func logContentSafetyDecision(c *gin.Context, reqLog *zap.Logger, apiKey *servic
 	}
 	if decision.Blocked {
 		reqLog.Warn("content_safety_filter.blocked", fields...)
+		return
+	}
+	if decision.Action == service.ContentSafetyActionObserve {
+		reqLog.Warn("content_safety_filter.observe", fields...)
 		return
 	}
 	reqLog.Warn("content_safety_filter.warn", fields...)

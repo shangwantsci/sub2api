@@ -41,6 +41,9 @@ func TestGatewayContentSafetyGuard_MessagesAndCountTokensBlock(t *testing.T) {
 			require.Equal(t, "请求违反使用政策，已被拦截。", gjson.Get(payload, "error.message").String())
 			require.Equal(t, service.ContentSafetyCategoryFraud, gjson.Get(payload, "error.policy.category").String())
 			require.Equal(t, "欺诈、钓鱼、伪造或误导性信息", gjson.Get(payload, "error.policy.category_label").String())
+			require.Equal(t, service.ContentSafetySeverityHigh, gjson.Get(payload, "error.policy.severity").String())
+			require.Equal(t, service.ContentSafetyConfidenceHigh, gjson.Get(payload, "error.policy.confidence").String())
+			require.Equal(t, service.ContentSafetyActionBlock, gjson.Get(payload, "error.policy.action").String())
 			require.Equal(t, "req-test", gjson.Get(payload, "error.policy.request_id").String())
 			require.Equal(t, "messages[0].content", gjson.Get(payload, "error.policy.evidence.source").String())
 			require.NotEmpty(t, gjson.Get(payload, "error.policy.evidence.excerpt").String())
@@ -75,12 +78,68 @@ func TestContentSafetyGuardLogIncludesRedactedEvidenceByDefault(t *testing.T) {
 	entries := logs.All()
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()
+	require.Equal(t, service.ContentSafetyConfidenceHigh, fields["confidence"])
+	require.Equal(t, service.ContentSafetyActionBlock, fields["action"])
 	require.Equal(t, "messages[0].content", fields["evidence_source"])
 	require.NotEmpty(t, fields["evidence_excerpt"])
 	require.NotEmpty(t, fields["evidence_hash"])
 	require.Contains(t, fields["evidence_excerpt"], "钓鱼登录页")
 	require.NotContains(t, fields["evidence_excerpt"], "user@example.com")
 	require.NotContains(t, fields["evidence_excerpt"], "sk-ant-api03")
+}
+
+func TestGatewayContentSafetyGuard_GradedNonBlockingFindingsDoNotWriteResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       []byte
+		logMessage string
+		action     string
+		confidence string
+	}{
+		{
+			name:       "observe",
+			body:       []byte(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"The child process died when the shell session ended; nearby documentation mentions sexual content filters."}]}`),
+			logMessage: "content_safety_filter.observe",
+			action:     service.ContentSafetyActionObserve,
+			confidence: service.ContentSafetyConfidenceLow,
+		},
+		{
+			name:       "warn",
+			body:       []byte(`{"model":"claude-3-5-sonnet-20241022","messages":[{"role":"user","content":"Create a fake review detection training sample for employees."}]}`),
+			logMessage: "content_safety_filter.warn",
+			action:     service.ContentSafetyActionWarn,
+			confidence: service.ContentSafetyConfidenceMedium,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zap.WarnLevel)
+			reqLog := zap.New(core)
+			guard := service.NewContentSafetyGuard(service.NewSettingService(&handlerContentSafetySettingRepo{
+				values: map[string]string{
+					service.SettingKeyEnableContentSafetyFilter: "true",
+					service.SettingKeyContentSafetyGuardMode:    service.ContentSafetyGuardModeBlock,
+				},
+			}, nil))
+			h := &GatewayHandler{contentSafetyGuard: guard}
+			c, recorder := newContentSafetyGinContext("/v1/messages", tc.body)
+
+			blocked := h.checkContentSafety(c, reqLog, testContentSafetyAPIKey(), middleware2.AuthSubject{UserID: 7}, service.ContentModerationProtocolAnthropicMessages, "claude-3-5-sonnet-20241022", tc.body)
+
+			require.False(t, blocked)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.Empty(t, recorder.Body.String())
+			entries := logs.All()
+			require.Len(t, entries, 1)
+			require.Equal(t, tc.logMessage, entries[0].Message)
+			fields := entries[0].ContextMap()
+			require.Equal(t, tc.action, fields["action"])
+			require.Equal(t, tc.confidence, fields["confidence"])
+			require.NotContains(t, recorder.Body.String(), "child process")
+			require.NotContains(t, recorder.Body.String(), "fake review")
+		})
+	}
 }
 
 func TestGatewayContentSafetyGuard_WarnDoesNotWriteResponse(t *testing.T) {
@@ -129,12 +188,16 @@ func TestContentSafetyGuardLogOmitsPlainUserAndKeyIdentifiers(t *testing.T) {
 		Mode:    service.ContentSafetyGuardModeBlock,
 		Action:  service.ContentSafetyActionBlock,
 		PrimaryFinding: service.ContentSafetyFinding{
-			Category: service.ContentSafetyCategoryFraud,
-			Severity: service.ContentSafetySeverityHigh,
+			Category:   service.ContentSafetyCategoryFraud,
+			Severity:   service.ContentSafetySeverityHigh,
+			Confidence: service.ContentSafetyConfidenceHigh,
+			Action:     service.ContentSafetyActionBlock,
 		},
 		Findings: []service.ContentSafetyFinding{{
-			Category: service.ContentSafetyCategoryFraud,
-			Severity: service.ContentSafetySeverityHigh,
+			Category:   service.ContentSafetyCategoryFraud,
+			Severity:   service.ContentSafetySeverityHigh,
+			Confidence: service.ContentSafetyConfidenceHigh,
+			Action:     service.ContentSafetyActionBlock,
 		}},
 	}
 
@@ -144,7 +207,7 @@ func TestContentSafetyGuardLogOmitsPlainUserAndKeyIdentifiers(t *testing.T) {
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()
 	for _, key := range []string{
-		"request_id", "endpoint", "protocol", "model", "category", "severity", "mode", "action", "blocked", "finding_count",
+		"request_id", "endpoint", "protocol", "model", "category", "severity", "confidence", "mode", "action", "blocked", "finding_count",
 	} {
 		require.Contains(t, fields, key)
 	}
