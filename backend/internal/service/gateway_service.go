@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -45,6 +47,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// claudeCodeSystemPromptExpansion 是真实 Claude Code 主系统提示词的静态部分，
+// 从 CC CLI 2.1.201 抓包提取。包含 # System / # Doing tasks / # Executing actions
+// with care / # Using your tools / # Tone and style / # Text output /
+// # Session-specific guidance 共 7 个章节。排除了用户特定的动态章节
+// （# auto memory / # Environment / # Context management）。
+//
+//go:embed prompts/claude_code_system_prompt_expansion.txt
+var claudeCodeSystemPromptExpansion string
+
 const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
@@ -53,22 +64,7 @@ const (
 	// Canonical Claude Agent SDK identity block from Claude Code CLI 2.1.197.
 	// Keep it EXACT (no trailing whitespace/newlines) to match captured traffic.
 	claudeCodeSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
-	// claudeCodeSystemPromptExpansion 是真实 Claude Code 主系统提示词中"与具体工具无关"
-	// 的通用段落（身份/用途总述 + 安全声明 + URL 告警 + Tone and style），逐字取自真实
-	// CLI（2.1.x 一致）。伪装路径用它把 system 块数从 2 提升到 3、体量贴近真实 CC，同时
-	// 刻意排除 # Doing tasks / # Using your tools / # Executing actions 等会污染被代理
-	// 用户行为的工具专属指令。
-	claudeCodeSystemPromptExpansion = `You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
-
-IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
-IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.
-
-# Tone and style
- - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
- - Your responses should be short and concise.
- - When referencing specific functions or pieces of code include the pattern file_path:line_number to allow the user to easily navigate to the source code location.
- - When referencing GitHub issues or pull requests, use the owner/repo#123 format (e.g. anthropics/claude-code#100) so they render as clickable links.
- - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.`
+	// claudeCodeSystemPromptExpansion: 见 var 块中的 go:embed 定义
 	maxCacheControlBlocks = 4 // Anthropic API 允许的最大 cache_control 块数量
 
 	defaultUserGroupRateCacheTTL           = 30 * time.Second
@@ -657,6 +653,9 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	// noProxyAnthropicWarned 记录已告警过的无代理 Anthropic OAuth 账号 ID，
+	// 避免在请求热路径上对同一账号重复打印告警日志。
+	noProxyAnthropicWarned sync.Map
 }
 
 // NewGatewayService creates a new GatewayService
@@ -1080,8 +1079,26 @@ type anthropicSystemTextBlockPayload struct {
 	CacheControl *anthropicCacheControlPayload `json:"cache_control,omitempty"`
 }
 
+// anthropicSystemTextBlockRawCachePayload mirrors anthropicSystemTextBlockPayload
+// but carries a free-form cache_control value (decoded from user config). The field
+// order matters: the real Claude Code CLI emits type -> text -> cache_control, and a
+// map-based marshal would reorder keys alphabetically and leak a Go backend fingerprint.
+type anthropicSystemTextBlockRawCachePayload struct {
+	Type         string `json:"type"`
+	Text         string `json:"text"`
+	CacheControl any    `json:"cache_control,omitempty"`
+}
+
 type anthropicMetadataPayload struct {
 	UserID string `json:"user_id"`
+}
+
+// anthropicMessagePayload marshals a message in the same key order the real Claude
+// Code CLI uses (role -> content). A map-based marshal would emit content before role
+// alphabetically and leak a Go backend fingerprint.
+type anthropicMessagePayload struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
 }
 
 // replaceModelInBody 替换请求体中的model字段
@@ -1130,12 +1147,10 @@ func marshalAnthropicSystemTextBlock(text string, includeCacheControl bool) ([]b
 }
 
 func marshalAnthropicSystemTextBlockWithCacheControl(text string, cacheControl any) ([]byte, error) {
-	block := map[string]any{
-		"type": "text",
-		"text": text,
-	}
-	if cacheControl != nil {
-		block["cache_control"] = cacheControl
+	block := anthropicSystemTextBlockRawCachePayload{
+		Type:         "text",
+		Text:         text,
+		CacheControl: cacheControl,
 	}
 	return json.Marshal(block)
 }
@@ -5081,21 +5096,19 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    先完成 messages 迁移，再构造 system blocks。
 	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
 	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
-		instructionBlock := map[string]any{
-			"type": "text",
-			"text": "[System Instructions]\n" + originalSystemText,
+		instructionBlock := anthropicSystemTextBlockRawCachePayload{
+			Type:         "text",
+			Text:         "[System Instructions]\n" + originalSystemText,
+			CacheControl: originalSystemCacheControl,
 		}
-		if originalSystemCacheControl != nil {
-			instructionBlock["cache_control"] = originalSystemCacheControl
-		}
-		instrMsg, err1 := json.Marshal(map[string]any{
-			"role":    "user",
-			"content": []map[string]any{instructionBlock},
+		instrMsg, err1 := json.Marshal(anthropicMessagePayload{
+			Role:    "user",
+			Content: []anthropicSystemTextBlockRawCachePayload{instructionBlock},
 		})
-		ackMsg, err2 := json.Marshal(map[string]any{
-			"role": "assistant",
-			"content": []map[string]any{
-				{"type": "text", "text": "Understood. I will follow these instructions."},
+		ackMsg, err2 := json.Marshal(anthropicMessagePayload{
+			Role: "assistant",
+			Content: []anthropicSystemTextBlockRawCachePayload{
+				{Type: "text", Text: "Understood. I will follow these instructions."},
 			},
 		})
 		if err1 != nil || err2 != nil {
@@ -5679,6 +5692,24 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if account.ProxyID != nil && account.Proxy != nil {
 		if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
 			proxyURL = account.Proxy.URL()
+		}
+	}
+
+	// 无代理的 Anthropic 请求会从网关出口 IP 直连 api.anthropic.com，
+	// 使所有无代理账号共用同一指纹。此处告警（OAuth/SetupToken 账号），
+	// 并在启用 require_proxy_for_anthropic 时直接拒绝，避免真实 IP 泄露与关联。
+	if account.Platform == PlatformAnthropic && proxyURL == "" {
+		if account.Type == AccountTypeOAuth || account.Type == AccountTypeSetupToken {
+			if _, warned := s.noProxyAnthropicWarned.LoadOrStore(account.ID, struct{}{}); !warned {
+				slog.Warn("anthropic_oauth_account_without_proxy",
+					"account_id", account.ID,
+					"account_name", account.Name,
+					"account_type", account.Type,
+					"detail", "requests egress from gateway IP; multiple no-proxy accounts share one fingerprint")
+			}
+		}
+		if s.cfg != nil && s.cfg.Gateway.RequireProxyForAnthropic {
+			return nil, fmt.Errorf("account %d (%s): proxy required for Anthropic requests but none configured (gateway.require_proxy_for_anthropic=true)", account.ID, account.Name)
 		}
 	}
 

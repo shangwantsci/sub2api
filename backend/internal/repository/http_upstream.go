@@ -127,6 +127,8 @@ type httpUpstreamService struct {
 	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
+	// proxyIsolationWarnOnce 确保 proxy 隔离模式被强制升级为 account_proxy 时只告警一次
+	proxyIsolationWarnOnce sync.Once
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务
@@ -614,7 +616,16 @@ func (s *httpUpstreamService) getIsolationMode() string {
 		return config.ConnectionPoolIsolationAccountProxy
 	}
 	switch mode {
-	case config.ConnectionPoolIsolationProxy, config.ConnectionPoolIsolationAccount, config.ConnectionPoolIsolationAccountProxy:
+	case config.ConnectionPoolIsolationProxy:
+		// proxy 模式下多个账号共享同一 HTTP 客户端 -> 同一 TLS 连接，
+		// HTTP/2 多路复用会让上游在单连接上看到多个 OAuth token，造成账号关联。
+		// 强制升级为 account_proxy，保证连接层按账号隔离。
+		s.proxyIsolationWarnOnce.Do(func() {
+			slog.Warn("connection_pool_isolation_proxy_forced_to_account_proxy",
+				"detail", "'proxy' isolation multiplexes multiple accounts over one TLS connection (OAuth token correlation risk); forcing 'account_proxy'")
+		})
+		return config.ConnectionPoolIsolationAccountProxy
+	case config.ConnectionPoolIsolationAccount, config.ConnectionPoolIsolationAccountProxy:
 		return mode
 	default:
 		return config.ConnectionPoolIsolationAccountProxy
