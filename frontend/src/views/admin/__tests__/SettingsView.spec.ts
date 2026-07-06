@@ -684,7 +684,7 @@ describe("admin SettingsView payment visible method controls", () => {
     ]);
   });
 
-  it("uses Claude Code 2.1.197 Agent SDK identity for default OAuth system blocks", async () => {
+  it("uses backend template placeholders for default OAuth system blocks", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       claude_oauth_system_prompt_blocks: "",
@@ -704,9 +704,8 @@ describe("admin SettingsView payment visible method controls", () => {
       text: string;
     }>;
 
-    expect(blocks[1]?.text).toBe(
-      "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
-    );
+    expect(blocks[1]?.text).toBe("{claude_code_system_prompt}");
+    expect(blocks[2]?.text).toBe("{claude_code_expansion_prompt}");
     expect(blocks[1]?.text).not.toBe(
       "You are Claude Code, Anthropic's official CLI for Claude.",
     );

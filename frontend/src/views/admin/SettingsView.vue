@@ -7575,17 +7575,10 @@ const legacyClaudeCodeSystemPrompt =
 const defaultClaudeCodeSystemPrompt =
   "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 
-const defaultClaudeCodeExpansionPrompt = `You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
-
-IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
-IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.
-
-# Tone and style
- - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
- - Your responses should be short and concise.
- - When referencing specific functions or pieces of code include the pattern file_path:line_number to allow the user to easily navigate to the source code location.
- - When referencing GitHub issues or pull requests, use the owner/repo#123 format (e.g. anthropics/claude-code#100) so they render as clickable links.
- - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.`;
+// 前端不再硬编码完整提示词文本；后端 go:embed 模板（prompts/claude_code_system_prompt_expansion.txt）
+// 是唯一 source of truth。前端保存时保留 {claude_code_expansion_prompt} 模板变量，
+// 后端在请求时动态展开为完整提示词。
+const defaultClaudeCodeExpansionPrompt = "{claude_code_expansion_prompt}";
 
 let claudeOAuthSystemPromptBlockID = 0;
 
@@ -7622,18 +7615,13 @@ function detectClaudeOAuthSystemPromptPreset(
 
 function normalizeClaudeOAuthSystemPromptBlockText(
   text: string,
-  expansionPrompt = "",
+  _expansionPrompt = "",
 ): string {
   const trimmed = text.trim();
-  if (trimmed === "{claude_code_system_prompt}") {
-    return defaultClaudeCodeSystemPrompt;
-  }
   if (trimmed === legacyClaudeCodeSystemPrompt) {
     return defaultClaudeCodeSystemPrompt;
   }
-  if (trimmed === "{claude_code_expansion_prompt}") {
-    return expansionPrompt.trim() || defaultClaudeCodeExpansionPrompt;
-  }
+  // 保留模板变量原样，不展开 — 后端在请求时动态替换为完整提示词
   return text;
 }
 
@@ -7654,12 +7642,8 @@ function createClaudeOAuthSystemPromptBlock(
 }
 
 function createDefaultClaudeOAuthSystemPromptBlocks(
-  expansionPrompt = "",
+  _expansionPrompt = "",
 ): ClaudeOAuthSystemPromptBlock[] {
-  const normalizedExpansionPrompt = expansionPrompt.trim();
-  const expansionText =
-    normalizedExpansionPrompt || defaultClaudeCodeExpansionPrompt;
-
   return [
     createClaudeOAuthSystemPromptBlock({
       preset: "billing",
@@ -7667,14 +7651,11 @@ function createDefaultClaudeOAuthSystemPromptBlocks(
     }),
     createClaudeOAuthSystemPromptBlock({
       preset: "system",
-      text: defaultClaudeCodeSystemPrompt,
+      text: "{claude_code_system_prompt}",
     }),
     createClaudeOAuthSystemPromptBlock({
-      preset:
-        expansionText === defaultClaudeCodeExpansionPrompt
-          ? "expansion"
-          : "custom",
-      text: expansionText,
+      preset: "expansion",
+      text: "{claude_code_expansion_prompt}",
       cacheControlEnabled: true,
       cacheControlTTL: "5m",
     }),
