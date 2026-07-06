@@ -6510,6 +6510,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
+	body = sanitizeAnthropicThinkingCitations(body, gjson.GetBytes(body, "model").String())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -7495,6 +7496,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
 	}
+	body = sanitizeAnthropicThinkingCitations(body, modelID)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -7699,6 +7701,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(vertexBody, finalBeta); changed {
 		vertexBody = sanitized
 	}
+	vertexBody = sanitizeAnthropicThinkingCitations(vertexBody, modelID)
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
 	if err != nil {
 		return nil, err

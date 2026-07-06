@@ -219,7 +219,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
 	// 1. 首先获取用户并发槽位
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, shouldPrewriteSSEWhileWaitingForSlot(c, reqStream), &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
@@ -402,7 +402,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					account.ID,
 					selection.WaitPlan.MaxConcurrency,
 					selection.WaitPlan.Timeout,
-					reqStream,
+					shouldPrewriteSSEWhileWaitingForSlot(c, reqStream),
 					&streamStarted,
 				)
 				if err != nil {
@@ -699,7 +699,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					account.ID,
 					selection.WaitPlan.MaxConcurrency,
 					selection.WaitPlan.Timeout,
-					reqStream,
+					shouldPrewriteSSEWhileWaitingForSlot(c, reqStream),
 					&streamStarted,
 				)
 				if err != nil {

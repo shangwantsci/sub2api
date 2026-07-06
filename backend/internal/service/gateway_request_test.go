@@ -336,6 +336,27 @@ func TestFilterThinkingBlocksForRetry_DisablesThinkingAndPreservesAsText(t *test
 	require.Equal(t, "Let me think...", first["text"])
 }
 
+func TestSanitizeAnthropicThinkingCitations_RemovesOnlyThinkingCitations(t *testing.T) {
+	input := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"thinking":{"type":"enabled","budget_tokens":1024},
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"analysis","signature":"sig_123","citations":[{"type":"char_location","start_char_index":0,"end_char_index":8}]},
+				{"type":"text","text":"Answer","citations":[{"type":"webpage","url":"https://example.com"}]}
+			]}
+		]
+	}`)
+
+	out := sanitizeAnthropicThinkingCitations(input, "claude-sonnet-4-5")
+
+	require.False(t, gjson.GetBytes(out, "messages.0.content.0.citations").Exists())
+	require.Equal(t, "analysis", gjson.GetBytes(out, "messages.0.content.0.thinking").String())
+	require.Equal(t, "sig_123", gjson.GetBytes(out, "messages.0.content.0.signature").String())
+	require.True(t, gjson.GetBytes(out, "messages.0.content.1.citations").Exists())
+	require.True(t, gjson.GetBytes(out, "thinking").Exists())
+}
+
 func TestFilterThinkingBlocksForRetry_DisablesThinkingEvenWithoutThinkingBlocks(t *testing.T) {
 	input := []byte(`{
 		"model":"claude-3-5-sonnet-20241022",

@@ -1093,7 +1093,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	reqLog *zap.Logger,
 ) (func(), bool) {
 	ctx := c.Request.Context()
-	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, userID, userConcurrency, reqStream, streamStarted)
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, userID, userConcurrency, shouldPrewriteSSEWhileWaitingForSlot(c, reqStream), streamStarted)
 	if err != nil {
 		reqLog.Warn("openai.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", *streamStarted)
@@ -1171,7 +1171,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 		account.ID,
 		selection.WaitPlan.MaxConcurrency,
 		selection.WaitPlan.Timeout,
-		reqStream,
+		shouldPrewriteSSEWhileWaitingForSlot(c, reqStream),
 		streamStarted,
 	)
 	if err != nil {

@@ -154,6 +154,18 @@ func NewConcurrencyHelper(concurrencyService *service.ConcurrencyService, pingFo
 	}
 }
 
+func shouldPrewriteSSEWhileWaitingForSlot(c *gin.Context, isStream bool) bool {
+	if !isStream {
+		return false
+	}
+	if c != nil && c.Request != nil && c.Request.URL != nil {
+		if strings.HasSuffix(c.Request.URL.Path, "/v1/messages") {
+			return false
+		}
+	}
+	return true
+}
+
 // wrapReleaseOnDone ensures release runs at most once and still triggers on context cancellation.
 // 用于避免客户端断开或上游超时导致的并发槽位泄漏。
 // 优化：基于 context.AfterFunc 注册回调，避免每请求额外守护 goroutine。

@@ -787,6 +787,62 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 	return out
 }
 
+func sanitizeAnthropicThinkingCitations(body []byte, mappedModel string) []byte {
+	if len(body) == 0 || !ShouldPreFilterThinkingBlocks(mappedModel) || !bytes.Contains(body, []byte(`"citations"`)) {
+		return body
+	}
+
+	jsonStr := *(*string)(unsafe.Pointer(&body))
+	msgsRes := gjson.Get(jsonStr, "messages")
+	if !msgsRes.Exists() || !msgsRes.IsArray() {
+		return body
+	}
+
+	var messages []any
+	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
+		return body
+	}
+
+	modified := false
+	for i := 0; i < len(messages); i++ {
+		msgMap, ok := messages[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		content, ok := msgMap["content"].([]any)
+		if !ok {
+			continue
+		}
+		for bi := 0; bi < len(content); bi++ {
+			blockMap, ok := content[bi].(map[string]any)
+			if !ok {
+				continue
+			}
+			blockType, _ := blockMap["type"].(string)
+			if blockType != "thinking" {
+				continue
+			}
+			if _, ok := blockMap["citations"]; ok {
+				delete(blockMap, "citations")
+				modified = true
+			}
+		}
+	}
+
+	if !modified {
+		return body
+	}
+	msgsBytes, err := json.Marshal(messages)
+	if err != nil {
+		return body
+	}
+	out, err := sjson.SetRawBytes(body, "messages", msgsBytes)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 // removeThinkingDependentContextStrategies 从 context_management.edits 中移除
 // 需要 thinking 启用的策略（如 clear_thinking_20251015）。
 // 当顶层 "thinking" 字段被禁用时必须调用，否则上游会返回

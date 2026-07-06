@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
@@ -92,6 +93,41 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 			assert.Equal(t, tt.message, errorObj["message"])
 		})
 	}
+}
+
+func TestOpenAIAnthropicMessagesAccountSlotTimeoutDoesNotPrewriteSSE(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cache := &concurrencyCacheMock{
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return false, nil
+		},
+	}
+	h := &OpenAIGatewayHandler{
+		concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatComment, time.Millisecond),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	selection := &service.AccountSelectionResult{
+		Account: &service.Account{ID: 42},
+		WaitPlan: &service.AccountWaitPlan{
+			AccountID:      42,
+			MaxConcurrency: 1,
+			Timeout:        20 * time.Millisecond,
+			MaxWaiting:     1,
+		},
+	}
+	streamStarted := false
+
+	release, acquired := h.acquireResponsesAccountSlot(c, nil, "", selection, true, &streamStarted, zap.NewNop())
+
+	require.False(t, acquired)
+	require.Nil(t, release)
+	require.False(t, streamStarted)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.NotContains(t, rec.Body.String(), ":\n\n")
+	require.NotContains(t, rec.Body.String(), "event:")
+	require.Contains(t, rec.Body.String(), `"type":"rate_limit_error"`)
 }
 
 func TestResolveOpenAIMessagesMetadataSession_DoesNotDerivePromptCacheKey(t *testing.T) {
