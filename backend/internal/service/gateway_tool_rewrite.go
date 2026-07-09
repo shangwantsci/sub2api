@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -283,6 +284,76 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 		body = next
 	}
 	return body
+}
+
+func cacheControlTTLForAutoInjectedBreakpoints(body []byte) string {
+	if bodyUsesAnthropicCacheTTL1h(body) {
+		return cacheTTLTarget1h
+	}
+	return claude.DefaultCacheControlTTL
+}
+
+func cacheControlUsesTTL1h(cc gjson.Result) bool {
+	return cc.Exists() &&
+		cc.Get("type").String() == "ephemeral" &&
+		strings.EqualFold(cc.Get("ttl").String(), cacheTTLTarget1h)
+}
+
+func bodyUsesAnthropicCacheTTL1h(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if cacheControlUsesTTL1h(gjson.GetBytes(body, "cache_control")) {
+		return true
+	}
+
+	found := false
+	system := gjson.GetBytes(body, "system")
+	if system.IsArray() {
+		system.ForEach(func(_, block gjson.Result) bool {
+			if cacheControlUsesTTL1h(block.Get("cache_control")) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+
+	messages := gjson.GetBytes(body, "messages")
+	if messages.IsArray() {
+		messages.ForEach(func(_, msg gjson.Result) bool {
+			content := msg.Get("content")
+			if !content.IsArray() {
+				return true
+			}
+			content.ForEach(func(_, block gjson.Result) bool {
+				if cacheControlUsesTTL1h(block.Get("cache_control")) {
+					found = true
+					return false
+				}
+				return true
+			})
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+
+	tools := gjson.GetBytes(body, "tools")
+	if tools.IsArray() {
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			if cacheControlUsesTTL1h(tool.Get("cache_control")) {
+				found = true
+				return false
+			}
+			return true
+		})
+	}
+	return found
 }
 
 // restoreToolNamesInBytes 对 bytes chunk 做逆向还原：假名 → 真名。

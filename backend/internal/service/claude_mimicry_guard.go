@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 )
 
@@ -31,6 +34,41 @@ func normalizeClaudeMimicryGuardMode(mode string) string {
 	default:
 		return claudeMimicryGuardWarn
 	}
+}
+
+func (s *GatewayService) enforceClaudeMimicryGuard(ctx context.Context, req *http.Request, body []byte, account *Account) error {
+	profile := claude.DefaultClaudeCodeMimicryProfile()
+	guardMode := claudeMimicryGuardWarn
+	if s.settingService != nil {
+		runtimeSettings := s.settingService.GetClaudeMimicryRuntimeSettings(ctx)
+		profile = claude.ResolveClaudeCodeMimicryProfile(runtimeSettings.ProfileID)
+		guardMode = normalizeClaudeMimicryGuardMode(runtimeSettings.GuardMode)
+	}
+	modelProfile := claude.ResolveClaudeCodeMimicryModelProfile(gjson.GetBytes(body, "model").String())
+	profile.MessageBetas = modelProfile.MessageBetas
+	if req != nil && req.URL != nil && strings.Contains(req.URL.Path, "count_tokens") {
+		profile.MessageBetas = modelProfile.CountTokensBetas
+	}
+	audit := evaluateClaudeMimicryGuard(req, body, profile, guardMode)
+	if !audit.OK {
+		accountID := int64(0)
+		if account != nil {
+			accountID = account.ID
+		}
+		endpoint := ""
+		requestID := ""
+		if req != nil {
+			if req.URL != nil {
+				endpoint = req.URL.Path
+			}
+			requestID = getHeaderRaw(req.Header, "x-client-request-id")
+		}
+		logger.LegacyPrintf("service.gateway", "[ClaudeMimicryGuard] mode=%s profile=%s endpoint=%s account_id=%d request_id=%s findings=%s", guardMode, profile.ID, endpoint, accountID, requestID, strings.Join(audit.Findings, ","))
+	}
+	if audit.ShouldBlock {
+		return fmt.Errorf("claude mimicry guard blocked request: %s", strings.Join(audit.Findings, ","))
+	}
+	return nil
 }
 
 func evaluateClaudeMimicryGuard(req *http.Request, body []byte, profile claude.ClaudeCodeMimicryProfile, mode string) claudeMimicryAuditResult {

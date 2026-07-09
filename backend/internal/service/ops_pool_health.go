@@ -106,7 +106,7 @@ func (s *OpsService) GetPublicPoolHealth(ctx context.Context, req PublicPoolHeal
 		Horizon:     req.Horizon,
 	})
 
-	accounts, err := s.listAllAccountsForOps(ctx, opts.Platform)
+	accounts, err := s.listAllAccountsForOps(ctx, opts.Platform, nil)
 	if err != nil {
 		return nil, err
 	}
