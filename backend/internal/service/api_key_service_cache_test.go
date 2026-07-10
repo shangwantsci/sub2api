@@ -280,6 +280,9 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *testing.T) {
 	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	groupID := int64(9)
+	videoPrice480P := 0.11
+	videoPrice720P := 0.22
+	videoPrice1080P := 0.33
 	apiKey := &APIKey{
 		ID:      1,
 		UserID:  2,
@@ -301,6 +304,11 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *t
 			Status:                          StatusActive,
 			SubscriptionType:                SubscriptionTypeStandard,
 			RateMultiplier:                  1,
+			VideoRateIndependent:            true,
+			VideoRateMultiplier:             1.25,
+			VideoPrice480P:                  &videoPrice480P,
+			VideoPrice720P:                  &videoPrice720P,
+			VideoPrice1080P:                 &videoPrice1080P,
 			AnthropicMixedTypeWeightEnabled: true,
 			AnthropicSetupTokenPoolWeight:   70,
 			AnthropicAPIKeyPoolWeight:       30,
@@ -312,6 +320,11 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *t
 
 	require.NotNil(t, roundTrip)
 	require.NotNil(t, roundTrip.Group)
+	require.True(t, roundTrip.Group.VideoRateIndependent)
+	require.Equal(t, 1.25, roundTrip.Group.VideoRateMultiplier)
+	require.Equal(t, &videoPrice480P, roundTrip.Group.VideoPrice480P)
+	require.Equal(t, &videoPrice720P, roundTrip.Group.VideoPrice720P)
+	require.Equal(t, &videoPrice1080P, roundTrip.Group.VideoPrice1080P)
 	require.True(t, roundTrip.Group.AnthropicMixedTypeWeightEnabled)
 	require.Equal(t, 70, roundTrip.Group.AnthropicSetupTokenPoolWeight)
 	require.Equal(t, 30, roundTrip.Group.AnthropicAPIKeyPoolWeight)
