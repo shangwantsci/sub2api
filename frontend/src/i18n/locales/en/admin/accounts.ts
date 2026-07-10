@@ -3,6 +3,13 @@ export default {
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
+      anthropicSessionBulkImport: 'Bulk Import Claude SessionKeys',
+      anthropicSessionBulkImportShort: 'Bulk Import',
+      anthropicSessionBulkImportTitle: 'Bulk Import Claude SessionKeys',
+      anthropicSessionBulkImportFormHint:
+        'The account settings below will be applied to imported setup-token accounts. Leave proxy empty for automatic assignment; groups, concurrency, quota controls, session masking, and other settings are saved with the import.',
+      anthropicSessionAutoNamePlaceholder: 'Accounts will be named by email + subscription type',
+      anthropicSessionAutoNameHint: 'Bulk import auto-names accounts, so no account name is required here.',
       autoRefresh: 'Auto Refresh',
       enableAutoRefresh: 'Enable auto refresh',
       refreshInterval5s: '5 seconds',
@@ -743,11 +750,18 @@ export default {
         cookieAutoAuth: 'Cookie Auto-Auth',
         cookieAutoAuthDesc:
           'Use claude.ai sessionKey to automatically complete OAuth authorization without manually opening browser.',
+        anthropicSessionBulkImport: 'Bulk import sessionKeys',
+        anthropicSessionBulkImportDesc:
+          'Paste one claude.ai sessionKey per line. Import exchanges setup tokens, assigns proxies automatically, and names accounts by email + subscription type.',
         sessionKey: 'sessionKey',
+        sessionKeys: 'sessionKeys',
         keysCount: '{count} keys',
         batchCreateAccounts: 'Will batch create {count} accounts',
+        batchImportAccounts: 'Will bulk import {count} accounts',
         sessionKeyPlaceholder:
           'One sessionKey per line, e.g.:\nsk-ant-sid01-xxxxx...\nsk-ant-sid01-yyyyy...',
+        anthropicSessionBulkImportPlaceholder:
+          'One claude.ai sessionKey per line, e.g.:\nsk-ant-sid01-xxxxx...\nsk-ant-sid01-yyyyy...',
         sessionKeyPlaceholderSingle: 'sk-ant-sid01-xxxxx...',
         howToGetSessionKey: 'How to get sessionKey',
         step1: 'Login to claude.ai in your browser',
@@ -758,7 +772,9 @@ export default {
         step6: 'Copy the Value',
         sessionKeyFormat: 'sessionKey usually starts with sk-ant-sid01-',
         startAutoAuth: 'Start Auto-Auth',
+        startBatchImport: 'Start Bulk Import',
         authorizing: 'Authorizing...',
+        importing: 'Importing...',
         followSteps: 'Follow these steps to authorize your Claude account:',
         step1GenerateUrl: 'Click the button below to generate the authorization URL',
         generateAuthUrl: 'Generate Auth URL',
