@@ -2361,14 +2361,21 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 	if !h.gatewayService.IsCyberSessionBlocked(c.Request.Context(), key) {
 		return false
 	}
-	// body-signal compact 心跳可能已把响应头提交为 200（cyber 检查在用户槽位
-	// 长等待之后执行）：以 response.failed 终止事件回传；未提交时停拍后照常
-	// 写 JSON（#3887）。
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+	writeCyberSessionBlockedResponse(c, format)
+	h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, model, key)
+	return true
+}
+
+func writeCyberSessionBlockedResponse(c *gin.Context, format cyberSessionBlockFormat) {
+	// body-signal compact 心跳或普通槽位 ping 可能已把 Responses 响应头提交为
+	// 200（cyber 检查在用户槽位长等待之后执行）：以 response.failed 终止事件
+	// 回传；未提交时停拍后照常写 JSON（#3887）。
+	compactCommitted := service.StopOpenAICompactSSEKeepaliveCommitted(c)
+	responsesCommitted := format == cyberBlockFormatResponses && c.Writer.Written()
+	if compactCommitted || responsesCommitted {
 		service.MarkOpsStreamError(c, "permission_error", cyberSessionBlockedClientMsg, http.StatusForbidden)
 		if writeResponsesFailedSSE(c, "permission_error", cyberSessionBlockedClientMsg) {
-			h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, model, key)
-			return true
+			return
 		}
 	}
 	switch format {
@@ -2384,8 +2391,6 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 			"message": cyberSessionBlockedClientMsg,
 		}})
 	}
-	h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, model, key)
-	return true
 }
 
 // enqueueCyberSessionBlockedOpsEntry captures request meta and enqueues the

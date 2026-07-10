@@ -139,6 +139,30 @@ func TestRejectIfCyberSessionBlocked_FailOpen(t *testing.T) {
 	require.False(t, h2.rejectIfCyberSessionBlocked(c, key, []byte(`{}`), "gpt-5", cyberBlockFormatResponses), "nil gateway service → pass")
 }
 
+func TestOpenAIResponsesCyberBlockAfterSlotPingEmitsResponseFailed(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointResponses)
+	const ping = ":\n\n"
+	_, err := c.Writer.WriteString(ping)
+	require.NoError(t, err)
+	require.True(t, c.Writer.Written(), "ordinary slot ping must commit the response writer")
+	require.False(t, service.StopOpenAICompactSSEKeepaliveCommitted(c), "ordinary slot ping is not compact keepalive")
+
+	writeCyberSessionBlockedResponse(c, cyberBlockFormatResponses)
+
+	body := w.Body.String()
+	require.True(t, strings.HasPrefix(body, ping), "missing prewritten ping: %q", body)
+	_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(body, ping))
+	require.Equal(t, "permission_denied", errObj["code"])
+	require.Equal(t, cyberSessionBlockedClientMsg, errObj["message"])
+	require.NotContains(t, body, ping+`{"error":`, "must not append a raw JSON envelope after SSE ping")
+
+	streamErr, ok := service.GetOpsStreamError(c)
+	require.True(t, ok)
+	require.Equal(t, "permission_error", streamErr.ErrType)
+	require.Equal(t, cyberSessionBlockedClientMsg, streamErr.Message)
+	require.Equal(t, 403, streamErr.IntendedStatus)
+}
+
 // TestRecordCyberPolicyIfMarked_BlockKeyPlumbed verifies the 6th param is
 // accepted and a non-empty key with nil gateway service does not panic
 // (write-side guards live in the service layer).

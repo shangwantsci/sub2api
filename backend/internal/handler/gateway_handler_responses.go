@@ -299,6 +299,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.
 func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code, message string) {
+	if c.Writer.Written() {
+		h.handleStreamingAwareError(c, status, code, message, true)
+		return
+	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"code":    code,

@@ -91,6 +91,87 @@ func TestGatewayHandleResponsesFailoverExhausted_AfterPingEmitsResponseFailed(t 
 	assert.Contains(t, body, `"message":"All available accounts exhausted"`)
 }
 
+func TestGatewayResponsesErrorAfterPingEmitsResponseFailed(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointResponses)
+	const ping = ":\n\n"
+	_, err := c.Writer.WriteString(ping)
+	require.NoError(t, err)
+
+	h := &GatewayHandler{}
+	h.responsesErrorResponse(c, http.StatusForbidden, "billing_error", "Billing eligibility failed")
+
+	body := w.Body.String()
+	require.True(t, strings.HasPrefix(body, ping), "missing prewritten ping: %q", body)
+	_, errObj := parseResponsesFailedSSE(t, strings.TrimPrefix(body, ping))
+	require.Equal(t, "billing_error", errObj["code"])
+	require.Equal(t, "Billing eligibility failed", errObj["message"])
+	require.NotContains(t, body, ping+`{"error":`, "must not append a raw JSON envelope after SSE ping")
+}
+
+func TestGatewayResponsesUnstartedErrorKeepsJSON(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointResponses)
+
+	h := &GatewayHandler{}
+	h.responsesErrorResponse(c, http.StatusForbidden, "billing_error", "Billing eligibility failed")
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, map[string]any{
+		"error": map[string]any{
+			"code":    "billing_error",
+			"message": "Billing eligibility failed",
+		},
+	}, got)
+}
+
+func TestGatewayChatCompletionsErrorAfterPingKeepsLegacySSE(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
+	const ping = ":\n\n"
+	_, err := c.Writer.WriteString(ping)
+	require.NoError(t, err)
+
+	h := &GatewayHandler{}
+	h.chatCompletionsErrorResponse(c, http.StatusForbidden, "billing_error", "Billing eligibility failed")
+
+	require.Equal(t,
+		ping+`data: {"type":"error","error":{"type":"billing_error","message":"Billing eligibility failed"}}`+"\n\n",
+		w.Body.String(),
+	)
+}
+
+func TestGatewayHandleCCFailoverExhausted_AfterPingEmitsLegacySSE(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
+	const ping = ":\n\n"
+	_, err := c.Writer.WriteString(ping)
+	require.NoError(t, err)
+
+	h := &GatewayHandler{}
+	h.handleCCFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}, true)
+
+	require.Equal(t,
+		ping+`data: {"type":"error","error":{"type":"server_error","message":"All available accounts exhausted"}}`+"\n\n",
+		w.Body.String(),
+	)
+}
+
+func TestGatewayChatCompletionsUnstartedErrorKeepsJSON(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
+
+	h := &GatewayHandler{}
+	h.chatCompletionsErrorResponse(c, http.StatusForbidden, "billing_error", "Billing eligibility failed")
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, map[string]any{
+		"error": map[string]any{
+			"type":    "billing_error",
+			"message": "Billing eligibility failed",
+		},
+	}, got)
+}
+
 func TestGatewayForwardErrorAlreadyCommunicated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
