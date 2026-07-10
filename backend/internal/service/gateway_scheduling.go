@@ -218,6 +218,30 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	for i := range accounts {
 		accountByID[accounts[i].ID] = &accounts[i]
 	}
+	runtimeBlocks := map[int64]accountRuntimeBlock(nil)
+	if s.rateLimitService != nil {
+		runtimeBlocks = s.rateLimitService.GetAccountRuntimeSchedulingBlocks(ctx, accounts)
+		if len(runtimeBlocks) > 0 {
+			slog.Debug("account_runtime_blocks_prefetched",
+				"group_id", derefGroupID(groupID),
+				"model", requestedModel,
+				"blocked_count", len(runtimeBlocks),
+			)
+		}
+	}
+	isRuntimeBlocked := func(account *Account) bool {
+		if account == nil || len(runtimeBlocks) == 0 {
+			return false
+		}
+		block, ok := runtimeBlocks[account.ID]
+		if !ok {
+			return false
+		}
+		if !block.Until.After(time.Now()) {
+			return false
+		}
+		return true
+	}
 	isExcluded := func(accountID int64) bool {
 		if excludedIDs == nil {
 			return false
@@ -252,7 +276,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	if len(routingAccountIDs) > 0 && s.concurrencyService != nil {
 		// 1. 过滤出路由列表中可调度的账号
 		var routingCandidates []*Account
-		var filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost int
+		var filteredExcluded, filteredMissing, filteredUnsched, filteredRuntime, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost int
 		var modelScopeSkippedIDs []int64 // 记录因模型限流被跳过的账号 ID
 		for _, routingAccountID := range routingAccountIDs {
 			if isExcluded(routingAccountID) {
@@ -266,6 +290,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				} else {
 					filteredUnsched++
 				}
+				continue
+			}
+			if isRuntimeBlocked(account) {
+				filteredRuntime++
 				continue
 			}
 			if !s.isAccountAllowedForPlatform(account, platform, useMixed) {
@@ -298,9 +326,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		if s.debugModelRoutingEnabled() {
-			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed candidates: group_id=%v model=%s routed=%d candidates=%d filtered(excluded=%d missing=%d unsched=%d platform=%d model_scope=%d model_mapping=%d window_cost=%d)",
+			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed candidates: group_id=%v model=%s routed=%d candidates=%d filtered(excluded=%d missing=%d unsched=%d runtime=%d platform=%d model_scope=%d model_mapping=%d window_cost=%d)",
 				derefGroupID(groupID), requestedModel, len(routingAccountIDs), len(routingCandidates),
-				filteredExcluded, filteredMissing, filteredUnsched, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost)
+				filteredExcluded, filteredMissing, filteredUnsched, filteredRuntime, filteredPlatform, filteredModelScope, filteredModelMapping, filteredWindowCost)
 			if len(modelScopeSkippedIDs) > 0 {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] model_rate_limited accounts skipped: group_id=%v model=%s account_ids=%v",
 					derefGroupID(groupID), requestedModel, modelScopeSkippedIDs)
@@ -321,8 +349,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					// 粘性账号在路由列表中，优先使用
 					if stickyAccount, ok := accountByID[stickyAccountID]; ok {
 						var stickyCacheMissReason string
+						stickyRuntimeBlocked := isRuntimeBlocked(stickyAccount)
+						if stickyRuntimeBlocked && s.cache != nil {
+							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+						}
 
-						gatePass := s.isAccountSchedulableForSelection(stickyAccount) &&
+						gatePass := !stickyRuntimeBlocked &&
+							s.isAccountSchedulableForSelection(stickyAccount) &&
 							s.isAccountAllowedForPlatform(stickyAccount, platform, useMixed) &&
 							(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, stickyAccount, requestedModel)) &&
 							s.isAccountSchedulableForModelSelection(ctx, stickyAccount, requestedModel) &&
@@ -375,6 +408,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								}
 							}
 							// 粘性账号槽位满且等待队列已满，继续使用负载感知选择
+						} else if stickyRuntimeBlocked {
+							stickyCacheMissReason = "runtime_blocked"
 						} else if !gatePass {
 							stickyCacheMissReason = "gate_check"
 						} else {
@@ -493,11 +528,17 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			account, ok := accountByID[accountID]
 			if ok {
 				// 检查账户是否需要清理粘性会话绑定
-				clearSticky := shouldClearStickySession(account, requestedModel)
+				runtimeBlocked := isRuntimeBlocked(account)
+				clearSticky := runtimeBlocked || shouldClearStickySession(account, requestedModel)
 				if clearSticky {
 					slog.Debug("sticky.layer1_5_no_routing_clear",
 						"account_id", accountID,
-						"reason", "should_clear_sticky_session",
+						"reason", func() string {
+							if runtimeBlocked {
+								return "runtime_blocked"
+							}
+							return "should_clear_sticky_session"
+						}(),
 						"session", shortSessionHash(sessionHash),
 					)
 					_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
@@ -518,6 +559,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					"account_id", accountID,
 					"session", shortSessionHash(sessionHash),
 					"clear_sticky", clearSticky,
+					"runtime_blocked", runtimeBlocked,
 					"schedulable", schedulable,
 					"platform_ok", platformOK,
 					"model_supported", modelSupported,
@@ -617,6 +659,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if isExcluded(acc.ID) {
 			continue
 		}
+		if isRuntimeBlocked(acc) {
+			continue
+		}
 		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
@@ -645,6 +690,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			continue
 		}
 		candidates = append(candidates, acc)
+	}
+
+	mixedTypePolicyEnabled := shouldUseAnthropicMixedTypeWeightScheduling(group, platform)
+	if mixedTypePolicyEnabled {
+		candidates = filterCandidatesForMixedTypePolicy(candidates, group)
 	}
 
 	if len(candidates) == 0 {
@@ -681,44 +731,36 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
-		// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
-		for len(available) > 0 {
-			// 1. 取优先级最小的集合
-			candidates := filterByMinPriority(available)
-			// 2. （可选）use-it-or-lose-it：优先选用会话窗口最早重置的账号
-			if cfg.PreferSoonestReset {
-				candidates = filterBySoonestReset(candidates)
+		if mixedTypePolicyEnabled {
+			if result, ok, err := s.tryAcquireMixedTypeWeighted(ctx, available, groupID, sessionHash, group, preferOAuth, cfg.PreferSoonestReset); err != nil {
+				return nil, err
+			} else if ok {
+				return result, nil
 			}
-			// 3. 取负载率最低的集合
-			candidates = filterByMinLoadRate(candidates)
-			// 4. LRU 选择最久未用的账号
-			selected := selectByLRU(candidates, preferOAuth)
-			if selected == nil {
-				break
-			}
+		} else {
+			// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
+			for len(available) > 0 {
+				selected := selectDefaultLoadAwareCandidate(available, preferOAuth, cfg.PreferSoonestReset)
+				if selected == nil {
+					break
+				}
 
-			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
-			if err == nil && result.Acquired {
-				// 会话数量限制检查
-				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
-					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
-				} else {
-					if sessionHash != "" && s.cache != nil {
-						_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
+				result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
+				if err == nil && result.Acquired {
+					// 会话数量限制检查
+					if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
+						result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
+					} else {
+						if sessionHash != "" && s.cache != nil {
+							_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
+						}
+						return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
 					}
-					return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
 				}
-			}
 
-			// 移除已尝试的账号，重新进行分层过滤
-			selectedID := selected.account.ID
-			newAvailable := make([]accountWithLoad, 0, len(available)-1)
-			for _, acc := range available {
-				if acc.account.ID != selectedID {
-					newAvailable = append(newAvailable, acc)
-				}
+				// 移除已尝试的账号，重新进行分层过滤
+				available = removeAccountWithLoadByID(available, selected.account.ID)
 			}
-			available = newAvailable
 		}
 	}
 
@@ -737,6 +779,106 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		})
 	}
 	return nil, ErrNoAvailableAccounts
+}
+
+func (s *GatewayService) tryAcquireMixedTypeWeighted(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, group *Group, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
+	available = filterAvailableForMixedTypePolicy(available, group)
+	if len(available) == 0 {
+		return nil, false, nil
+	}
+
+	poolOrder := mixedTypePoolAttemptOrder(available, group)
+	for _, pool := range poolOrder {
+		result, ok, err := s.tryAcquireMixedTypePool(ctx, available, groupID, sessionHash, pool, preferOAuth, preferSoonestReset)
+		if err != nil || ok {
+			return result, ok, err
+		}
+	}
+	return nil, false, nil
+}
+
+func mixedTypePoolAttemptOrder(available []accountWithLoad, group *Group) []string {
+	if group == nil {
+		return nil
+	}
+	first := selectMixedTypePool(group.AnthropicSetupTokenPoolWeight, group.AnthropicAPIKeyPoolWeight)
+	order := make([]string, 0, 2)
+	if first != "" && mixedTypePoolHasCandidate(available, first) {
+		order = append(order, first)
+	}
+	for _, pool := range []string{mixedTypePoolSetupToken, mixedTypePoolAPIKey} {
+		if pool == first || !mixedTypePoolHasCandidate(available, pool) {
+			continue
+		}
+		switch pool {
+		case mixedTypePoolSetupToken:
+			if group.AnthropicSetupTokenPoolWeight <= 0 {
+				continue
+			}
+		case mixedTypePoolAPIKey:
+			if group.AnthropicAPIKeyPoolWeight <= 0 {
+				continue
+			}
+		}
+		order = append(order, pool)
+	}
+	return order
+}
+
+func mixedTypePoolHasCandidate(available []accountWithLoad, pool string) bool {
+	for _, item := range available {
+		if item.account != nil && mixedTypePoolForAccount(item.account) == pool {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *GatewayService) tryAcquireMixedTypePool(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, pool string, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
+	candidates := filterAvailableByMixedTypePool(available, pool)
+	for len(candidates) > 0 {
+		var selected *accountWithLoad
+		if pool == mixedTypePoolAPIKey {
+			selected = selectWeightedAPIKeyCandidate(candidates)
+		} else {
+			selected = selectDefaultLoadAwareCandidate(candidates, preferOAuth, preferSoonestReset)
+		}
+		if selected == nil || selected.account == nil {
+			break
+		}
+
+		result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
+		if err == nil && result.Acquired {
+			if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
+				result.ReleaseFunc()
+			} else {
+				if sessionHash != "" && s.cache != nil {
+					_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
+				}
+				selection, err := s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
+				if err != nil {
+					return nil, false, err
+				}
+				return selection, true, nil
+			}
+		}
+
+		candidates = removeAccountWithLoadByID(candidates, selected.account.ID)
+	}
+	return nil, false, nil
+}
+
+func filterAvailableByMixedTypePool(available []accountWithLoad, pool string) []accountWithLoad {
+	if len(available) == 0 {
+		return available
+	}
+	result := make([]accountWithLoad, 0, len(available))
+	for _, item := range available {
+		if item.account != nil && mixedTypePoolForAccount(item.account) == pool {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
@@ -1450,6 +1592,97 @@ func filterByMinLoadRate(accounts []accountWithLoad) []accountWithLoad {
 	return result
 }
 
+func shouldUseAnthropicMixedTypeWeightScheduling(group *Group, platform string) bool {
+	return group != nil &&
+		platform == PlatformAnthropic &&
+		group.Platform == PlatformAnthropic &&
+		group.AnthropicMixedTypeWeightEnabled
+}
+
+func filterCandidatesForMixedTypePolicy(candidates []*Account, group *Group) []*Account {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	result := make([]*Account, 0, len(candidates))
+	for _, account := range candidates {
+		if accountAllowedByMixedTypePolicy(account, group) {
+			result = append(result, account)
+		}
+	}
+	return result
+}
+
+func filterAvailableForMixedTypePolicy(available []accountWithLoad, group *Group) []accountWithLoad {
+	if len(available) == 0 {
+		return available
+	}
+	result := make([]accountWithLoad, 0, len(available))
+	for _, item := range available {
+		if accountAllowedByMixedTypePolicy(item.account, group) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func accountAllowedByMixedTypePolicy(account *Account, group *Group) bool {
+	if account == nil || group == nil {
+		return false
+	}
+	switch mixedTypePoolForAccount(account) {
+	case mixedTypePoolAPIKey:
+		return group.AnthropicAPIKeyPoolWeight > 0 && account.EffectivePoolWeight() > 0
+	case mixedTypePoolSetupToken:
+		return group.AnthropicSetupTokenPoolWeight > 0
+	default:
+		return false
+	}
+}
+
+func mixedTypePoolForAccount(account *Account) string {
+	if account != nil && account.Type == AccountTypeAPIKey {
+		return mixedTypePoolAPIKey
+	}
+	return mixedTypePoolSetupToken
+}
+
+func selectMixedTypePool(setupWeight, apiKeyWeight int) string {
+	setupWeight = positiveWeight(setupWeight)
+	apiKeyWeight = positiveWeight(apiKeyWeight)
+	total := setupWeight + apiKeyWeight
+	if total <= 0 {
+		return ""
+	}
+	return selectMixedTypePoolByDraw(setupWeight, apiKeyWeight, mathrand.Intn(total))
+}
+
+func selectMixedTypePoolByDraw(setupWeight, apiKeyWeight, draw int) string {
+	setupWeight = positiveWeight(setupWeight)
+	apiKeyWeight = positiveWeight(apiKeyWeight)
+	total := setupWeight + apiKeyWeight
+	if total <= 0 {
+		return ""
+	}
+	if draw < 0 {
+		draw = 0
+	}
+	draw %= total
+	if setupWeight > 0 && draw < setupWeight {
+		return mixedTypePoolSetupToken
+	}
+	if apiKeyWeight > 0 {
+		return mixedTypePoolAPIKey
+	}
+	return mixedTypePoolSetupToken
+}
+
+func positiveWeight(weight int) int {
+	if weight < 0 {
+		return 0
+	}
+	return weight
+}
+
 // filterBySoonestReset 过滤出「会话窗口最早重置」的账号集合（use-it-or-lose-it）。
 // 仅保留拥有未来重置时间（SessionWindowEnd 在当前时间之后）且最早的账号；
 // 窗口为空或已过期的账号视为无活跃窗口、优先级最低。
@@ -1478,6 +1711,67 @@ func filterBySoonestReset(accounts []accountWithLoad) []accountWithLoad {
 		end := acc.account.SessionWindowEnd
 		if end != nil && now.Before(*end) && end.Equal(*minEnd) {
 			result = append(result, acc)
+		}
+	}
+	return result
+}
+
+func selectDefaultLoadAwareCandidate(accounts []accountWithLoad, preferOAuth bool, preferSoonestReset bool) *accountWithLoad {
+	candidates := filterByMinPriority(accounts)
+	if preferSoonestReset {
+		candidates = filterBySoonestReset(candidates)
+	}
+	candidates = filterByMinLoadRate(candidates)
+	return selectByLRU(candidates, preferOAuth)
+}
+
+func selectWeightedAPIKeyCandidate(accounts []accountWithLoad) *accountWithLoad {
+	total := 0
+	scores := make([]int, len(accounts))
+	for i, item := range accounts {
+		score := weightedAPIKeyCandidateScore(item)
+		scores[i] = score
+		total += score
+	}
+	if total <= 0 {
+		return nil
+	}
+	draw := mathrand.Intn(total)
+	for i, score := range scores {
+		if score <= 0 {
+			continue
+		}
+		if draw < score {
+			return &accounts[i]
+		}
+		draw -= score
+	}
+	return nil
+}
+
+func weightedAPIKeyCandidateScore(item accountWithLoad) int {
+	if item.account == nil || item.account.Type != AccountTypeAPIKey {
+		return 0
+	}
+	weight := item.account.EffectivePoolWeight()
+	if weight <= 0 {
+		return 0
+	}
+	availableLoad := 100
+	if item.loadInfo != nil {
+		availableLoad = 100 - item.loadInfo.LoadRate
+	}
+	if availableLoad <= 0 {
+		return 0
+	}
+	return weight * availableLoad
+}
+
+func removeAccountWithLoadByID(accounts []accountWithLoad, accountID int64) []accountWithLoad {
+	result := make([]accountWithLoad, 0, len(accounts))
+	for _, item := range accounts {
+		if item.account == nil || item.account.ID != accountID {
+			result = append(result, item)
 		}
 	}
 	return result
