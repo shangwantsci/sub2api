@@ -130,8 +130,10 @@ count_tokens 边界必须显式保持：
 
 - CountTokensBetas 不再由更新后的 messages beta 自动推导。
 - 继续保留本轮开始前的 count_tokens 专属列表和 token-counting 行为。
+- 模型 profile 增加独立的 count_tokens 默认 max_tokens；Sonnet 在 messages 更新为 32000 时，count_tokens 继续保持本轮前的 64000。
+- count_tokens 规范化调用必须显式标识端点类型，不能复用更新后的 messages max_tokens。
 - 新测试必须证明本轮没有改变 count_tokens 专属 beta 列表。
-- 共享的 CLI 版本身份会自然更新到 2.1.206，但不修改 count_tokens 专属算法、body 默认值或 beta 组合。
+- 共享的 CLI 版本身份会自然更新到 2.1.206，但不修改 count_tokens 专属算法、body 默认值、默认 expansion 或 beta 组合。
 
 ### 6.3 模型感知的默认 expansion
 
@@ -139,6 +141,8 @@ count_tokens 边界必须显式保持：
 
 - 包含 fable 时返回 Fable 文件。
 - 其他模型返回现有通用文件。
+- messages synthetic mimic 使用上述模型感知选择。
+- count_tokens 在管理员 legacy prompt 为空时继续显式使用本轮前的通用 expansion，避免未抓到该端点却间接切换到 Fable 模板。
 
 选择发生在构造第三个 system block 之前。优先级保持为：
 
@@ -209,7 +213,7 @@ oauth 子对象 7 个：
 - Sonnet 与 Opus 的 max_tokens 必须分别为 32000 和 64000。
 - Fable 默认 expansion 必须选择新文件；其他模型必须继续选择现有文件。
 - messages wire 测试必须验证字面量 beta 顺序、billing 版本前缀和模型默认值。
-- count_tokens 回归测试记录本轮前的专属 beta 列表，并断言更新后完全不变。
+- count_tokens 回归测试记录本轮前的专属 beta 列表、Sonnet 64000 默认值及通用 expansion 哈希，并断言更新后完全不变。
 
 ### 8.2 RED：前端
 
@@ -225,8 +229,8 @@ oauth 子对象 7 个：
 
 前端至少运行：
 
-- pnpm exec vitest run 相关 i18n 与 SettingsView 测试
-- pnpm run build
+- npm run test:run -- 相关 i18n 与 SettingsView 测试
+- npm run build
 
 最后启动本地前端，用浏览器在中文 locale 下实际检查：
 
@@ -252,10 +256,14 @@ oauth 子对象 7 个：
 - backend/internal/pkg/claude/constants_test.go
 - backend/internal/service/gateway_service.go
 - backend/internal/service/gateway_claude_oauth_body.go
+- backend/internal/service/gateway_count_tokens.go
 - backend/internal/service/gateway_beta_test.go
+- backend/internal/service/gateway_body_order_test.go
+- backend/internal/service/gateway_context_management_test.go
+- backend/internal/service/gateway_oauth_metadata_test.go
 - backend/internal/service/gateway_claude_wire_test.go
 - backend/internal/service/prompts/claude_code_fable_system_prompt_expansion.txt
-- 必要的 prompt 选择单元测试
+- 模型 prompt 选择与 count_tokens 保持测试
 
 前端：
 
@@ -266,6 +274,7 @@ oauth 子对象 7 个：
 - frontend/src/i18n/locales/zh/admin/settings.ts
 - frontend/src/i18n/locales/en/admin/settings.ts
 - frontend/src/i18n/__tests__/anthropicSessionBulkImportLocales.spec.ts
+- frontend/src/i18n/__tests__/claudeCodeMimicryProfileLocales.spec.ts
 
 不应修改模型定价、模型白名单、账号调度、TLS profile 或部署文件。
 
@@ -273,7 +282,7 @@ oauth 子对象 7 个：
 
 - 本地 Claude Code 2.1.206 的四个模型族 messages 抓包字段与 synthetic mimic 的测试期望一致。
 - Fable 使用独立、经双抓包确认的静态 expansion；其他模型继续使用已验证通用 expansion。
-- count_tokens 专属测试输出与本轮前一致。
+- count_tokens 专属 beta、Sonnet max_tokens 和默认 expansion 与本轮前一致。
 - 管理页 profile 完整迁移到 2.1.206，旧值加载正常。
 - 批量导入完整流程的 13 个 key 在中英文语言包中存在。
 - 后端测试、前端测试和前端 build 全部通过。
