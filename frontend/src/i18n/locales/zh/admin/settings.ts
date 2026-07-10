@@ -303,6 +303,10 @@ export default {
         description: '控制请求转发到上游 OAuth 账号时的行为',
         fingerprintUnification: '指纹统一化',
         fingerprintUnificationHint: '统一共享同一 OAuth 账号的用户的 X-Stainless-* 请求头。关闭后透传客户端原始请求头。',
+        claudeCodeMimicryProfile: 'Claude Code 伪装 Profile',
+        claudeCodeMimicryProfile2206: 'Claude Code 2.1.206 / macOS arm64',
+        claudeCodeMimicryProfileHint:
+          '控制 OAuth mimic 路径使用的 User-Agent、X-Stainless 头、beta 集合与 billing entrypoint。',
         metadataPassthrough: 'Metadata 透传',
         metadataPassthroughHint: '透传客户端原始 metadata.user_id，不进行重写。可能提高上游缓存命中率。',
         cchSigning: 'CCH 签名',

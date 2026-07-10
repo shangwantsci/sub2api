@@ -789,10 +789,10 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("submits Claude mimicry profile and guard settings", async () => {
+  it("submits the current Claude Code mimicry profile and guard settings", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      claude_code_mimicry_profile: "cc-2.1.197-sdk-cli-macos-arm64",
+      claude_code_mimicry_profile: "cc-2.1.206-sdk-cli-macos-arm64",
       claude_mimicry_guard_mode: "block",
     });
 
@@ -805,11 +805,37 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledTimes(1);
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        claude_code_mimicry_profile: "cc-2.1.197-sdk-cli-macos-arm64",
+        claude_code_mimicry_profile: "cc-2.1.206-sdk-cli-macos-arm64",
         claude_mimicry_guard_mode: "block",
       }),
     );
   });
+
+  it.each([
+    "cc-2.1.197-sdk-cli-macos-arm64",
+    "unknown-profile",
+  ])(
+    "normalizes unsupported Claude Code mimicry profile %s to the current profile",
+    async (storedProfile) => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        claude_code_mimicry_profile: storedProfile,
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          claude_code_mimicry_profile:
+            "cc-2.1.206-sdk-cli-macos-arm64",
+        }),
+      );
+    },
+  );
 
   it("submits Antigravity user agent version gateway setting", async () => {
     getSettings.mockResolvedValueOnce({

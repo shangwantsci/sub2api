@@ -309,6 +309,10 @@ export default {
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         fingerprintUnification: 'Fingerprint Unification',
         fingerprintUnificationHint: 'Unify X-Stainless-* headers across users sharing the same OAuth account. Disabling passes through each client\'s original headers.',
+        claudeCodeMimicryProfile: 'Claude Code Mimicry Profile',
+        claudeCodeMimicryProfile2206: 'Claude Code 2.1.206 / macOS arm64',
+        claudeCodeMimicryProfileHint:
+          'Controls the User-Agent, X-Stainless headers, beta set, and billing entrypoint used by the OAuth mimic path.',
         metadataPassthrough: 'Metadata Passthrough',
         metadataPassthroughHint: 'Pass through client\'s original metadata.user_id without rewriting. May improve upstream cache hit rates.',
         cchSigning: 'CCH Signing',

@@ -7909,10 +7909,13 @@ const claudeOAuthSystemPromptCacheTTLOptions = computed(() => [
   { value: "1h", label: t("admin.settings.gatewayForwarding.cacheTTL1h") },
 ]);
 
+const currentClaudeCodeMimicryProfileID =
+  "cc-2.1.206-sdk-cli-macos-arm64";
+
 const claudeCodeMimicryProfileOptions = computed(() => [
   {
-    value: "cc-2.1.197-sdk-cli-macos-arm64",
-    label: t("admin.settings.gatewayForwarding.claudeCodeMimicryProfile2197"),
+    value: currentClaudeCodeMimicryProfileID,
+    label: t("admin.settings.gatewayForwarding.claudeCodeMimicryProfile2206"),
   },
 ]);
 
@@ -8277,7 +8280,7 @@ const form = reactive<SettingsForm>({
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
-  claude_code_mimicry_profile: "cc-2.1.197-sdk-cli-macos-arm64",
+  claude_code_mimicry_profile: currentClaudeCodeMimicryProfileID,
   claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
@@ -9071,6 +9074,8 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.claude_code_mimicry_profile =
+      currentClaudeCodeMimicryProfileID;
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
         defaultClaudeOAuthSystemPromptBlocks;
@@ -9579,7 +9584,7 @@ async function saveSettings() {
       enable_cch_signing: form.enable_cch_signing,
       claude_code_mimicry_profile:
         form.claude_code_mimicry_profile?.trim() ||
-        "cc-2.1.197-sdk-cli-macos-arm64",
+        currentClaudeCodeMimicryProfileID,
       claude_mimicry_guard_mode: form.claude_mimicry_guard_mode || "warn",
       enable_claude_oauth_system_prompt_injection:
         form.enable_claude_oauth_system_prompt_injection,
