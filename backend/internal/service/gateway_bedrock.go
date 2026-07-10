@@ -42,6 +42,9 @@ func (s *GatewayService) ApplyBedrockCCCompat(c *gin.Context, body []byte, model
 
 // isBedrockCCCompatEnabled 检查渠道是否启用了 Bedrock CC 兼容模式
 func (s *GatewayService) isBedrockCCCompatEnabled(ctx context.Context, account *Account, groupID *int64) bool {
+	if account == nil || !account.IsBedrock() {
+		return false
+	}
 	if groupID == nil || s.channelService == nil {
 		return false
 	}
