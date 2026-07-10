@@ -7,7 +7,8 @@ import "strings"
 
 // Beta header 常量
 //
-// 这里的默认组合对齐本机 Claude Code CLI 2.1.197 受控抓包结果。
+// 这里的兼容兜底组合沿用 Claude Code CLI 2.1.197 受控抓包结果；
+// synthetic mimic messages 的 2.1.206 组合由模型 profile 单独维护。
 const (
 	BetaOAuth                    = "oauth-2025-04-20"
 	BetaClaudeCode               = "claude-code-20250219"
@@ -23,6 +24,7 @@ const (
 	BetaContextManagement     = "context-management-2025-06-27"
 	BetaExtendedCacheTTL      = "extended-cache-ttl-2025-04-11"
 	BetaThinkingTokenCount    = "thinking-token-count-2026-05-13"
+	BetaToolSearchTool        = "tool-search-tool-2025-10-19"
 	BetaMidConversationSystem = "mid-conversation-system-2026-04-07"
 	BetaAdvancedToolUse       = "advanced-tool-use-2025-11-20"
 	BetaServerSideFallback    = "server-side-fallback-2026-06-01"
@@ -66,11 +68,11 @@ const DefaultCacheControlTTL = "5m"
 // CLICurrentVersion 是 sub2api 当前对外伪装的 Claude Code CLI 版本号（三段 semver）。
 // 用于 billing attribution block 中的 cc_version=X.Y.Z.{fp} 前缀以及 fingerprint 计算。
 // 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
-const CLICurrentVersion = "2.1.197"
+const CLICurrentVersion = "2.1.206"
 
 const (
 	// DefaultClaudeCodeMimicryProfileID 是默认 Claude Code 伪装 profile。
-	DefaultClaudeCodeMimicryProfileID = "cc-2.1.197-sdk-cli-macos-arm64"
+	DefaultClaudeCodeMimicryProfileID = "cc-2.1.206-sdk-cli-macos-arm64"
 	defaultClaudeAgentSDKSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 )
 
@@ -85,13 +87,14 @@ type ClaudeCodeMimicryProfile struct {
 	CountTokensBetas  []string
 }
 
-// ClaudeCodeMimicryModelProfile 描述 Claude Code 2.1.197 对不同模型族的
+// ClaudeCodeMimicryModelProfile 描述 Claude Code 2.1.206 对不同模型族的
 // beta/body 默认形态差异。
 type ClaudeCodeMimicryModelProfile struct {
 	ID                          string
 	MessageBetas                []string
 	CountTokensBetas            []string
 	DefaultMaxTokens            int
+	CountTokensDefaultMaxTokens int
 	DefaultThinkingType         string
 	DefaultThinkingBudgetTokens int
 	DefaultOutputConfigEffort   string
@@ -114,11 +117,7 @@ var defaultClaudeCodeMimicryHeaders = map[string]string{
 var defaultClaudeCodeMimicryMessageBetas = []string{
 	BetaClaudeCode,
 	BetaInterleavedThinking,
-	BetaThinkingTokenCount,
-	BetaContextManagement,
-	BetaPromptCachingScope,
-	BetaMidConversationSystem,
-	BetaAdvancedToolUse,
+	BetaToolSearchTool,
 	BetaEffort,
 }
 
@@ -135,15 +134,29 @@ var defaultClaudeCodeMimicryCountTokensBetas = []string{
 }
 
 var claudeCodeMimicryHaikuMessageBetas = []string{
+	BetaClaudeCode,
+	BetaToolSearchTool,
+}
+
+var claudeCodeMimicryFableMessageBetas = []string{
+	BetaClaudeCode,
+	BetaInterleavedThinking,
+	BetaToolSearchTool,
+	BetaEffort,
+	BetaFallbackCredit,
+}
+
+var claudeCodeMimicryHaikuCountTokensBetas = []string{
 	BetaInterleavedThinking,
 	BetaThinkingTokenCount,
 	BetaContextManagement,
 	BetaPromptCachingScope,
 	BetaClaudeCode,
 	BetaAdvancedToolUse,
+	BetaTokenCounting,
 }
 
-var claudeCodeMimicryFableMessageBetas = []string{
+var claudeCodeMimicryFableCountTokensBetas = []string{
 	BetaClaudeCode,
 	BetaInterleavedThinking,
 	BetaThinkingTokenCount,
@@ -154,6 +167,7 @@ var claudeCodeMimicryFableMessageBetas = []string{
 	BetaEffort,
 	BetaServerSideFallback,
 	BetaFallbackCredit,
+	BetaTokenCounting,
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -168,17 +182,7 @@ func cloneStrings(values []string) []string {
 	return append([]string(nil), values...)
 }
 
-func withTokenCounting(values []string) []string {
-	out := cloneStrings(values)
-	for _, value := range out {
-		if value == BetaTokenCounting {
-			return out
-		}
-	}
-	return append(out, BetaTokenCounting)
-}
-
-// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 2.1.197 profile。
+// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 2.1.206 profile。
 func DefaultClaudeCodeMimicryProfile() ClaudeCodeMimicryProfile {
 	return ClaudeCodeMimicryProfile{
 		ID:                DefaultClaudeCodeMimicryProfileID,
@@ -201,7 +205,7 @@ func ResolveClaudeCodeMimicryProfile(id string) ClaudeCodeMimicryProfile {
 	}
 }
 
-// ResolveClaudeCodeMimicryModelProfile 返回指定模型在 Claude Code 2.1.197
+// ResolveClaudeCodeMimicryModelProfile 返回指定模型在 Claude Code 2.1.206
 // synthetic mimic 路径上的模型族 profile。未知模型保守按 Sonnet/Opus profile 处理。
 func ResolveClaudeCodeMimicryModelProfile(modelID string) ClaudeCodeMimicryModelProfile {
 	normalized := strings.ToLower(strings.TrimSpace(NormalizeModelID(modelID)))
@@ -210,28 +214,41 @@ func ResolveClaudeCodeMimicryModelProfile(modelID string) ClaudeCodeMimicryModel
 		return ClaudeCodeMimicryModelProfile{
 			ID:                          "haiku",
 			MessageBetas:                cloneStrings(claudeCodeMimicryHaikuMessageBetas),
-			CountTokensBetas:            withTokenCounting(claudeCodeMimicryHaikuMessageBetas),
+			CountTokensBetas:            cloneStrings(claudeCodeMimicryHaikuCountTokensBetas),
 			DefaultMaxTokens:            32000,
+			CountTokensDefaultMaxTokens: 32000,
 			DefaultThinkingType:         "enabled",
 			DefaultThinkingBudgetTokens: 31999,
 		}
 	case strings.Contains(normalized, "fable"):
 		return ClaudeCodeMimicryModelProfile{
-			ID:                        "fable",
-			MessageBetas:              cloneStrings(claudeCodeMimicryFableMessageBetas),
-			CountTokensBetas:          withTokenCounting(claudeCodeMimicryFableMessageBetas),
-			DefaultMaxTokens:          64000,
-			DefaultThinkingType:       "adaptive",
-			DefaultOutputConfigEffort: "high",
+			ID:                          "fable",
+			MessageBetas:                cloneStrings(claudeCodeMimicryFableMessageBetas),
+			CountTokensBetas:            cloneStrings(claudeCodeMimicryFableCountTokensBetas),
+			DefaultMaxTokens:            64000,
+			CountTokensDefaultMaxTokens: 64000,
+			DefaultThinkingType:         "adaptive",
+			DefaultOutputConfigEffort:   "high",
+		}
+	case strings.Contains(normalized, "sonnet"):
+		return ClaudeCodeMimicryModelProfile{
+			ID:                          "sonnet",
+			MessageBetas:                cloneStrings(defaultClaudeCodeMimicryMessageBetas),
+			CountTokensBetas:            cloneStrings(defaultClaudeCodeMimicryCountTokensBetas),
+			DefaultMaxTokens:            32000,
+			CountTokensDefaultMaxTokens: 64000,
+			DefaultThinkingType:         "adaptive",
+			DefaultOutputConfigEffort:   "high",
 		}
 	default:
 		return ClaudeCodeMimicryModelProfile{
-			ID:                        "opus-sonnet",
-			MessageBetas:              cloneStrings(defaultClaudeCodeMimicryMessageBetas),
-			CountTokensBetas:          withTokenCounting(defaultClaudeCodeMimicryMessageBetas),
-			DefaultMaxTokens:          64000,
-			DefaultThinkingType:       "adaptive",
-			DefaultOutputConfigEffort: "high",
+			ID:                          "opus",
+			MessageBetas:                cloneStrings(defaultClaudeCodeMimicryMessageBetas),
+			CountTokensBetas:            cloneStrings(defaultClaudeCodeMimicryCountTokensBetas),
+			DefaultMaxTokens:            64000,
+			CountTokensDefaultMaxTokens: 64000,
+			DefaultThinkingType:         "adaptive",
+			DefaultOutputConfigEffort:   "high",
 		}
 	}
 }

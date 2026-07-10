@@ -125,7 +125,7 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	require.Contains(t, resultStr, `"system":"`+claudeCodeSystemPrompt+`"`)
 	require.Contains(t, resultStr, `"tools":[]`)
 	require.Contains(t, resultStr, `"metadata":{"user_id":"user-1"}`)
-	require.Contains(t, resultStr, `"max_tokens":64000`)
+	require.Contains(t, resultStr, `"max_tokens":32000`)
 }
 
 func TestApplyClaudeCodeOAuthMimicryToBody_EnsuresModelAwareBodyDefaultsForCompatOAuth(t *testing.T) {

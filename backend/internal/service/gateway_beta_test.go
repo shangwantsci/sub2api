@@ -132,21 +132,22 @@ func TestFullClaudeCodeMimicryBetas_DoesNotDefaultRedactThinking(t *testing.T) {
 	require.NotContains(t, required, claude.BetaRedactThinking)
 	require.Contains(t, required, claude.BetaClaudeCode)
 	require.Contains(t, required, claude.BetaInterleavedThinking)
-	require.Contains(t, required, claude.BetaThinkingTokenCount)
+	require.Contains(t, required, claude.BetaToolSearchTool)
+	require.NotContains(t, required, claude.BetaThinkingTokenCount)
 	require.NotContains(t, required, claude.BetaOAuth)
 	require.NotContains(t, required, claude.BetaExtendedCacheTTL)
 	require.NotContains(t, required, claude.BetaFineGrainedToolStreaming)
 }
 
-func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2197Baseline(t *testing.T) {
+func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2206Baseline(t *testing.T) {
 	profile := claude.DefaultClaudeCodeMimicryProfile()
 
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, profile.ID)
-	require.Equal(t, "cc-2.1.197-sdk-cli-macos-arm64", profile.ID)
-	require.Equal(t, "2.1.197", profile.CLIVersion)
+	require.Equal(t, "cc-2.1.206-sdk-cli-macos-arm64", profile.ID)
+	require.Equal(t, "2.1.206", profile.CLIVersion)
 	require.Equal(t, "sdk-cli", profile.BillingEntrypoint)
 	require.Equal(t, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", profile.SystemPrompt)
-	require.Equal(t, "claude-cli/2.1.197 (external, sdk-cli)", profile.Headers["User-Agent"])
+	require.Equal(t, "claude-cli/2.1.206 (external, sdk-cli)", profile.Headers["User-Agent"])
 	require.Equal(t, "0.94.0", profile.Headers["X-Stainless-Package-Version"])
 	require.Equal(t, "v26.3.0", profile.Headers["X-Stainless-Runtime-Version"])
 	require.Equal(t, "MacOS", profile.Headers["X-Stainless-OS"])
@@ -154,60 +155,90 @@ func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2197Baseline(t *t
 	require.Equal(t, strings.Join(profile.MessageBetas, ","), strings.Join(claude.FullClaudeCodeMimicryBetas(), ","))
 }
 
-func TestComputeFinalAnthropicBeta_OAuthMimicUsesCapturedProfileBetasWithoutOAuth(t *testing.T) {
+func TestComputeFinalAnthropicBeta_OAuthMimicUsesCapturedClaudeCode2206MessageBetas(t *testing.T) {
 	svc := &GatewayService{}
-	profile := claude.ResolveClaudeCodeMimicryModelProfile("claude-sonnet-5")
-
-	got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-5", nil, []byte(`{"model":"claude-sonnet-5"}`), nil)
-
-	require.True(t, shouldSet)
-	require.Equal(t, strings.Join(profile.MessageBetas, ","), got)
-	require.NotContains(t, got, claude.BetaOAuth)
-	require.Contains(t, got, claude.BetaThinkingTokenCount)
-	require.Contains(t, got, claude.BetaAdvancedToolUse)
-	require.Contains(t, got, claude.BetaMidConversationSystem)
-}
-
-func TestComputeFinalAnthropicBeta_OAuthMimicUsesModelSpecificProfileBetas(t *testing.T) {
-	svc := &GatewayService{}
-
 	tests := []struct {
-		name          string
-		model         string
-		wantContains  []string
-		wantNotTokens []string
+		name       string
+		model      string
+		wantHeader string
 	}{
 		{
-			name:         "haiku",
-			model:        "claude-haiku-4-5-20251001",
-			wantContains: []string{claude.BetaAdvancedToolUse, claude.BetaContextManagement, claude.BetaClaudeCode},
-			wantNotTokens: []string{
-				claude.BetaEffort,
-				claude.BetaMidConversationSystem,
-			},
+			name:       "sonnet",
+			model:      "claude-sonnet-4-6",
+			wantHeader: "claude-code-20250219,interleaved-thinking-2025-05-14,tool-search-tool-2025-10-19,effort-2025-11-24",
 		},
 		{
-			name:         "fable",
-			model:        "claude-fable-5",
-			wantContains: []string{claude.BetaServerSideFallback, claude.BetaFallbackCredit, claude.BetaEffort},
+			name:       "opus",
+			model:      "claude-opus-4-6",
+			wantHeader: "claude-code-20250219,interleaved-thinking-2025-05-14,tool-search-tool-2025-10-19,effort-2025-11-24",
+		},
+		{
+			name:       "haiku",
+			model:      "claude-haiku-4-5",
+			wantHeader: "claude-code-20250219,tool-search-tool-2025-10-19",
+		},
+		{
+			name:       "fable",
+			model:      "claude-fable-5",
+			wantHeader: "claude-code-20250219,interleaved-thinking-2025-05-14,tool-search-tool-2025-10-19,effort-2025-11-24,fallback-credit-2026-06-01",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			profile := claude.ResolveClaudeCodeMimicryModelProfile(tt.model)
-
 			got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil)
 
 			require.True(t, shouldSet)
-			require.Equal(t, strings.Join(profile.MessageBetas, ","), got)
-			require.NotContains(t, got, claude.BetaOAuth)
-			for _, token := range tt.wantContains {
-				require.Contains(t, got, token)
-			}
-			for _, token := range tt.wantNotTokens {
-				require.NotContains(t, got, token)
-			}
+			require.Equal(t, tt.wantHeader, got)
+		})
+	}
+}
+
+func TestComputeFinalCountTokensAnthropicBeta_OAuthMimicPreservesPre2206Betas(t *testing.T) {
+	svc := &GatewayService{}
+	tests := []struct {
+		name       string
+		model      string
+		wantHeader string
+	}{
+		{
+			name:  "sonnet",
+			model: "claude-sonnet-5",
+			wantHeader: "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13," +
+				"context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07," +
+				"advanced-tool-use-2025-11-20,effort-2025-11-24,token-counting-2024-11-01",
+		},
+		{
+			name:  "opus",
+			model: "claude-opus-4-6",
+			wantHeader: "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13," +
+				"context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07," +
+				"advanced-tool-use-2025-11-20,effort-2025-11-24,token-counting-2024-11-01",
+		},
+		{
+			name:  "haiku",
+			model: "claude-haiku-4-5",
+			wantHeader: "interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27," +
+				"prompt-caching-scope-2026-01-05,claude-code-20250219,advanced-tool-use-2025-11-20,token-counting-2024-11-01",
+		},
+		{
+			name:  "fable",
+			model: "claude-fable-5",
+			wantHeader: "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13," +
+				"context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07," +
+				"advanced-tool-use-2025-11-20,effort-2025-11-24,server-side-fallback-2026-06-01," +
+				"fallback-credit-2026-06-01,token-counting-2024-11-01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, shouldSet := svc.computeFinalCountTokensAnthropicBeta(
+				"oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil,
+			)
+
+			require.True(t, shouldSet)
+			require.Equal(t, tt.wantHeader, got)
 		})
 	}
 }

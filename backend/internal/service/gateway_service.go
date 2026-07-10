@@ -43,7 +43,7 @@ const (
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
 	stickySessionTTL        = time.Hour // 粘性会话TTL
 	defaultMaxLineSize      = 500 * 1024 * 1024
-	// Canonical Claude Agent SDK identity block from Claude Code CLI 2.1.197.
+	// Canonical Claude Agent SDK identity block from Claude Code CLI 2.1.206.
 	// Keep it EXACT (no trailing whitespace/newlines) to match captured traffic.
 	claudeCodeSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 	// claudeCodeSystemPromptExpansion: 见 var 块中的 go:embed 定义

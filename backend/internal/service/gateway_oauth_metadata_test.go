@@ -432,10 +432,9 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_MessagesMissingFie
 	require.NotNil(t, upstream.lastReq)
 
 	require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
-	require.Equal(t, "clear_thinking_20251015",
-		gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
 	require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
-	require.Equal(t, int64(64000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+	require.Equal(t, int64(32000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
@@ -486,8 +485,7 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_HaikuUsesCapturedM
 	require.Equal(t, "enabled", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
 	require.Equal(t, int64(31999), gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Int())
 	require.Equal(t, int64(32000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
-	require.Equal(t, "clear_thinking_20251015",
-		gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "output_config").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
@@ -631,9 +629,7 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaults_PreservesExplicitF
 
 	require.Equal(t, "disabled", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
 	require.Equal(t, float64(777), gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Float())
-	require.Equal(t, "client_strategy", gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
-	require.Equal(t, "client", gjson.GetBytes(upstream.lastBody, "context_management.edits.0.keep").String())
-	require.Len(t, gjson.GetBytes(upstream.lastBody, "context_management.edits").Array(), 1)
+	require.False(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
 	require.Equal(t, "medium", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "output_config.extra").Bool())
 	require.Equal(t, int64(1234), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
@@ -1156,7 +1152,47 @@ func TestGatewayService_ClaudeMimicTLSProfile_DefaultsForCountTokensSyntheticMim
 	require.Equal(t, builtInClaudeCodeTLSProfileName, upstream.lastTLSProfile.Name)
 }
 
-func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsMatchMessages(t *testing.T) {
+func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsRemainPre2206(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"input_tokens":42}`)),
+		},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+		deferredService:  &DeferredService{},
+	}
+	account := &Account{
+		ID:          528,
+		Name:        "anthropic-oauth-count-tokens-pre-2206-body-defaults",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages/count_tokens")
+
+	err = svc.ForwardCountTokens(context.Background(), c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, int64(64000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+	require.Equal(t, "clear_thinking_20251015", gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
+}
+
+func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaultsDivergeByEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	messageBody := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
@@ -1215,12 +1251,15 @@ func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsMatchMes
 	require.NoError(t, err)
 	require.NotNil(t, countUpstream.lastReq)
 
-	for _, got := range [][]byte{messageUpstream.lastBody, countUpstream.lastBody} {
-		require.Equal(t, "adaptive", gjson.GetBytes(got, "thinking.type").String())
-		require.Equal(t, "clear_thinking_20251015",
-			gjson.GetBytes(got, "context_management.edits.0.type").String())
-		require.Equal(t, "high", gjson.GetBytes(got, "output_config.effort").String())
-	}
+	require.Equal(t, "adaptive", gjson.GetBytes(messageUpstream.lastBody, "thinking.type").String())
+	require.False(t, gjson.GetBytes(messageUpstream.lastBody, "context_management").Exists())
+	require.Equal(t, "high", gjson.GetBytes(messageUpstream.lastBody, "output_config.effort").String())
+	require.Equal(t, int64(32000), gjson.GetBytes(messageUpstream.lastBody, "max_tokens").Int())
+
+	require.Equal(t, "adaptive", gjson.GetBytes(countUpstream.lastBody, "thinking.type").String())
+	require.Equal(t, "clear_thinking_20251015", gjson.GetBytes(countUpstream.lastBody, "context_management.edits.0.type").String())
+	require.Equal(t, "high", gjson.GetBytes(countUpstream.lastBody, "output_config.effort").String())
+	require.Equal(t, int64(64000), gjson.GetBytes(countUpstream.lastBody, "max_tokens").Int())
 }
 
 func TestGatewayService_AnthropicOAuthCountTokensRealClaudeCodeDoesNotForceMimicDefaults(t *testing.T) {

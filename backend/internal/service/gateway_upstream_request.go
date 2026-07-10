@@ -352,7 +352,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 }
 
 // getBetaHeader 处理 anthropic-beta header。
-// 真实 Claude Code CLI 2.1.197 默认不携带 oauth-2025-04-20；该函数不再自动追加它。
+// 真实 Claude Code CLI 2.1.206 默认不携带 oauth-2025-04-20；该函数不再自动追加它。
 func (s *GatewayService) getBetaHeader(modelID string, clientBetaHeader string) string {
 	if strings.TrimSpace(clientBetaHeader) != "" {
 		return clientBetaHeader
@@ -518,8 +518,8 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 // 计算纯函数。语义与 computeFinalAnthropicBeta 对齐，但备份了 count_tokens 独有的
 // 两条特殊规则：
 //
-//   - OAuth mimic：requiredBetas 为 FullClaudeCodeMimicryBetas + BetaTokenCounting
-//     （与 messages 不同的是：不按 haiku 排除；count_tokens 始终携带 token-counting beta）
+//   - OAuth mimic：使用模型特定、独立冻结的 count_tokens profile；不从当前 messages
+//     profile 派生，并始终携带 token-counting beta
 //   - OAuth 透传 + 客户端未传 anthropic-beta：补齐 CountTokensBetaHeader
 //   - OAuth 透传 + 客户端传了：补齐 BetaTokenCounting（如果未含）
 //

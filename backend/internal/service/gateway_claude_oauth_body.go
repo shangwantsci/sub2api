@@ -58,6 +58,7 @@ type claudeOAuthNormalizeOptions struct {
 	metadataUserID          string
 	stripSystemCacheControl bool
 	ensureMimicBodyDefaults bool
+	countTokens             bool
 }
 
 // sanitizeSystemText rewrites only the fixed OpenCode identity sentence (if present).
@@ -279,8 +280,12 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	if !gjson.GetBytes(out, "max_tokens").Exists() && modelProfile.DefaultMaxTokens > 0 {
-		if next, ok := setJSONValueBytes(out, "max_tokens", modelProfile.DefaultMaxTokens); ok {
+	defaultMaxTokens := modelProfile.DefaultMaxTokens
+	if opts.countTokens && modelProfile.CountTokensDefaultMaxTokens > 0 {
+		defaultMaxTokens = modelProfile.CountTokensDefaultMaxTokens
+	}
+	if !gjson.GetBytes(out, "max_tokens").Exists() && defaultMaxTokens > 0 {
+		if next, ok := setJSONValueBytes(out, "max_tokens", defaultMaxTokens); ok {
 			out = next
 			modified = true
 		}
