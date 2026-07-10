@@ -38,6 +38,12 @@ import (
 //go:embed prompts/claude_code_system_prompt_expansion.txt
 var claudeCodeSystemPromptExpansion string
 
+// claudeCodeFableSystemPromptExpansion is the stable Fable-specific prefix
+// shared by two controlled Claude Code 2.1.206 captures.
+//
+//go:embed prompts/claude_code_fable_system_prompt_expansion.txt
+var claudeCodeFableSystemPromptExpansion string
+
 const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"

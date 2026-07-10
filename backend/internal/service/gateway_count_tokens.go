@@ -497,7 +497,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		}
 	}
 	if account.IsOAuth() && mimicClaudeCode {
-		body = s.ensureClaudeOAuthMimicSystemBody(ctx, body)
+		body = s.ensureClaudeOAuthMimicCountTokensSystemBody(ctx, body)
 		if !ctEnableMPT {
 			body = s.ensureClaudeOAuthMimicMetadata(ctx, c, account, body, ctMetadataFingerprint)
 		}

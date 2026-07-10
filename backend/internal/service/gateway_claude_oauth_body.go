@@ -884,6 +884,25 @@ func defaultClaudeOAuthExpansionPrompt(expansionPrompt string) string {
 	return expansionPrompt
 }
 
+func defaultClaudeOAuthExpansionPromptForModel(modelID string) string {
+	normalized := strings.ToLower(strings.TrimSpace(claude.NormalizeModelID(modelID)))
+	if strings.Contains(normalized, "fable") {
+		return claudeCodeFableSystemPromptExpansion
+	}
+	return claudeCodeSystemPromptExpansion
+}
+
+func resolveClaudeOAuthExpansionPrompt(modelID string, expansionPrompt string, useModelSpecificDefault bool) string {
+	expansionPrompt = strings.TrimSpace(expansionPrompt)
+	if expansionPrompt != "" {
+		return expansionPrompt
+	}
+	if useModelSpecificDefault {
+		return defaultClaudeOAuthExpansionPromptForModel(modelID)
+	}
+	return claudeCodeSystemPromptExpansion
+}
+
 func parseClaudeOAuthSystemPromptBlocksConfig(raw string) ([]claudeOAuthSystemPromptBlockConfig, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -1095,8 +1114,13 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 }
 
 func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string) []byte {
+	return rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body, system, expansionPrompt, blocksConfig, true)
+}
+
+func rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body []byte, system any, expansionPrompt string, blocksConfig string, useModelSpecificDefault bool) []byte {
 	system = normalizeSystemParam(system)
-	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
+	modelID := gjson.GetBytes(body, "model").String()
+	expansionPrompt = resolveClaudeOAuthExpansionPrompt(modelID, expansionPrompt, useModelSpecificDefault)
 
 	// 1. 提取原始 system prompt 文本及客户端声明的缓存断点。
 	originalSystemText, originalSystemCacheControl := extractSystemTextAndCacheControlForMigration(system)
@@ -1211,7 +1235,7 @@ func hasClaudeOAuthMimicSystemBlocks(body []byte) bool {
 	return billingFound && identityFound
 }
 
-func (s *GatewayService) ensureClaudeOAuthMimicSystemBody(ctx context.Context, body []byte) []byte {
+func (s *GatewayService) ensureClaudeOAuthMimicCountTokensSystemBody(ctx context.Context, body []byte) []byte {
 	if len(body) == 0 || hasClaudeOAuthMimicSystemBlocks(body) {
 		return body
 	}
@@ -1219,7 +1243,13 @@ func (s *GatewayService) ensureClaudeOAuthMimicSystemBody(ctx context.Context, b
 	if !enabled {
 		return body
 	}
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemValueFromBody(body), prompt, blocks)
+	return rewriteSystemForNonClaudeCodeWithPromptBlocksMode(
+		body,
+		systemValueFromBody(body),
+		prompt,
+		blocks,
+		false,
+	)
 }
 
 type cacheControlPath struct {
