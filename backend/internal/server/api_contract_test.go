@@ -318,16 +318,19 @@ func TestAPIContracts(t *testing.T) {
 				// 普通用户可见的分组列表不应包含内部字段（如 model_routing/account_count）。
 				deps.groupRepo.SetActive([]service.Group{
 					{
-						ID:                  10,
-						Name:                "Group One",
-						Description:         "desc",
-						Platform:            service.PlatformAnthropic,
-						RateMultiplier:      1.5,
-						PeakRateMultiplier:  1.0,
-						IsExclusive:         false,
-						Status:              service.StatusActive,
-						SubscriptionType:    service.SubscriptionTypeStandard,
-						ModelRoutingEnabled: true,
+						ID:                              10,
+						Name:                            "Group One",
+						Description:                     "desc",
+						Platform:                        service.PlatformAnthropic,
+						RateMultiplier:                  1.5,
+						PeakRateMultiplier:              1.0,
+						IsExclusive:                     false,
+						Status:                          service.StatusActive,
+						SubscriptionType:                service.SubscriptionTypeStandard,
+						AnthropicMixedTypeWeightEnabled: false,
+						AnthropicSetupTokenPoolWeight:   100,
+						AnthropicAPIKeyPoolWeight:       0,
+						ModelRoutingEnabled:             true,
 						ModelRouting: map[string][]int64{
 							"claude-3-*": []int64{101, 102},
 						},
@@ -382,6 +385,9 @@ func TestAPIContracts(t *testing.T) {
 						"require_oauth_only": false,
 						"require_privacy_set": false,
 						"rpm_limit": 0,
+						"anthropic_mixed_type_weight_enabled": false,
+						"anthropic_setup_token_pool_weight": 100,
+						"anthropic_api_key_pool_weight": 0,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
 					}
