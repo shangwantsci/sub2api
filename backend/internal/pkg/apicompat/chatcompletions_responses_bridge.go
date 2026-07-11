@@ -35,6 +35,11 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsR
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
 	}
+
+	namespaceChoice, hasNamespaceChoice, err := responsesNamespaceToolChoice(req.ToolChoice)
+	if err != nil {
+		return nil, err
+	}
 	if len(req.Tools) > 0 {
 		tools, err := responsesToolsToChatTools(req.Tools)
 		if err != nil {
@@ -42,10 +47,41 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsR
 		}
 		out.Tools = tools
 	}
+	if hasNamespaceChoice {
+		declared := false
+		for _, tool := range req.Tools {
+			if tool.Type == "namespace" && tool.Name == namespaceChoice {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return nil, fmt.Errorf("namespace tool_choice %q is not declared", namespaceChoice)
+		}
+
+		owners := NamespaceToolNames(req.Tools)
+		selected := make([]ChatTool, 0, len(out.Tools))
+		for _, tool := range out.Tools {
+			if tool.Function == nil {
+				continue
+			}
+			owner, ok := owners[tool.Function.Name]
+			if ok && owner.Namespace == namespaceChoice {
+				selected = append(selected, tool)
+			}
+		}
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("namespace tool_choice %q has no convertible function tools", namespaceChoice)
+		}
+		// Chat Completions 没有 namespace tool_choice。只声明选定 namespace
+		// 的摊平子工具，再要求至少调用其中一个，可保持原请求的强制选择边界。
+		out.Tools = selected
+		out.ToolChoice = json.RawMessage(`"required"`)
+	}
 	// tools 全部被丢弃（如仅含 web_search/image_generation 等服务端工具）时不再转发
 	// tool_choice：上游会拒绝 "'tool_choice' is only allowed when 'tools' are specified"。
 	// 指向被丢弃工具的选择项同理（见 responsesToolChoiceToChatToolChoice）。
-	if len(out.Tools) > 0 && len(req.ToolChoice) > 0 {
+	if !hasNamespaceChoice && len(out.Tools) > 0 && len(req.ToolChoice) > 0 {
 		declared := make(map[string]bool, len(out.Tools))
 		for _, tool := range out.Tools {
 			if tool.Function != nil {
@@ -61,6 +97,20 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsR
 	}
 
 	return out, nil
+}
+
+// responsesNamespaceToolChoice 识别 Responses 的 namespace 强制选择。Chat
+// Completions 无法直接表达该选择，调用方需据此过滤工具并改用 "required"。
+func responsesNamespaceToolChoice(raw json.RawMessage) (name string, ok bool, err error) {
+	var choice map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &choice) != nil || rawString(choice["type"]) != "namespace" {
+		return "", false, nil
+	}
+	name = rawString(choice["name"])
+	if name == "" {
+		return "", false, fmt.Errorf("namespace tool_choice requires a non-empty name")
+	}
+	return name, true, nil
 }
 
 // CustomToolNames 收集 Responses 请求中 custom/freeform 工具的名字。chat 桥回程时

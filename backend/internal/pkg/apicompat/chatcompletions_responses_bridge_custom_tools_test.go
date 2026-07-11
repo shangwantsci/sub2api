@@ -357,6 +357,185 @@ func TestResponsesToChatCompletionsRequest_NamespaceToolFlattensChildren(t *test
 	assert.Equal(t, "Send mail", out.Tools[0].Function.Description)
 }
 
+func TestResponsesToChatCompletionsRequest_NamespaceToolChoiceRestrictsToolsAndRequiresCall(t *testing.T) {
+	tests := []struct {
+		name      string
+		tools     []ResponsesTool
+		wantNames []string
+	}{
+		{
+			name: "single child",
+			tools: []ResponsesTool{{
+				Type:  "namespace",
+				Name:  "gmail",
+				Tools: []ResponsesTool{{Type: "function", Name: "send"}},
+			}},
+			wantNames: []string{"gmail__send"},
+		},
+		{
+			name: "multiple children",
+			tools: []ResponsesTool{{
+				Type: "namespace",
+				Name: "gmail",
+				Tools: []ResponsesTool{
+					{Type: "function", Name: "send"},
+					{Type: "function", Name: "search"},
+				},
+			}},
+			wantNames: []string{"gmail__send", "gmail__search"},
+		},
+		{
+			name: "mixed with ordinary and other namespace tools",
+			tools: []ResponsesTool{
+				{Type: "function", Name: "wait"},
+				{Type: "namespace", Name: "gmail", Tools: []ResponsesTool{{Type: "function", Name: "send"}}},
+				{Type: "namespace", Name: "calendar", Tools: []ResponsesTool{{Type: "function", Name: "create"}}},
+			},
+			wantNames: []string{"gmail__send"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{
+				Model:      "glm-5.2",
+				Input:      json.RawMessage(`"hi"`),
+				Tools:      tt.tools,
+				ToolChoice: json.RawMessage(`{"type":"namespace","name":"gmail"}`),
+			})
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(out.Tools))
+			for _, tool := range out.Tools {
+				require.NotNil(t, tool.Function)
+				names = append(names, tool.Function.Name)
+			}
+			assert.Equal(t, tt.wantNames, names)
+			assert.JSONEq(t, `"required"`, string(out.ToolChoice))
+		})
+	}
+}
+
+func TestResponsesToChatCompletionsRequest_NamespaceToolChoiceRejectsCrossNamespaceCollisionBeforeRoundTrip(t *testing.T) {
+	tools := []ResponsesTool{
+		{Type: "namespace", Name: "a", Tools: []ResponsesTool{{Type: "function", Name: "b__c"}}},
+		{Type: "namespace", Name: "a__b", Tools: []ResponsesTool{{Type: "function", Name: "c"}}},
+	}
+	chatReq, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{
+		Model:      "glm-5.2",
+		Input:      json.RawMessage(`"hi"`),
+		Tools:      tools,
+		ToolChoice: json.RawMessage(`{"type":"namespace","name":"a"}`),
+	})
+	if err == nil {
+		require.Len(t, chatReq.Tools, 1)
+		flatName := chatReq.Tools[0].Function.Name
+		restored := ChatCompletionsResponseToResponses(&ChatCompletionsResponse{
+			Choices: []ChatChoice{{Message: ChatMessage{ToolCalls: []ChatToolCall{{
+				ID:       "call_collision",
+				Function: ChatFunctionCall{Name: flatName, Arguments: `{}`},
+			}}}}},
+		}, "glm-5.2", nil, false, NamespaceToolNames(tools))
+		require.Len(t, restored.Output, 1)
+		t.Fatalf("expected flattening collision error before upstream; %q would restore to %q/%q instead of selected a/b__c",
+			flatName, restored.Output[0].Namespace, restored.Output[0].Name)
+	}
+	assert.Contains(t, err.Error(), "a__b__c")
+}
+
+func TestResponsesToChatCompletionsRequest_NamespaceToolChoiceRejectsUnselectedCustomCollision(t *testing.T) {
+	_, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{
+		Model: "glm-5.2",
+		Input: json.RawMessage(`"hi"`),
+		Tools: []ResponsesTool{
+			{Type: "namespace", Name: "gmail", Tools: []ResponsesTool{{Type: "function", Name: "send"}}},
+			{Type: "custom", Name: "gmail__send"},
+		},
+		ToolChoice: json.RawMessage(`{"type":"namespace","name":"gmail"}`),
+	})
+	require.Error(t, err, "选中 namespace 的摊平名与未选 custom 撞名时必须在上游前拒绝")
+	assert.Contains(t, err.Error(), "gmail__send")
+}
+
+func TestResponsesToChatCompletionsRequest_NamespaceToolChoiceRoundTripKeepsSelectedOwner(t *testing.T) {
+	tools := []ResponsesTool{
+		{Type: "function", Name: "wait"},
+		{Type: "namespace", Name: "gmail", Tools: []ResponsesTool{{Type: "function", Name: "send"}}},
+		{Type: "namespace", Name: "calendar", Tools: []ResponsesTool{{Type: "function", Name: "create"}}},
+	}
+	chatReq, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{
+		Model:      "glm-5.2",
+		Input:      json.RawMessage(`"hi"`),
+		Tools:      tools,
+		ToolChoice: json.RawMessage(`{"type":"namespace","name":"gmail"}`),
+	})
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+
+	restored := ChatCompletionsResponseToResponses(&ChatCompletionsResponse{
+		Choices: []ChatChoice{{Message: ChatMessage{ToolCalls: []ChatToolCall{{
+			ID:       "call_gmail",
+			Function: ChatFunctionCall{Name: chatReq.Tools[0].Function.Name, Arguments: `{}`},
+		}}}}},
+	}, "glm-5.2", nil, false, NamespaceToolNames(tools))
+	require.Len(t, restored.Output, 1)
+	assert.Equal(t, "gmail", restored.Output[0].Namespace)
+	assert.Equal(t, "send", restored.Output[0].Name)
+}
+
+func TestResponsesToChatCompletionsRequest_RejectsInvalidNamespaceToolChoice(t *testing.T) {
+	tests := []struct {
+		name       string
+		tools      []ResponsesTool
+		toolChoice string
+		wantError  string
+	}{
+		{
+			name: "namespace is not declared",
+			tools: []ResponsesTool{{
+				Type:  "namespace",
+				Name:  "calendar",
+				Tools: []ResponsesTool{{Type: "function", Name: "create"}},
+			}},
+			toolChoice: `{"type":"namespace","name":"gmail"}`,
+			wantError:  `namespace tool_choice "gmail" is not declared`,
+		},
+		{
+			name: "namespace has no convertible child",
+			tools: []ResponsesTool{{
+				Type:  "namespace",
+				Name:  "gmail",
+				Tools: []ResponsesTool{{Type: "custom", Name: "raw"}},
+			}},
+			toolChoice: `{"type":"namespace","name":"gmail"}`,
+			wantError:  `namespace tool_choice "gmail" has no convertible function tools`,
+		},
+		{
+			name: "namespace choice has no name",
+			tools: []ResponsesTool{{
+				Type:  "namespace",
+				Name:  "gmail",
+				Tools: []ResponsesTool{{Type: "function", Name: "send"}},
+			}},
+			toolChoice: `{"type":"namespace"}`,
+			wantError:  "namespace tool_choice requires a non-empty name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{
+				Model:      "glm-5.2",
+				Input:      json.RawMessage(`"hi"`),
+				Tools:      tt.tools,
+				ToolChoice: json.RawMessage(tt.toolChoice),
+			})
+
+			require.EqualError(t, err, tt.wantError)
+		})
+	}
+}
+
 func TestResponsesToolsParsing_StringToolBecomesCustom(t *testing.T) {
 	var req ResponsesRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"model":"glm-5.2","input":"hi","tools":["exec",{"type":"function","name":"wait"}]}`), &req))
