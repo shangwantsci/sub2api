@@ -211,6 +211,32 @@ func TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testin
 	assert.Equal(t, "Upstream request failed", errorObj["message"])
 }
 
+func TestOpenAIEnsureForwardErrorResponse_DoesNotAppendAfterCommittedJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.JSON(http.StatusBadRequest, gin.H{
+		"error": gin.H{
+			"type":    "invalid_request_error",
+			"message": "tool declaration conflict",
+		},
+	})
+	service.MarkResponseCommitted(c)
+	before := append([]byte(nil), w.Body.Bytes()...)
+
+	h := &OpenAIGatewayHandler{}
+	wrote := h.ensureForwardErrorResponse(c, false)
+
+	require.False(t, wrote)
+	require.Equal(t, before, w.Body.Bytes(), "committed JSON 后不得追加第二个终止响应")
+	require.NotContains(t, w.Body.String(), "event: response.failed")
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+	require.Len(t, envelope, 1)
+	require.Contains(t, envelope, "error")
+}
+
 // Writer 已写后 ensureForwardErrorResponse 必须仍然把错误信息以 SSE
 // 形式追加给客户端（streamStarted 强制 true）。
 // 这是 case B 修复：旧实现遇到 Writer.Written 直接 return false，

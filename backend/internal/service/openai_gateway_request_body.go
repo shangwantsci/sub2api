@@ -861,6 +861,7 @@ func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlocked
 			"message": err.Message,
 		},
 	})
+	MarkResponseCommitted(c)
 }
 
 // applyOpenAIFastPolicyToWSResponseCreate evaluates the OpenAI fast policy

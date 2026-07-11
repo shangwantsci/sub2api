@@ -132,6 +132,7 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 	_, _ = c.Writer.Write(payload)
 	_, _ = c.Writer.Write([]byte("\n\n"))
 	c.Writer.Flush()
+	MarkResponseCommitted(c)
 }
 
 // buildOpenAICompactSSEPayload 把 compact 的 Response JSON 转成 SSE 事件序列：

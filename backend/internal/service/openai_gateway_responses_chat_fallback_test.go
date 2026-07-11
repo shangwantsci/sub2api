@@ -5,12 +5,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -102,6 +104,66 @@ func TestForwardResponses_ForceChatCompletionsRoutesStreamingToChatCompletions(t
 	require.NotNil(t, result.FirstTokenMs)
 }
 
+func TestForwardResponses_ForceChatToolConflictCommitsSingleJSONError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"gpt-5.4",
+		"input":"hello",
+		"stream":false,
+		"tools":[
+			{"type":"tool_search"},
+			{"type":"function","name":"tool_search","parameters":{"type":"object"}}
+		]
+	}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+	result, err := svc.Forward(context.Background(), c, forceChatResponsesFallbackAccount(), body)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.True(t, IsResponseCommitted(c), "完整 400 JSON 写完后必须阻止 handler 追加 SSE")
+	requireSingleOpenAIJSONError(t, rec.Body.Bytes(), "invalid_request_error")
+}
+
+func TestForwardResponses_UserScopedFastPolicyBlockCommitsSingleJSONError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	settings := &OpenAIFastPolicySettings{Rules: []OpenAIFastPolicyRule{{
+		ServiceTier:    OpenAIFastTierPriority,
+		Action:         BetaPolicyActionBlock,
+		Scope:          BetaPolicyScopeAll,
+		UserIDs:        []int64{42},
+		ErrorMessage:   "fast mode is blocked for this user",
+		ModelWhitelist: []string{"gpt-5.5"},
+		FallbackAction: BetaPolicyActionPass,
+	}}}
+	svc := newOpenAIGatewayServiceWithSettings(t, settings)
+	svc.cfg = rawChatCompletionsTestConfig()
+
+	body := []byte(`{"model":"gpt-5.5","input":"hello","stream":false,"service_tier":"priority"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(context.Background(), ctxkey.UserID, int64(42))
+
+	result, err := svc.Forward(ctx, c, forceChatResponsesFallbackAccount(), body)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var blocked *OpenAIFastBlockedError
+	require.ErrorAs(t, err, &blocked)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.True(t, IsResponseCommitted(c), "完整 403 JSON 写完后必须阻止 handler 追加 SSE")
+	requireSingleOpenAIJSONError(t, rec.Body.Bytes(), "permission_error")
+}
+
 func TestForwardResponses_DeepSeekReasoningOnlyStreamProducesVisibleText(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -182,4 +244,21 @@ func forceChatResponsesFallbackAccount() *Account {
 		openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceChatCompletions),
 	}
 	return account
+}
+
+func requireSingleOpenAIJSONError(t *testing.T, body []byte, expectedType string) {
+	t.Helper()
+	require.NotContains(t, string(body), "event: response.failed")
+
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &envelope), "整个响应体必须是一个合法 JSON 文档")
+	require.Len(t, envelope, 1, "最终响应只能包含一个 error envelope")
+
+	var payload struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(envelope["error"], &payload))
+	require.Equal(t, expectedType, payload.Type)
+	require.NotEmpty(t, payload.Message)
 }
