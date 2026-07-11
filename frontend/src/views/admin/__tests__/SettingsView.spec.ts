@@ -648,6 +648,76 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
   });
 
+  it("retains, renders, and saves positive OpenAI Fast/Flex user IDs", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_fast_policy_settings: {
+        rules: [
+          {
+            service_tier: "priority",
+            action: "filter",
+            scope: "apikey",
+            user_ids: [101, 202],
+          },
+        ],
+      },
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const userIDInputs = wrapper.findAll(
+      'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
+    );
+    expect(userIDInputs).toHaveLength(2);
+    expect(
+      userIDInputs.map(
+        (input) => (input.element as HTMLInputElement).value,
+      ),
+    ).toEqual(["101", "202"]);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = updateSettings.mock.calls[0]?.[0];
+    expect(
+      payload.openai_fast_policy_settings.rules[0].user_ids,
+    ).toEqual([101, 202]);
+  });
+
+  it("omits an empty OpenAI Fast/Flex user-ID list when saving", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_fast_policy_settings: {
+        rules: [
+          {
+            service_tier: "flex",
+            action: "pass",
+            scope: "all",
+            user_ids: [],
+          },
+        ],
+      },
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(
+      wrapper.findAll(
+        'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
+      ),
+    ).toHaveLength(0);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = updateSettings.mock.calls[0]?.[0];
+    expect(
+      payload.openai_fast_policy_settings.rules[0].user_ids,
+    ).toBeUndefined();
+  });
+
   it("submits Anthropic cache TTL injection gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
