@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	adminhandler "github.com/Wei-Shaw/sub2api/internal/handler/admin"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -685,6 +686,10 @@ func TestAPIContracts(t *testing.T) {
 					"openai_advanced_scheduler_enabled":                                  "true",
 					service.SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
 					service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
+					service.SettingKeyClaudeCodeMimicryProfile:                           claude.DefaultClaudeCodeMimicryProfileID,
+					service.SettingKeyClaudeMimicryGuardMode:                             "block",
+					service.SettingKeyEnableContentSafetyFilter:                          "true",
+					service.SettingKeyContentSafetyGuardMode:                             "warn",
 				})
 			},
 			method:     http.MethodGet,
@@ -861,6 +866,8 @@ func TestAPIContracts(t *testing.T) {
 					"allow_ungrouped_key_scheduling": false,
 					"backend_mode_enabled": false,
 					"enable_cch_signing": false,
+					"claude_code_mimicry_profile": "cc-2.1.206-sdk-cli-macos-arm64",
+					"claude_mimicry_guard_mode": "block",
 					"enable_claude_oauth_system_prompt_injection": true,
 					"claude_oauth_system_prompt": "",
 					"claude_oauth_system_prompt_blocks": "",
@@ -936,6 +943,8 @@ func TestAPIContracts(t *testing.T) {
 					"channel_monitor_default_interval_seconds": 60,
 					"available_channels_enabled": false,
 					"risk_control_enabled": false,
+					"enable_content_safety_filter": true,
+					"content_safety_guard_mode": "warn",
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
 					"affiliate_enabled": false,
@@ -1129,6 +1138,8 @@ func TestAPIContracts(t *testing.T) {
 					"enable_fingerprint_unification": true,
 					"enable_metadata_passthrough": false,
 					"enable_cch_signing": false,
+					"claude_code_mimicry_profile": "cc-2.1.206-sdk-cli-macos-arm64",
+					"claude_mimicry_guard_mode": "warn",
 					"enable_claude_oauth_system_prompt_injection": true,
 					"claude_oauth_system_prompt": "",
 					"claude_oauth_system_prompt_blocks": "",
@@ -1206,6 +1217,8 @@ func TestAPIContracts(t *testing.T) {
 					"channel_monitor_default_interval_seconds": 60,
 					"available_channels_enabled": false,
 					"risk_control_enabled": false,
+					"enable_content_safety_filter": true,
+					"content_safety_guard_mode": "block",
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
 					"affiliate_enabled": false,

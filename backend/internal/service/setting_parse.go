@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
@@ -184,7 +185,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAffiliateEnabled: "false",
 
 		// 风控中心功能（默认关闭，显式启用）
-		SettingKeyRiskControlEnabled: "false",
+		SettingKeyRiskControlEnabled:        "false",
+		SettingKeyEnableContentSafetyFilter: "true",
+		SettingKeyContentSafetyGuardMode:    ContentSafetyGuardModeBlock,
 
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:    "false",
@@ -204,6 +207,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:                        "false",
+		SettingKeyClaudeCodeMimicryProfile:                           claude.DefaultClaudeCodeMimicryProfileID,
+		SettingKeyClaudeMimicryGuardMode:                             claudeMimicryGuardWarn,
 		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
@@ -719,6 +724,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
+	if v, ok := settings[SettingKeyEnableContentSafetyFilter]; ok && strings.TrimSpace(v) != "" {
+		result.EnableContentSafetyFilter = v == "true"
+	} else {
+		result.EnableContentSafetyFilter = true
+	}
+	result.ContentSafetyGuardMode = NormalizeContentSafetyGuardMode(settings[SettingKeyContentSafetyGuardMode])
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"
@@ -744,6 +755,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.EnableMetadataPassthrough = settings[SettingKeyEnableMetadataPassthrough] == "true"
 	result.EnableCCHSigning = settings[SettingKeyEnableCCHSigning] == "true"
+	result.ClaudeCodeMimicryProfile = normalizeClaudeCodeMimicryProfileID(settings[SettingKeyClaudeCodeMimicryProfile])
+	result.ClaudeMimicryGuardMode = normalizeClaudeMimicryGuardMode(settings[SettingKeyClaudeMimicryGuardMode])
 	if v, ok := settings[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
 		result.EnableClaudeOAuthSystemPromptInjection = v == "true"
 	} else {

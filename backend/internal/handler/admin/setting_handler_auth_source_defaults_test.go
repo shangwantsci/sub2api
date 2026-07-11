@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -508,4 +509,129 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_signup")
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
+}
+
+func TestSettingHandler_UpdateSettings_MimicryAndContentSafety(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyPromoCodeEnabled: "true",
+	}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":           true,
+		"claude_code_mimicry_profile":  claude.DefaultClaudeCodeMimicryProfileID,
+		"claude_mimicry_guard_mode":    "block",
+		"enable_content_safety_filter": false,
+		"content_safety_guard_mode":    "warn",
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.lastUpdates[service.SettingKeyClaudeCodeMimicryProfile])
+	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyClaudeMimicryGuardMode])
+	require.Equal(t, "false", repo.lastUpdates[service.SettingKeyEnableContentSafetyFilter])
+	require.Equal(t, "warn", repo.lastUpdates[service.SettingKeyContentSafetyGuardMode])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, data["claude_code_mimicry_profile"])
+	require.Equal(t, "block", data["claude_mimicry_guard_mode"])
+	require.Equal(t, false, data["enable_content_safety_filter"])
+	require.Equal(t, "warn", data["content_safety_guard_mode"])
+}
+
+func TestSettingHandler_UpdateSettings_PreservesOmittedMimicryAndContentSafety(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyPromoCodeEnabled:          "true",
+		service.SettingKeyClaudeCodeMimicryProfile:  claude.DefaultClaudeCodeMimicryProfileID,
+		service.SettingKeyClaudeMimicryGuardMode:    "block",
+		service.SettingKeyEnableContentSafetyFilter: "false",
+		service.SettingKeyContentSafetyGuardMode:    "warn",
+	}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	rawBody, err := json.Marshal(map[string]any{"promo_code_enabled": false})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.lastUpdates[service.SettingKeyClaudeCodeMimicryProfile])
+	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyClaudeMimicryGuardMode])
+	require.Equal(t, "false", repo.lastUpdates[service.SettingKeyEnableContentSafetyFilter])
+	require.Equal(t, "warn", repo.lastUpdates[service.SettingKeyContentSafetyGuardMode])
+}
+
+func TestSettingHandler_UpdateSettings_NormalizesMimicryAndContentSafety(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyPromoCodeEnabled: "true",
+	}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":           true,
+		"claude_code_mimicry_profile":  "  unknown-profile  ",
+		"claude_mimicry_guard_mode":    " BLOCK ",
+		"enable_content_safety_filter": true,
+		"content_safety_guard_mode":    " invalid ",
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.lastUpdates[service.SettingKeyClaudeCodeMimicryProfile])
+	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyClaudeMimicryGuardMode])
+	require.Equal(t, "true", repo.lastUpdates[service.SettingKeyEnableContentSafetyFilter])
+	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyContentSafetyGuardMode])
+}
+
+func TestDiffSettings_DetectsMimicryAndContentSafety(t *testing.T) {
+	before := &service.SystemSettings{
+		ClaudeCodeMimicryProfile:  "legacy-profile",
+		ClaudeMimicryGuardMode:    "warn",
+		EnableContentSafetyFilter: true,
+		ContentSafetyGuardMode:    "block",
+	}
+	after := &service.SystemSettings{
+		ClaudeCodeMimicryProfile:  claude.DefaultClaudeCodeMimicryProfileID,
+		ClaudeMimicryGuardMode:    "block",
+		EnableContentSafetyFilter: false,
+		ContentSafetyGuardMode:    "warn",
+	}
+	authDefaults := &service.AuthSourceDefaultSettings{}
+
+	changed := diffSettings(before, after, authDefaults, authDefaults, UpdateSettingsRequest{})
+
+	require.Equal(t, []string{
+		service.SettingKeyClaudeCodeMimicryProfile,
+		service.SettingKeyClaudeMimicryGuardMode,
+		service.SettingKeyEnableContentSafetyFilter,
+		service.SettingKeyContentSafetyGuardMode,
+	}, changed)
 }
