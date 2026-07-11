@@ -22,6 +22,20 @@ type settingHandlerRepoStub struct {
 	lastUpdates map[string]string
 }
 
+type fastPolicyAtomicSettingRepoStub struct {
+	settingHandlerRepoStub
+	setCalls int
+}
+
+func (s *fastPolicyAtomicSettingRepoStub) Set(ctx context.Context, key, value string) error {
+	s.setCalls++
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	s.values[key] = value
+	return nil
+}
+
 func (s *settingHandlerRepoStub) Get(ctx context.Context, key string) (*service.Setting, error) {
 	panic("unexpected Get call")
 }
@@ -474,6 +488,83 @@ func TestSettingHandler_UpdateSettings_DoesNotPersistPartialSystemSettingsWhenAu
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Equal(t, "false", repo.values[service.SettingKeyRegistrationEnabled])
 	require.Equal(t, "9.5", repo.values[service.SettingKeyAuthSourceDefaultEmailBalance])
+}
+
+func TestSettingHandler_UpdateSettings_RejectsInvalidFastPolicyBeforePersistingSystemSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyRegistrationEnabled: "false",
+		service.SettingKeyPromoCodeEnabled:    "true",
+	}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"promo_code_enabled":   true,
+		"openai_fast_policy_settings": map[string]any{
+			"rules": []map[string]any{{
+				"service_tier": "priority",
+				"action":       "filter",
+				"scope":        "apikey",
+				"user_ids":     []int64{0},
+			}},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyRegistrationEnabled])
+	require.Nil(t, repo.lastUpdates, "invalid Fast Policy must be rejected before the first settings write")
+}
+
+func TestSettingHandler_UpdateSettings_PersistsFastPolicyInTheSystemSettingsBatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &fastPolicyAtomicSettingRepoStub{settingHandlerRepoStub: settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyRegistrationEnabled: "false",
+		service.SettingKeyPromoCodeEnabled:    "true",
+	}}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"promo_code_enabled":   true,
+		"openai_fast_policy_settings": map[string]any{
+			"rules": []map[string]any{{
+				"service_tier": " PRIORITY ",
+				"action":       "filter",
+				"scope":        "apikey",
+				"user_ids":     []int64{42},
+			}},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Zero(t, repo.setCalls, "Fast Policy must not use a second repository write")
+	rawPolicy, ok := repo.lastUpdates[service.SettingKeyOpenAIFastPolicySettings]
+	require.True(t, ok, "Fast Policy JSON must share the atomic SetMultiple batch")
+	var stored service.OpenAIFastPolicySettings
+	require.NoError(t, json.Unmarshal([]byte(rawPolicy), &stored))
+	require.Equal(t, service.OpenAIFastTierPriority, stored.Rules[0].ServiceTier)
+	require.Equal(t, []int64{42}, stored.Rules[0].UserIDs)
 }
 
 func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {

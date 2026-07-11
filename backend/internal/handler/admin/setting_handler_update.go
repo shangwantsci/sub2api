@@ -1622,17 +1622,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		},
 		ForceEmailOnThirdPartySignup: boolValueOrDefault(req.ForceEmailOnThirdPartySignup, previousAuthSourceDefaults.ForceEmailOnThirdPartySignup),
 	}
-	if err := h.settingService.UpdateSettingsWithAuthSourceDefaults(c.Request.Context(), settings, authSourceDefaults); err != nil {
+	if err := h.settingService.UpdateSettingsWithAuthSourceDefaults(
+		c.Request.Context(),
+		settings,
+		authSourceDefaults,
+		openaiFastPolicySettingsFromDTO(req.OpenAIFastPolicySettings),
+	); err != nil {
 		response.ErrorFrom(c, err)
 		return
-	}
-
-	// Update OpenAI fast policy (stored under dedicated key, only when provided).
-	if req.OpenAIFastPolicySettings != nil {
-		if err := h.settingService.SetOpenAIFastPolicySettings(c.Request.Context(), openaiFastPolicySettingsFromDTO(req.OpenAIFastPolicySettings)); err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
 	}
 
 	// Update payment configuration (integrated into system settings).

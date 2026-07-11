@@ -7666,8 +7666,13 @@ const betaPolicyForm = reactive({
 });
 
 // OpenAI Fast/Flex Policy 状态
+type OpenAIFastPolicyUserIDDraft = number | "";
+type OpenAIFastPolicyRuleForm = Omit<OpenAIFastPolicyRule, "user_ids"> & {
+  user_ids?: OpenAIFastPolicyUserIDDraft[];
+};
+
 const openaiFastPolicyForm = reactive({
-  rules: [] as OpenAIFastPolicyRule[],
+  rules: [] as OpenAIFastPolicyRuleForm[],
 });
 // 标记 openai_fast_policy_settings 是否已成功从后端加载，
 // 避免后端 GET 出错或字段缺失时，保存把默认规则覆盖成空数组。
@@ -9497,6 +9502,21 @@ async function saveSettings() {
     form.claude_oauth_system_prompt_blocks =
       claudeOAuthSystemPromptBlocksJSON;
 
+    let normalizedOpenAIFastPolicyUserIDs: number[][] | undefined;
+    if (openaiFastPolicyLoaded.value) {
+      const normalizedUserIDs = normalizeOpenAIFastPolicyUserIDsForSave();
+      if (!normalizedUserIDs) {
+        appStore.showError(
+          localText(
+            "指定用户 ID 必须是大于 0 且不重复的整数；请删除空白项或修正后再保存。",
+            "Specific user IDs must be unique positive integers; remove empty entries or correct them before saving.",
+          ),
+        );
+        return;
+      }
+      normalizedOpenAIFastPolicyUserIDs = normalizedUserIDs;
+    }
+
     const payload: UpdateSettingsRequest = {
       registration_enabled: form.registration_enabled,
       email_verify_enabled: form.email_verify_enabled,
@@ -9766,19 +9786,17 @@ async function saveSettings() {
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
       payload.openai_fast_policy_settings = {
-        rules: openaiFastPolicyForm.rules.map((rule) => {
+        rules: openaiFastPolicyForm.rules.map((rule, ruleIndex) => {
           const whitelist = (rule.model_whitelist || [])
             .map((p) => p.trim())
             .filter((p) => p !== "");
           const hasWhitelist = whitelist.length > 0;
+          const userIDs = normalizedOpenAIFastPolicyUserIDs?.[ruleIndex] || [];
           return {
             service_tier: rule.service_tier,
             action: rule.action,
             scope: rule.scope,
-            user_ids:
-              rule.user_ids && rule.user_ids.length > 0
-                ? [...rule.user_ids]
-                : undefined,
+            user_ids: userIDs.length > 0 ? userIDs : undefined,
             error_message:
               rule.action === "block" ? rule.error_message : undefined,
             model_whitelist: hasWhitelist ? whitelist : undefined,
@@ -10283,25 +10301,49 @@ function removeOpenAIFastPolicyRule(index: number) {
   openaiFastPolicyForm.rules.splice(index, 1);
 }
 
-function addOpenAIFastPolicyUserID(rule: OpenAIFastPolicyRule) {
+function normalizeOpenAIFastPolicyUserIDsForSave(): number[][] | null {
+  const normalizedRules: number[][] = [];
+
+  for (const rule of openaiFastPolicyForm.rules) {
+    const normalizedUserIDs: number[] = [];
+    const seen = new Set<number>();
+    for (const draft of rule.user_ids || []) {
+      if (
+        draft === "" ||
+        !Number.isSafeInteger(draft) ||
+        draft <= 0 ||
+        seen.has(draft)
+      ) {
+        return null;
+      }
+      seen.add(draft);
+      normalizedUserIDs.push(draft);
+    }
+    normalizedRules.push(normalizedUserIDs);
+  }
+
+  return normalizedRules;
+}
+
+function addOpenAIFastPolicyUserID(rule: OpenAIFastPolicyRuleForm) {
   if (!rule.user_ids) rule.user_ids = [];
-  rule.user_ids.push(0);
+  rule.user_ids.push("");
 }
 
 function removeOpenAIFastPolicyUserID(
-  rule: OpenAIFastPolicyRule,
+  rule: OpenAIFastPolicyRuleForm,
   idx: number,
 ) {
   rule.user_ids?.splice(idx, 1);
 }
 
-function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {
+function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRuleForm) {
   if (!rule.model_whitelist) rule.model_whitelist = [];
   rule.model_whitelist.push("");
 }
 
 function removeOpenAIFastPolicyModelPattern(
-  rule: OpenAIFastPolicyRule,
+  rule: OpenAIFastPolicyRuleForm,
   idx: number,
 ) {
   rule.model_whitelist?.splice(idx, 1);

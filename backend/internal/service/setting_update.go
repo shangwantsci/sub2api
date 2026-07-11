@@ -28,8 +28,23 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 	return err
 }
 
-// UpdateSettingsWithAuthSourceDefaults persists system settings and auth-source defaults in a single write.
-func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings) error {
+// UpdateSettingsWithAuthSourceDefaults persists system settings, auth-source defaults,
+// and an optionally supplied OpenAI Fast Policy in a single write.
+func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(
+	ctx context.Context,
+	settings *SystemSettings,
+	authDefaults *AuthSourceDefaultSettings,
+	fastPolicy *OpenAIFastPolicySettings,
+) error {
+	var fastPolicyJSON string
+	if fastPolicy != nil {
+		var err error
+		fastPolicyJSON, err = normalizeAndMarshalOpenAIFastPolicySettings(fastPolicy)
+		if err != nil {
+			return infraerrors.BadRequest("INVALID_OPENAI_FAST_POLICY_SETTINGS", err.Error())
+		}
+	}
+
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -41,6 +56,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 	}
 	for key, value := range authSourceUpdates {
 		updates[key] = value
+	}
+	if fastPolicy != nil {
+		updates[SettingKeyOpenAIFastPolicySettings] = fastPolicyJSON
 	}
 
 	err = s.settingRepo.SetMultiple(ctx, updates)

@@ -718,6 +718,64 @@ describe("admin SettingsView payment visible method controls", () => {
     ).toBeUndefined();
   });
 
+  it.each([
+    ["an empty draft", [""]],
+    ["zero", ["0"]],
+    ["a negative ID", ["-1"]],
+    ["duplicate IDs", ["42", "42"]],
+  ])("blocks %s before saving OpenAI Fast/Flex settings", async (_label, draftValues) => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_fast_policy_settings: {
+        rules: [
+          {
+            service_tier: "priority",
+            action: "filter",
+            scope: "apikey",
+            user_ids: [],
+          },
+        ],
+      },
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const addUserIDButton = wrapper
+      .findAll("button")
+      .find((button) =>
+        button.text().includes("admin.settings.openaiFastPolicy.addUserId"),
+      );
+    expect(addUserIDButton).toBeDefined();
+
+    for (const [index, value] of draftValues.entries()) {
+      await addUserIDButton?.trigger("click");
+      const input = wrapper.findAll(
+        'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
+      )[index];
+      expect(input).toBeDefined();
+      if (value !== "") {
+        await input?.setValue(value);
+      }
+    }
+
+    expect(
+      wrapper
+        .findAll(
+          'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
+        )
+        .map((input) => (input.element as HTMLInputElement).value),
+    ).toEqual(draftValues);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenLastCalledWith(
+      "指定用户 ID 必须是大于 0 且不重复的整数；请删除空白项或修正后再保存。",
+    );
+  });
+
   it("submits Anthropic cache TTL injection gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

@@ -253,7 +253,7 @@ func TestUpdateSettingsWithAuthSourceDefaults_PlatformQuotaRoundTrip(t *testing.
 			},
 		},
 	}
-	if err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), systemSettings, authDefaults); err != nil {
+	if err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), systemSettings, authDefaults, nil); err != nil {
 		t.Fatalf("UpdateSettingsWithAuthSourceDefaults: %v", err)
 	}
 	got := svc.GetAuthSourcePlatformQuotas(context.Background(), "email")
@@ -288,7 +288,7 @@ func TestUpdateSettingsWithAuthSourceDefaults_NilPlatformQuotaPreservesExisting(
 	authDefaults := &AuthSourceDefaultSettings{
 		Email: ProviderDefaultGrantSettings{PlatformQuotas: nil},
 	}
-	if err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{}, authDefaults); err != nil {
+	if err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{}, authDefaults, nil); err != nil {
 		t.Fatalf("UpdateSettingsWithAuthSourceDefaults: %v", err)
 	}
 	anthro := svc.GetAuthSourcePlatformQuotas(context.Background(), "email")["anthropic"]
@@ -338,7 +338,7 @@ func TestUpdateSettingsWithAuthSourceDefaults_NegativeQuotaRejected(t *testing.T
 			},
 		},
 	}
-	err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{}, authDefaults)
+	err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{}, authDefaults, nil)
 	require.Error(t, err, "expected error for negative quota")
 	require.Equal(t, "INVALID_DEFAULT_PLATFORM_QUOTA", infraerrors.Reason(err))
 }
