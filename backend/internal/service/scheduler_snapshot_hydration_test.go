@@ -141,6 +141,47 @@ func TestOpenAINewAcquiredSelectionResult_ReleasesSlotWhenHydrationFails(t *test
 	}
 }
 
+func TestGatewaySelectAccountWithLoadAwareness_ReleasesSlotWhenHydrationFails(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		snapshot: []*Account{
+			{
+				ID:          9,
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    1,
+			},
+		},
+		accounts: map[int64]*Account{},
+	}
+	concurrencyCache := &stubConcurrencyCacheForTest{acquireResult: true}
+	cfg := testConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	svc := &GatewayService{
+		schedulerSnapshot:  NewSchedulerSnapshotService(cache, nil, stubOpenAIAccountRepo{}, nil, nil),
+		cache:              &mockGatewayCacheForPlatform{},
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+		cfg:                cfg,
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "", "claude-3-5-sonnet-20241022", nil, "", 0)
+
+	if err == nil {
+		t.Fatal("expected hydration error")
+	}
+	if selection != nil {
+		t.Fatal("expected nil selection on hydration error")
+	}
+	if len(concurrencyCache.releasedAccountIDs) != 1 {
+		t.Fatalf("expected exactly one released account slot, got %d", len(concurrencyCache.releasedAccountIDs))
+	}
+	if got := concurrencyCache.releasedAccountIDs[0]; got != 9 {
+		t.Fatalf("expected released account ID 9, got %d", got)
+	}
+}
+
 func TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedulerSnapshot(t *testing.T) {
 	cache := &snapshotHydrationCache{
 		snapshot: []*Account{
@@ -171,10 +212,14 @@ func TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedu
 	}
 
 	schedulerSnapshot := NewSchedulerSnapshotService(cache, nil, nil, nil, nil)
+	concurrencyCache := &stubConcurrencyCacheForTest{acquireResult: true}
+	cfg := testConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	svc := &GatewayService{
-		schedulerSnapshot: schedulerSnapshot,
-		cache:             &mockGatewayCacheForPlatform{},
-		cfg:               testConfig(),
+		schedulerSnapshot:  schedulerSnapshot,
+		cache:              &mockGatewayCacheForPlatform{},
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+		cfg:                cfg,
 	}
 
 	result, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "", "claude-3-5-sonnet-20241022", nil, "", 0)
@@ -186,6 +231,21 @@ func TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedu
 	}
 	if got := result.Account.GetCredential("api_key"); got != "anthropic-live-key" {
 		t.Fatalf("expected hydrated api key, got %q", got)
+	}
+	if len(concurrencyCache.releasedAccountIDs) != 0 {
+		t.Fatalf("expected no early slot release, got %d", len(concurrencyCache.releasedAccountIDs))
+	}
+	if result.ReleaseFunc == nil {
+		t.Fatal("expected selection release function")
+	}
+
+	result.ReleaseFunc()
+
+	if len(concurrencyCache.releasedAccountIDs) != 1 {
+		t.Fatalf("expected exactly one released account slot, got %d", len(concurrencyCache.releasedAccountIDs))
+	}
+	if got := concurrencyCache.releasedAccountIDs[0]; got != 9 {
+		t.Fatalf("expected released account ID 9, got %d", got)
 	}
 }
 
