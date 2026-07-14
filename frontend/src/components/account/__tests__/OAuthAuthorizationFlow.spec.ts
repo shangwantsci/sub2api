@@ -27,7 +27,7 @@ const mountCookieFlow = (anthropicSessionBulkImport: boolean) =>
       platform: 'anthropic',
       showCookieOption: true,
       allowMultiple: true,
-      defaultInputMethod: 'cookie',
+      initialInputMethod: 'cookie',
       anthropicSessionBulkImport
     },
     global: {

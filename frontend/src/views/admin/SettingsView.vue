@@ -1199,60 +1199,10 @@
                   <p class="mb-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.openaiFastPolicy.userIdsHint") }}
                   </p>
-                  <div
-                    v-for="(_, userIDIndex) in rule.user_ids || []"
-                    :key="userIDIndex"
-                    class="mb-1.5 flex items-center gap-2"
-                  >
-                    <input
-                      v-model.number="rule.user_ids![userIDIndex]"
-                      type="number"
-                      min="1"
-                      step="1"
-                      class="input input-sm flex-1"
-                      :placeholder="t('admin.settings.openaiFastPolicy.userIdPlaceholder')"
-                    />
-                    <button
-                      type="button"
-                      @click="removeOpenAIFastPolicyUserID(rule, userIDIndex)"
-                      class="shrink-0 rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                      :title="t('admin.settings.openaiFastPolicy.removeUserId')"
-                    >
-                      <svg
-                        class="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    @click="addOpenAIFastPolicyUserID(rule)"
-                    class="mb-2 inline-flex items-center gap-1 text-xs text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                  >
-                    <svg
-                      class="h-3.5 w-3.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M12 4v16m8-8H4"
-                      />
-                    </svg>
-                    {{ t("admin.settings.openaiFastPolicy.addUserId") }}
-                  </button>
+                  <OpenAIFastPolicyUserSelector
+                    :model-value="rule.user_ids || []"
+                    @update:model-value="rule.user_ids = $event"
+                  />
                 </div>
 
                 <!-- Error Message (only when action=block) -->
@@ -7478,6 +7428,7 @@ import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
+import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
@@ -7666,13 +7617,8 @@ const betaPolicyForm = reactive({
 });
 
 // OpenAI Fast/Flex Policy 状态
-type OpenAIFastPolicyUserIDDraft = number | "";
-type OpenAIFastPolicyRuleForm = Omit<OpenAIFastPolicyRule, "user_ids"> & {
-  user_ids?: OpenAIFastPolicyUserIDDraft[];
-};
-
 const openaiFastPolicyForm = reactive({
-  rules: [] as OpenAIFastPolicyRuleForm[],
+  rules: [] as OpenAIFastPolicyRule[],
 });
 // 标记 openai_fast_policy_settings 是否已成功从后端加载，
 // 避免后端 GET 出错或字段缺失时，保存把默认规则覆盖成空数组。
@@ -9502,21 +9448,6 @@ async function saveSettings() {
     form.claude_oauth_system_prompt_blocks =
       claudeOAuthSystemPromptBlocksJSON;
 
-    let normalizedOpenAIFastPolicyUserIDs: number[][] | undefined;
-    if (openaiFastPolicyLoaded.value) {
-      const normalizedUserIDs = normalizeOpenAIFastPolicyUserIDsForSave();
-      if (!normalizedUserIDs) {
-        appStore.showError(
-          localText(
-            "指定用户 ID 必须是大于 0 且不重复的整数；请删除空白项或修正后再保存。",
-            "Specific user IDs must be unique positive integers; remove empty entries or correct them before saving.",
-          ),
-        );
-        return;
-      }
-      normalizedOpenAIFastPolicyUserIDs = normalizedUserIDs;
-    }
-
     const payload: UpdateSettingsRequest = {
       registration_enabled: form.registration_enabled,
       email_verify_enabled: form.email_verify_enabled,
@@ -9786,17 +9717,19 @@ async function saveSettings() {
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
       payload.openai_fast_policy_settings = {
-        rules: openaiFastPolicyForm.rules.map((rule, ruleIndex) => {
+        rules: openaiFastPolicyForm.rules.map((rule) => {
           const whitelist = (rule.model_whitelist || [])
             .map((p) => p.trim())
             .filter((p) => p !== "");
           const hasWhitelist = whitelist.length > 0;
-          const userIDs = normalizedOpenAIFastPolicyUserIDs?.[ruleIndex] || [];
           return {
             service_tier: rule.service_tier,
             action: rule.action,
             scope: rule.scope,
-            user_ids: userIDs.length > 0 ? userIDs : undefined,
+            user_ids:
+              rule.user_ids && rule.user_ids.length > 0
+                ? [...rule.user_ids]
+                : undefined,
             error_message:
               rule.action === "block" ? rule.error_message : undefined,
             model_whitelist: hasWhitelist ? whitelist : undefined,
@@ -10301,49 +10234,13 @@ function removeOpenAIFastPolicyRule(index: number) {
   openaiFastPolicyForm.rules.splice(index, 1);
 }
 
-function normalizeOpenAIFastPolicyUserIDsForSave(): number[][] | null {
-  const normalizedRules: number[][] = [];
-
-  for (const rule of openaiFastPolicyForm.rules) {
-    const normalizedUserIDs: number[] = [];
-    const seen = new Set<number>();
-    for (const draft of rule.user_ids || []) {
-      if (
-        draft === "" ||
-        !Number.isSafeInteger(draft) ||
-        draft <= 0 ||
-        seen.has(draft)
-      ) {
-        return null;
-      }
-      seen.add(draft);
-      normalizedUserIDs.push(draft);
-    }
-    normalizedRules.push(normalizedUserIDs);
-  }
-
-  return normalizedRules;
-}
-
-function addOpenAIFastPolicyUserID(rule: OpenAIFastPolicyRuleForm) {
-  if (!rule.user_ids) rule.user_ids = [];
-  rule.user_ids.push("");
-}
-
-function removeOpenAIFastPolicyUserID(
-  rule: OpenAIFastPolicyRuleForm,
-  idx: number,
-) {
-  rule.user_ids?.splice(idx, 1);
-}
-
-function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRuleForm) {
+function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {
   if (!rule.model_whitelist) rule.model_whitelist = [];
   rule.model_whitelist.push("");
 }
 
 function removeOpenAIFastPolicyModelPattern(
-  rule: OpenAIFastPolicyRuleForm,
+  rule: OpenAIFastPolicyRule,
   idx: number,
 ) {
   rule.model_whitelist?.splice(idx, 1);

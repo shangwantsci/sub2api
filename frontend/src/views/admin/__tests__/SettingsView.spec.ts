@@ -484,6 +484,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        OpenAIFastPolicyUserSelector: true,
       },
     },
   });
@@ -648,7 +649,11 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
   });
 
-  it("retains, renders, and saves positive OpenAI Fast/Flex user IDs", async () => {
+  // After the 0.1.155 merge the manual user-ID inputs were replaced by the
+  // upstream OpenAIFastPolicyUserSelector (email search) component, which is
+  // stubbed here and covered by its own spec. These tests keep the fork's
+  // load -> save serialization contract for rule.user_ids.
+  it("retains and saves positive OpenAI Fast/Flex user IDs", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       openai_fast_policy_settings: {
@@ -665,16 +670,6 @@ describe("admin SettingsView payment visible method controls", () => {
 
     const wrapper = mountView();
     await flushPromises();
-
-    const userIDInputs = wrapper.findAll(
-      'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
-    );
-    expect(userIDInputs).toHaveLength(2);
-    expect(
-      userIDInputs.map(
-        (input) => (input.element as HTMLInputElement).value,
-      ),
-    ).toEqual(["101", "202"]);
 
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
@@ -703,12 +698,6 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
     await flushPromises();
 
-    expect(
-      wrapper.findAll(
-        'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
-      ),
-    ).toHaveLength(0);
-
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
@@ -716,64 +705,6 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(
       payload.openai_fast_policy_settings.rules[0].user_ids,
     ).toBeUndefined();
-  });
-
-  it.each([
-    ["an empty draft", [""]],
-    ["zero", ["0"]],
-    ["a negative ID", ["-1"]],
-    ["duplicate IDs", ["42", "42"]],
-  ])("blocks %s before saving OpenAI Fast/Flex settings", async (_label, draftValues) => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_fast_policy_settings: {
-        rules: [
-          {
-            service_tier: "priority",
-            action: "filter",
-            scope: "apikey",
-            user_ids: [],
-          },
-        ],
-      },
-    });
-
-    const wrapper = mountView();
-    await flushPromises();
-
-    const addUserIDButton = wrapper
-      .findAll("button")
-      .find((button) =>
-        button.text().includes("admin.settings.openaiFastPolicy.addUserId"),
-      );
-    expect(addUserIDButton).toBeDefined();
-
-    for (const [index, value] of draftValues.entries()) {
-      await addUserIDButton?.trigger("click");
-      const input = wrapper.findAll(
-        'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
-      )[index];
-      expect(input).toBeDefined();
-      if (value !== "") {
-        await input?.setValue(value);
-      }
-    }
-
-    expect(
-      wrapper
-        .findAll(
-          'input[placeholder="admin.settings.openaiFastPolicy.userIdPlaceholder"]',
-        )
-        .map((input) => (input.element as HTMLInputElement).value),
-    ).toEqual(draftValues);
-
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).not.toHaveBeenCalled();
-    expect(showError).toHaveBeenLastCalledWith(
-      "指定用户 ID 必须是大于 0 且不重复的整数；请删除空白项或修正后再保存。",
-    );
   });
 
   it("submits Anthropic cache TTL injection gateway setting", async () => {
