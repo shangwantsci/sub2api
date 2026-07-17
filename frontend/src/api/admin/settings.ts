@@ -1368,11 +1368,31 @@ export interface ClaudeCalibratedProfileStatus {
   error?: string;
 }
 
+export function normalizeClaudeCalibratedProfileStatus(
+  input: Partial<ClaudeCalibratedProfileStatus> | null | undefined,
+): ClaudeCalibratedProfileStatus {
+  return {
+    published: input?.published === true,
+    valid: input?.valid === true,
+    cli_version: typeof input?.cli_version === "string" ? input.cli_version : "",
+    captured_at: typeof input?.captured_at === "string" ? input.captured_at : "",
+    source: typeof input?.source === "string" ? input.source : "",
+    user_agent: typeof input?.user_agent === "string" ? input.user_agent : "",
+    salt_verified: input?.salt_verified === true,
+    guard_checked: Number.isFinite(input?.guard_checked) ? Number(input?.guard_checked) : 0,
+    guard_ok: Number.isFinite(input?.guard_ok) ? Number(input?.guard_ok) : 0,
+    beta_rule_keys: Array.isArray(input?.beta_rule_keys) ? input.beta_rule_keys : [],
+    absent_headers: Array.isArray(input?.absent_headers) ? input.absent_headers : [],
+    raw: typeof input?.raw === "string" ? input.raw : "",
+    ...(typeof input?.error === "string" && input.error ? { error: input.error } : {}),
+  };
+}
+
 export async function getClaudeCalibratedProfile(): Promise<ClaudeCalibratedProfileStatus> {
   const { data } = await apiClient.get<ClaudeCalibratedProfileStatus>(
     "/admin/settings/claude-calibrated-profile",
   );
-  return data;
+  return normalizeClaudeCalibratedProfileStatus(data);
 }
 
 /**
@@ -1388,14 +1408,14 @@ export async function publishClaudeCalibratedProfile(
     raw,
     { headers: { "Content-Type": "application/json" } },
   );
-  return data;
+  return normalizeClaudeCalibratedProfileStatus(data);
 }
 
 export async function clearClaudeCalibratedProfile(): Promise<ClaudeCalibratedProfileStatus> {
   const { data } = await apiClient.delete<ClaudeCalibratedProfileStatus>(
     "/admin/settings/claude-calibrated-profile",
   );
-  return data;
+  return normalizeClaudeCalibratedProfileStatus(data);
 }
 
 // --- Web Search Emulation Config ---

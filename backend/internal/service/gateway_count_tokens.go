@@ -607,6 +607,11 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 func sanitizeCountTokensRequestBody(body []byte) []byte {
 	out := body
 	for _, path := range []string{
+		// /v1/messages/count_tokens rejects generation-only max_tokens. The OAuth
+		// normalizer may add a message-profile default before this endpoint-specific
+		// sanitize step, so it must be removed here (production returned HTTP 400:
+		// "max_tokens: Extra inputs are not permitted").
+		"max_tokens",
 		"temperature",
 		"top_p",
 		"top_k",

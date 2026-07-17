@@ -17,6 +17,7 @@
 #   OUT_DIR               where profile-<version>.json is written (default: ./out)
 #   CC_CALIBRATE_MODELS   model sweep (default: "haiku sonnet opus fable")
 #   SHIM_PORT             local shim port (default: 8788)
+#   CC_CALIBRATE_KEEP_CAP  1 = keep cap-<version>.jsonl in OUT_DIR for diagnostics
 set -euo pipefail
 
 CC_VERSION="${CC_VERSION:-latest}"
@@ -53,12 +54,40 @@ CAP_OUT="$WORK/cap.jsonl" SHIM_PORT="$SHIM_PORT" node "$CAL_DIR/shim.js" &
 SHIM=$!
 trap 'kill $SHIM 2>/dev/null || true; rm -rf "$WORK"' EXIT
 sleep 1
+
+# Official Claude Code uses two fingerprint inputs:
+# - main query: first non-meta user message BEFORE wire normalization;
+# - side query: first user text in the side-query API body.
+# The former cannot be reconstructed from wire bytes alone, so write a marker before
+# each CLI invocation. extract-profile.js tries both the marker prompt and wire user
+# texts, and records which source matched the real billing fingerprint.
+mark_canary() {
+  CANARY_MODEL="$1" CANARY_KIND="$2" CANARY_PROMPT="$3" CAP_OUT="$WORK/cap.jsonl" \
+    node -e 'const fs=require("fs"); fs.appendFileSync(process.env.CAP_OUT, JSON.stringify({kind:"canary",model:process.env.CANARY_MODEL,canary_kind:process.env.CANARY_KIND,prompt:process.env.CANARY_PROMPT})+"\n")'
+}
+
+# GNU coreutils calls it timeout; Homebrew calls it gtimeout. In an environment with
+# neither (plain macOS), run directly—the local shim responds immediately.
+run_cli() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 60 "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 60 "$@"
+  else
+    "$@"
+  fi
+}
+
 for M in $MODELS; do
   # tools-triggering turn (exercises the tools beta set)
-  timeout 60 "$CLA" -p "Read the file /etc/hostname and tell me its exact contents" \
+  PROMPT="Read the file /etc/hostname and tell me its exact contents"
+  mark_canary "$M" tools "$PROMPT"
+  run_cli "$CLA" -p "$PROMPT" \
     --model "$M" --dangerously-skip-permissions >/dev/null 2>&1 || true
   # plain no-tools turn (exercises the base beta set + title-gen sub-calls)
-  timeout 60 "$CLA" -p "In one short sentence, what is 2+2?" \
+  PROMPT="In one short sentence, what is 2+2?"
+  mark_canary "$M" plain "$PROMPT"
+  run_cli "$CLA" -p "$PROMPT" \
     --model "$M" --dangerously-skip-permissions >/dev/null 2>&1 || true
 done
 sleep 1
@@ -66,6 +95,9 @@ kill $SHIM 2>/dev/null || true
 
 # extract-profile.js exits non-zero (3) on fingerprint-guard failure; set -e then aborts
 # and the caller (watch.sh) discards the profile. The file is written either way.
+if [ "${CC_CALIBRATE_KEEP_CAP:-0}" = "1" ]; then
+  cp "$WORK/cap.jsonl" "$OUT_DIR/cap-$VER.jsonl"
+fi
 node "$CAL_DIR/extract-profile.js" "$WORK/cap.jsonl" "$VER" > "$OUT_DIR/profile-$VER.json"
 echo "wrote $OUT_DIR/profile-$VER.json"
 grep -m1 salt_verified "$OUT_DIR/profile-$VER.json" || true

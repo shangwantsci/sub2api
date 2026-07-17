@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
@@ -18,29 +21,42 @@ const fingerprintSalt = "59cf53e54c78"
 
 // computeClaudeCodeFingerprint 复刻真实 Claude Code CLI 的 cc_version 指纹算法：
 //
-//  1. 取 messages 中第一条 role=user 的纯文本（首块 text）
-//  2. 取该文本的第 4、7、20 字符（不足以 '0' 补齐）
+//  1. 取 messages 中第一条非 synthetic role=user 的纯文本（首块 text）
+//  2. 按 JavaScript 字符串（UTF-16 code unit）语义取第 4、7、20 位（不足以 '0' 补齐）
 //  3. SHA256(SALT + chars + cc_version) 取 hex 前 3 字符
 //
-// 算法来自 Parrot src/transform/cc_mimicry.py:compute_fingerprint，与官方 CLI 字节对齐。
+// 算法已直接从官方 Claude Code 2.1.211 native binary 验证：
+//
+//	[4,7,20].map(i => text[i] || "0").join("")
+//
+// 不能按 UTF-8 byte 索引，否则中文/emoji 首轮会产生错误 fp。
 // 任何偏差都会导致 cc_version=X.Y.Z.{fp} 在上游侧与真实 CLI 不一致。
 func computeClaudeCodeFingerprint(body []byte, version string) string {
 	firstText := extractFirstUserText(body)
 	indices := []int{4, 7, 20}
-	chars := make([]byte, 0, 3)
+	units := utf16.Encode([]rune(firstText))
+	var chars strings.Builder
 	for _, i := range indices {
-		if i < len(firstText) {
-			chars = append(chars, firstText[i])
-		} else {
-			chars = append(chars, '0')
+		if i >= len(units) {
+			chars.WriteByte('0')
+			continue
 		}
+		unit := units[i]
+		// Node's crypto.update(string) UTF-8 encodes a lone surrogate as U+FFFD.
+		if unit >= 0xD800 && unit <= 0xDFFF {
+			chars.WriteRune(utf8.RuneError)
+			continue
+		}
+		chars.WriteRune(rune(unit))
 	}
-	sum := sha256.Sum256([]byte(fingerprintSalt + string(chars) + version))
+	sum := sha256.Sum256([]byte(fingerprintSalt + chars.String() + version))
 	return hex.EncodeToString(sum[:])[:3]
 }
 
-// extractFirstUserText 提取 messages 中第一条 user 消息的首段 text 内容。
-// 兼容 string 和 []block 两种 content 格式。
+// extractFirstUserText 提取 messages 中第一条非 synthetic user 消息的首段 text。
+// rewriteSystemForNonClaudeCodeWithPromptBlocks 会把客户端 system 迁移为
+// "[System Instructions]\n..." user/assistant 对；官方 CLI 的主请求 fp 来自 normalize
+// 之前第一条 non-meta 用户消息，因此必须跳过该 synthetic user，取真实用户首轮。
 func extractFirstUserText(body []byte) string {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
@@ -52,20 +68,22 @@ func extractFirstUserText(body []byte) string {
 			return true
 		}
 		content := msg.Get("content")
+		text := ""
 		if content.Type == gjson.String {
-			first = content.String()
-			return false
-		}
-		if content.IsArray() {
+			text = content.String()
+		} else if content.IsArray() {
 			content.ForEach(func(_, block gjson.Result) bool {
 				if block.Get("type").String() == "text" {
-					first = block.Get("text").String()
+					text = block.Get("text").String()
 					return false
 				}
 				return true
 			})
-			return false
 		}
+		if strings.HasPrefix(text, "[System Instructions]\n") {
+			return true
+		}
+		first = text
 		return false
 	})
 	return first

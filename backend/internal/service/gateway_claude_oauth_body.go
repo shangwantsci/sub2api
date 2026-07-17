@@ -281,10 +281,10 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	}
 
 	defaultMaxTokens := modelProfile.DefaultMaxTokens
-	if opts.countTokens && modelProfile.CountTokensDefaultMaxTokens > 0 {
-		defaultMaxTokens = modelProfile.CountTokensDefaultMaxTokens
-	}
-	if !gjson.GetBytes(out, "max_tokens").Exists() && defaultMaxTokens > 0 {
+	// /v1/messages/count_tokens does not accept generation-only max_tokens.
+	// Do not synthesize it for that endpoint; sanitizeCountTokensRequestBody also
+	// removes a client-supplied value defensively.
+	if !opts.countTokens && !gjson.GetBytes(out, "max_tokens").Exists() && defaultMaxTokens > 0 {
 		if next, ok := setJSONValueBytes(out, "max_tokens", defaultMaxTokens); ok {
 			out = next
 			modified = true

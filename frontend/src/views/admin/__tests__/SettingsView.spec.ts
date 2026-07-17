@@ -16,6 +16,7 @@ const {
   getStreamTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
+  getClaudeCalibratedProfile,
   getGroups,
   listProxies,
   getProviders,
@@ -38,6 +39,7 @@ const {
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
+  getClaudeCalibratedProfile: vi.fn(),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
@@ -66,6 +68,7 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
+      getClaudeCalibratedProfile,
     },
     groups: {
       getAll: getGroups,
@@ -520,6 +523,34 @@ async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   await flushPromises();
 }
 
+async function openGatewayTab(wrapper: ReturnType<typeof mountView>) {
+  const gatewayTabButton = wrapper
+    .findAll("button")
+    .find((node) => node.text().includes("admin.settings.tabs.gateway"));
+
+  expect(gatewayTabButton).toBeDefined();
+  await gatewayTabButton?.trigger("click");
+  await flushPromises();
+}
+
+beforeEach(() => {
+  getClaudeCalibratedProfile.mockReset();
+  getClaudeCalibratedProfile.mockResolvedValue({
+    published: false,
+    valid: false,
+    cli_version: "",
+    captured_at: "",
+    source: "",
+    user_agent: "",
+    salt_verified: false,
+    guard_checked: 0,
+    guard_ok: 0,
+    beta_rule_keys: [],
+    absent_headers: [],
+    raw: "",
+  });
+});
+
 describe("admin SettingsView payment visible method controls", () => {
   beforeEach(() => {
     getSettings.mockReset();
@@ -597,6 +628,26 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("renders the gateway tab when the calibrated profile endpoint returns a partial payload", async () => {
+    getClaudeCalibratedProfile.mockResolvedValue({
+      published: true,
+      valid: true,
+      cli_version: "2.1.211",
+      source: "cc-calibrate",
+      // Simulates an older/partial response; the page must not go blank.
+      beta_rule_keys: [],
+      absent_headers: [],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(wrapper.find("form").exists()).toBe(true);
+    expect(wrapper.text()).toContain("2.1.211");
+    expect(getClaudeCalibratedProfile).toHaveBeenCalled();
   });
 
   it("does not render legacy visible payment method controls", async () => {

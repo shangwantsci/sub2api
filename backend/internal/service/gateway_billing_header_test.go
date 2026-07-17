@@ -1,10 +1,66 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestComputeClaudeCodeFingerprint_Official211Vectors(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "tools canary",
+			text: "Read the file /etc/hostname and tell me its exact contents",
+			want: "882",
+		},
+		{
+			name: "plain canary",
+			text: "In one short sentence, what is 2+2?",
+			want: "65c",
+		},
+		{
+			name: "Chinese uses JS UTF-16 indexing, not UTF-8 bytes",
+			text: "你好，这是一个用于测试指纹的中文提示词",
+			want: "b72",
+		},
+		{
+			name: "selected lone surrogate encodes as replacement rune like Node",
+			text: "abc😀defghijklmnopqrstuvwxyz",
+			want: "74c",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"messages":[{"role":"user","content":` + mustJSONMarshalString(t, tt.text) + `}]}`)
+			require.Equal(t, tt.want, computeClaudeCodeFingerprint(body, "2.1.211"))
+		})
+	}
+}
+
+func TestComputeClaudeCodeFingerprint_SkipsMigratedSystemInstruction(t *testing.T) {
+	body := []byte(`{
+	  "messages": [
+	    {"role":"user","content":[{"type":"text","text":"[System Instructions]\nproject rules"}]},
+	    {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]},
+	    {"role":"user","content":"Read the file /etc/hostname and tell me its exact contents"}
+	  ]
+	}`)
+	require.Equal(t, "Read the file /etc/hostname and tell me its exact contents", extractFirstUserText(body))
+	require.Equal(t, "882", computeClaudeCodeFingerprint(body, "2.1.211"))
+}
+
+func mustJSONMarshalString(t *testing.T, value string) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(raw)
+}
 
 func TestSyncBillingHeaderVersion(t *testing.T) {
 	tests := []struct {

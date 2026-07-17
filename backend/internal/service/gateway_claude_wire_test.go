@@ -411,11 +411,12 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 			require.False(t, gjson.GetBytes(got.body, "context_management").Exists())
 		}
 	}
-	wantMaxTokens := modelProfile.DefaultMaxTokens
-	if wantTokenCounting && modelProfile.CountTokensDefaultMaxTokens > 0 {
-		wantMaxTokens = modelProfile.CountTokensDefaultMaxTokens
+	if wantTokenCounting {
+		require.False(t, gjson.GetBytes(got.body, "max_tokens").Exists(),
+			"count_tokens rejects generation-only max_tokens")
+	} else {
+		require.Equal(t, int64(modelProfile.DefaultMaxTokens), gjson.GetBytes(got.body, "max_tokens").Int())
 	}
-	require.Equal(t, int64(wantMaxTokens), gjson.GetBytes(got.body, "max_tokens").Int())
 	if modelProfile.DefaultOutputConfigEffort != "" {
 		require.JSONEq(t, fmt.Sprintf(`{"effort":%q}`, modelProfile.DefaultOutputConfigEffort), gjson.GetBytes(got.body, "output_config").Raw)
 	} else {

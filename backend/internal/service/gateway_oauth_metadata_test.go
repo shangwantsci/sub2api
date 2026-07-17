@@ -1152,7 +1152,7 @@ func TestGatewayService_ClaudeMimicTLSProfile_DefaultsForCountTokensSyntheticMim
 	require.Equal(t, builtInClaudeCodeTLSProfileName, upstream.lastTLSProfile.Name)
 }
 
-func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsRemainPre2206(t *testing.T) {
+func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicOmitsGenerationOnlyMaxTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"claude-sonnet-4-6","system":"project rules","messages":[{"role":"user","content":"hello"}]}`)
@@ -1188,7 +1188,7 @@ func TestGatewayService_AnthropicOAuthCountTokensClaudeMimicBodyDefaultsRemainPr
 
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, int64(64000), gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "max_tokens").Exists())
 	require.Equal(t, "clear_thinking_20251015", gjson.GetBytes(upstream.lastBody, "context_management.edits.0.type").String())
 }
 
@@ -1259,7 +1259,7 @@ func TestGatewayService_AnthropicOAuthClaudeMimicBodyDefaultsDivergeByEndpoint(t
 	require.Equal(t, "adaptive", gjson.GetBytes(countUpstream.lastBody, "thinking.type").String())
 	require.Equal(t, "clear_thinking_20251015", gjson.GetBytes(countUpstream.lastBody, "context_management.edits.0.type").String())
 	require.Equal(t, "high", gjson.GetBytes(countUpstream.lastBody, "output_config.effort").String())
-	require.Equal(t, int64(64000), gjson.GetBytes(countUpstream.lastBody, "max_tokens").Int())
+	require.False(t, gjson.GetBytes(countUpstream.lastBody, "max_tokens").Exists())
 }
 
 func TestGatewayService_AnthropicOAuthCountTokensRealClaudeCodeDoesNotForceMimicDefaults(t *testing.T) {

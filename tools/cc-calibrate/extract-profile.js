@@ -7,10 +7,14 @@
 // (constants.go stays as compiled-in fallback). Output goes to stdout.
 //
 // Guard: for every captured request that carries an `x-anthropic-billing-header`
-// system block (cc_version=X.Y.Z.{fp}), recompute {fp} from that request's first
-// user text using the repo's algorithm (sha256(salt + chars[4,7,20] + version)[:3])
-// and compare. A mismatch means the salt/index algorithm drifted -> the guard
-// fails loudly instead of shipping a wrong fingerprint that gets accounts flagged.
+// system block (cc_version=X.Y.Z.{fp}), recompute {fp} using the official algorithm
+// (sha256(salt + JS-string-chars[4,7,20] + version)[:3]).
+//
+// Input semantics, verified from the official 2.1.211 native binary:
+// - main query fingerprints the first non-meta user message BEFORE API normalization;
+// - side queries fingerprint the first user text in their API body.
+// calibrate-run.sh writes a canary marker before each CLI invocation so the first input
+// remains observable even though it may not equal the normalized wire body's first user.
 const fs = require('fs');
 const crypto = require('crypto');
 
@@ -24,10 +28,22 @@ for (const a of rest) if (a.startsWith('--salt=')) salt = a.slice('--salt='.leng
 
 const lines = fs.readFileSync(capPath, 'utf8').trim().split('\n').filter(Boolean);
 const reqs = [];
+let currentCanary = null;
 for (const l of lines) {
   try {
     const r = JSON.parse(l);
-    if (/\/v1\/messages/.test(r.url)) reqs.push(r);
+    if (r && r.kind === 'canary') {
+      currentCanary = {
+        model: String(r.model || ''),
+        kind: String(r.canary_kind || ''),
+        prompt: String(r.prompt || ''),
+      };
+      continue;
+    }
+    if (/\/v1\/messages/.test(r.url)) {
+      r.canary = currentCanary;
+      reqs.push(r);
+    }
   } catch (_) {}
 }
 if (reqs.length === 0) {
@@ -39,25 +55,26 @@ const H = (h, k) => {
   const kk = Object.keys(h || {}).find((x) => x.toLowerCase() === k.toLowerCase());
   return kk ? h[kk] : '';
 };
-const firstUserText = (b) => {
+const userTexts = (b) => {
+  const out = [];
   const msgs = (b && b.messages) || [];
   for (const m of msgs) {
     if (m.role !== 'user') continue;
     const c = m.content;
-    if (typeof c === 'string') return c;
-    if (Array.isArray(c)) for (const blk of c) if (blk.type === 'text') return blk.text || '';
+    if (typeof c === 'string') out.push(c);
+    if (Array.isArray(c)) for (const blk of c) if (blk.type === 'text') out.push(blk.text || '');
   }
-  return '';
+  return out;
 };
 const computeFp = (text, version) => {
-  const buf = Buffer.from(text, 'utf8');
-  const idx = [4, 7, 20];
-  const chars = Buffer.from(idx.map((i) => (i < buf.length ? buf[i] : 0x30)));
-  return crypto.createHash('sha256').update(salt + chars.toString('latin1') + version).digest('hex').slice(0, 3);
+  // Deliberately index the JavaScript string, not UTF-8 bytes. JS indexing addresses
+  // UTF-16 code units; crypto.update(string) then UTF-8 encodes the joined string.
+  const chars = [4, 7, 20].map((i) => String(text || '')[i] || '0').join('');
+  return crypto.createHash('sha256').update(salt + chars + version).digest('hex').slice(0, 3);
 };
 
 // --- guard ---
-const guard = { checked: 0, ok: 0, mismatches: [] };
+const guard = { checked: 0, ok: 0, matched_sources: {}, mismatches: [] };
 for (const r of reqs) {
   const sys = (r.body && r.body.system) || [];
   const billing = Array.isArray(sys) ? sys.find((s) => String(s.text || '').includes('x-anthropic-billing-header')) : null;
@@ -66,9 +83,30 @@ for (const r of reqs) {
   if (!m) continue;
   guard.checked++;
   const realFp = m[2];
-  const got = computeFp(firstUserText(r.body), m[1]);
-  if (got === realFp) guard.ok++;
-  else guard.mismatches.push({ url: r.url, realFp, computed: got, version: m[1] });
+  const candidates = [];
+  const addCandidate = (source, text) => {
+    if (typeof text !== 'string' || text === '') return;
+    if (candidates.some((c) => c.text === text)) return;
+    candidates.push({ source, text, computed: computeFp(text, m[1]) });
+  };
+  addCandidate('canary_prompt', r.canary && r.canary.prompt);
+  userTexts(r.body).forEach((text, i) => addCandidate(`wire_user_${i}`, text));
+  // Empty input is still a valid official input (indices become "000").
+  if (candidates.length === 0) addCandidate('empty', ' ');
+
+  const matched = candidates.find((c) => c.computed === realFp);
+  if (matched) {
+    guard.ok++;
+    guard.matched_sources[matched.source] = (guard.matched_sources[matched.source] || 0) + 1;
+  } else {
+    guard.mismatches.push({
+      url: r.url,
+      canary: r.canary ? { model: r.canary.model, kind: r.canary.kind } : null,
+      realFp,
+      candidates: candidates.map(({ source, computed }) => ({ source, computed })),
+      version: m[1],
+    });
+  }
 }
 
 // --- beta rules matrix (endpoint x model family x request features -> beta set) ---
