@@ -39,7 +39,7 @@
 截至 2026-07-17 首次正式上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 应用 commit：`00a96b5c`
+- 应用 commit：`c8637aab`
 - 应用版本：`0.1.156`
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
@@ -57,7 +57,7 @@
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-00a96b5c
+sub2api-rollback:pre-c8637aab
 ```
 
 ## 4. 已实现功能
@@ -262,12 +262,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-本次生产镜像构建：
+当前生产 hotfix 镜像构建：
 
-- run：`29578816168`
+- run：`29583104613`
 - job：`custom-image`
 - 结论：success
 - 其它 release/tag jobs：skipped
+
+首次 Persona 版本镜像构建 run 为 `29578816168`；随后因 Vue I18n JSON
+placeholder 修复重新构建并部署 `c8637aab`。
 
 ### 6.2 自动真身标定
 
