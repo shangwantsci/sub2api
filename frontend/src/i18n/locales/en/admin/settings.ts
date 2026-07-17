@@ -989,7 +989,7 @@ export default {
         notPublished: 'No calibrated profile published; the gateway is using built-in constants.',
         fallbackNote: '(Built-in constants match the current hand-authored version, so the fallback is safe.)',
         rawLabel: 'Publish new profile (paste profile-<version>.json content)',
-        rawPlaceholder: '{ "schema_version": 1, "cli_version": "2.1.211", ... }',
+        rawPlaceholder: 'profile JSON: schema_version=1, cli_version=2.1.212, …',
         publish: 'Publish',
         clear: 'Clear (fall back to built-in)',
         published: 'Calibrated profile published; the gateway hot-loads it within ~60s.',

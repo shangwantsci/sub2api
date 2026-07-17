@@ -21,4 +21,14 @@ describe('Claude Code mimicry profile locale copy', () => {
         'Controls the User-Agent, X-Stainless headers, beta set, and billing entrypoint used by the OAuth mimic path.'
     })
   })
+
+  it.each([
+    ['zh', zh.admin.settings.calibratedProfile.rawPlaceholder],
+    ['en', en.admin.settings.calibratedProfile.rawPlaceholder],
+  ])('keeps the %s calibrated-profile placeholder free of i18n token braces', (_locale, message) => {
+    // Vue I18n treats a raw JSON object (`{ "schema_version": ... }`) as a
+    // placeholder expression and throws during render, blanking the settings page.
+    expect(message).toContain('schema_version=1')
+    expect(message).not.toMatch(/[{}]/)
+  })
 })

@@ -181,6 +181,28 @@ max_tokens: Extra inputs are not permitted
 - 不再注入真身 CLI 不发送的 `x-client-request-id`；
 - JSON schema 请求按条件追加 `structured-outputs` beta。
 
+### 4.6 设置页 Vue I18n 花括号事故
+
+2026-07-17 首次部署后，系统设置页因以下翻译文案无法渲染：
+
+```text
+{ "schema_version": 1, "cli_version": "2.1.211", ... }
+```
+
+Vue I18n 会把裸 `{ ... }` 当作 placeholder 表达式，并抛出：
+
+```text
+SyntaxError: Invalid token in placeholder: '"schema_version":'
+```
+
+处理规则：
+
+- i18n 文案中不要直接放原始 JSON 花括号；
+- 示例改为不带花括号的普通文本，例如
+  `profile JSON: schema_version=1, cli_version=2.1.212, …`；
+- `claudeCodeMimicryProfileLocales.spec.ts` 必须断言该 placeholder 不含 `{}`；
+- 设置页相关改动除组件测试外，发布前必须跑生产 frontend build。
+
 ## 5. 当前自动标定状态
 
 首次真实标定：

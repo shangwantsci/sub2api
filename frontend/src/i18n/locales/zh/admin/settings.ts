@@ -984,7 +984,7 @@ export default {
         notPublished: '尚未发布标定 profile，网关正在使用内置常量。',
         fallbackNote: '（内置常量已对齐当前手抄版本，回退是安全的。）',
         rawLabel: '发布新 profile（粘贴 profile-<版本>.json 内容）',
-        rawPlaceholder: '{ "schema_version": 1, "cli_version": "2.1.211", ... }',
+        rawPlaceholder: 'profile JSON：schema_version=1，cli_version=2.1.212，…',
         publish: '发布',
         clear: '清除（回退内置）',
         published: '标定 profile 发布成功，网关将在约 60 秒内热加载。',
