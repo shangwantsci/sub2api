@@ -1,0 +1,27 @@
+[Unit]
+# Sub2API Claude Code 标定器：自动跟随新版 CLI → 真身抓包标定 wire profile → 发布到网关热加载。
+# 在宿主机上直跑（复用已安装的 node + claude-code CLI），与镜像/compose 部署解耦；
+# 只调用网关 Admin API 发布，不改动 sub2api / postgres / redis 容器。
+Description=Sub2API Claude Code Calibrator (auto-calibrate + publish wire profile)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 需要 node + npm + 能安装 @anthropic-ai/claude-code。若用 nvm 安装，请把对应 bin 目录
+# 加进 PATH（如 /root/.nvm/versions/node/vXX/bin）；用 `which node npm` 确认路径后修改。
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# 在 node 环境内直跑标定核心，不嵌套 Docker。
+Environment=CC_CALIBRATE_INPROC=1
+# GATEWAY_URL + ADMIN_API_KEY 放这个文件里（含密钥，不要入库）。见 cc-calibrate.env.example。
+EnvironmentFile=/etc/sub2api/cc-calibrate.env
+# 把 tools/cc-calibrate 整个目录放到这里（7 个脚本需在同一目录）。
+WorkingDirectory=/opt/sub2api/cc-calibrate
+# 参数：<OUT_DIR> <POLL_SECONDS>（默认 6h 轮询；仅当出现未标定过的新版本才真正标定+发布）。
+ExecStart=/usr/bin/env bash /opt/sub2api/cc-calibrate/watch.sh /opt/sub2api/cc-calibrate/out 21600
+Restart=always
+RestartSec=30s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

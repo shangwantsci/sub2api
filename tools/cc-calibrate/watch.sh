@@ -88,7 +88,12 @@ calibrate_once() {
 
 run_once() {
   local ver
-  ver="$(latest_version)"
+  # CC_VERSION 显式锁定要标定/伪装的版本；留空或 "latest" 则跟随 npm latest 自动追新。
+  if [ -n "${CC_VERSION:-}" ] && [ "${CC_VERSION}" != "latest" ]; then
+    ver="${CC_VERSION}"
+  else
+    ver="$(latest_version)"
+  fi
   if [ -z "$ver" ]; then
     echo "$(date -Is) could not resolve latest claude-code version; skipping" >&2
     return 0
