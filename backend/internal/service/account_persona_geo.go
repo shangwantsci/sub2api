@@ -43,6 +43,21 @@ var countryTimezones = map[string][]string{
 	"MX": {"America/Mexico_City"},
 }
 
+// countryLocales 是 persona_locale 的组织元数据默认值。它不会写入出站请求头；
+// 仅用于在管理员选择“按代理自动识别”时免去手填。
+var countryLocales = map[string]string{
+	"JP": "ja-JP",
+	"SG": "en-SG",
+	"CN": "zh-CN",
+	"HK": "zh-HK",
+	"TW": "zh-TW",
+	"KR": "ko-KR",
+	"US": "en-US",
+	"CA": "en-CA",
+	"GB": "en-GB",
+	"AU": "en-AU",
+}
+
 // usRegionTimezones 把美国常见州/地区名映射到时区（Region 文本来自代理探测 exitInfo.Region）。
 var usRegionTimezones = map[string]string{
 	"california": "America/Los_Angeles", "washington": "America/Los_Angeles", "oregon": "America/Los_Angeles", "nevada": "America/Los_Angeles",
@@ -70,6 +85,12 @@ func TimezoneForCountry(countryCode, region string) string {
 		}
 	}
 	return zones[0]
+}
+
+// LocaleForCountry 返回代理出口国家对应的 BCP-47 persona locale 组织默认值。
+// 未知国家返回空；locale 仍然只作管理元数据，不注入 Accept-Language。
+func LocaleForCountry(countryCode string) string {
+	return countryLocales[strings.ToUpper(strings.TrimSpace(countryCode))]
 }
 
 // PersonaTimezoneMatchesCountry 校验人格时区与代理出口国家是否自洽。

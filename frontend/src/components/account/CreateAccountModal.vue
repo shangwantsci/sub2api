@@ -2457,17 +2457,22 @@
           <div v-if="personaEnabled" class="mt-3 space-y-3">
             <div>
               <label class="input-label">{{ t('admin.accounts.persona.timezone') }}</label>
-              <input
+              <Select
                 v-model="personaTimezone"
-                type="text"
-                class="input"
-                :placeholder="t('admin.accounts.persona.timezonePlaceholder')"
+                data-testid="persona-timezone-select"
+                :options="personaTimezoneOptions"
+                :searchable="false"
               />
               <p class="input-hint">{{ t('admin.accounts.persona.timezoneHint') }}</p>
             </div>
             <div>
               <label class="input-label">{{ t('admin.accounts.persona.locale') }}</label>
-              <input v-model="personaLocale" type="text" class="input" placeholder="en-US" />
+              <Select
+                v-model="personaLocale"
+                data-testid="persona-locale-select"
+                :options="personaLocaleOptions"
+                :searchable="false"
+              />
               <p class="input-hint">{{ t('admin.accounts.persona.localeHint') }}</p>
             </div>
             <div class="grid grid-cols-2 gap-4">
@@ -3664,6 +3669,12 @@ import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/forma
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
+  PERSONA_LOCALE_PRESETS,
+  PERSONA_TIMEZONE_PRESETS,
+  buildPersonaSelectOptions,
+  defaultPersonaLocaleForTimezone,
+} from '@/constants/persona'
+import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
@@ -4084,6 +4095,26 @@ const personaActiveStart = ref<number | null>(null)
 const personaActiveEnd = ref<number | null>(null)
 const personaMaxConcurrency = ref<number | null>(2)
 const personaDailyCap = ref<number | null>(null)
+const personaTimezoneOptions = computed(() =>
+  buildPersonaSelectOptions(
+    PERSONA_TIMEZONE_PRESETS,
+    personaTimezone.value,
+    (key, params) => t(key, params || {}),
+  ),
+)
+const personaLocaleOptions = computed(() =>
+  buildPersonaSelectOptions(
+    PERSONA_LOCALE_PRESETS,
+    personaLocale.value,
+    (key, params) => t(key, params || {}),
+  ),
+)
+watch(personaTimezone, (next, previous) => {
+  const previousDefault = defaultPersonaLocaleForTimezone(previous)
+  if (!personaLocale.value || personaLocale.value === previousDefault) {
+    personaLocale.value = defaultPersonaLocaleForTimezone(next)
+  }
+})
 const userMsgQueueMode = ref('')
 const umqModeOptions = computed(() => [
   { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },

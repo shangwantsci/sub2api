@@ -158,23 +158,27 @@ func TestApplyPersonaGeoDefaults(t *testing.T) {
 	extra := map[string]any{extraPersonaEnabled: true}
 	svc.applyPersonaGeoDefaults(ctx, extra, &pid)
 	require.Equal(t, "Asia/Tokyo", extra[extraPersonaTimezone])
+	require.Equal(t, "ja-JP", extra[extraPersonaLocale])
 
 	// 时区已填但与代理国家不一致 → 不改写（只告警），保持原值。
 	extraMismatch := map[string]any{extraPersonaEnabled: true, extraPersonaTimezone: "Asia/Shanghai"}
 	svcUS := &adminServiceImpl{proxyLatencyCache: &fakeProxyLatencyCache{infos: map[int64]*ProxyLatencyInfo{7: {CountryCode: "US"}}}}
 	svcUS.applyPersonaGeoDefaults(ctx, extraMismatch, &pid)
 	require.Equal(t, "Asia/Shanghai", extraMismatch[extraPersonaTimezone])
+	require.Equal(t, "en-US", extraMismatch[extraPersonaLocale])
 
 	// 未配置 persona → 完全不动。
 	noPersona := map[string]any{}
 	svc.applyPersonaGeoDefaults(ctx, noPersona, &pid)
 	require.NotContains(t, noPersona, extraPersonaTimezone)
+	require.NotContains(t, noPersona, extraPersonaLocale)
 
 	// 代理国家未知 → 不 prefill。
 	svcUnknown := &adminServiceImpl{proxyLatencyCache: &fakeProxyLatencyCache{infos: map[int64]*ProxyLatencyInfo{}}}
 	extraUnknown := map[string]any{extraPersonaEnabled: true}
 	svcUnknown.applyPersonaGeoDefaults(ctx, extraUnknown, &pid)
 	require.NotContains(t, extraUnknown, extraPersonaTimezone)
+	require.NotContains(t, extraUnknown, extraPersonaLocale)
 }
 
 // utcAt 构造指定 UTC 小时的固定时刻（日期任意取非 DST 敏感值）。

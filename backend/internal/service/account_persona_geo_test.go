@@ -23,6 +23,15 @@ func TestTimezoneForCountry(t *testing.T) {
 	require.Equal(t, "", TimezoneForCountry("", ""))
 }
 
+func TestLocaleForCountry(t *testing.T) {
+	require.Equal(t, "zh-CN", LocaleForCountry("cn"))
+	require.Equal(t, "en-US", LocaleForCountry("US"))
+	require.Equal(t, "en-SG", LocaleForCountry("SG"))
+	require.Equal(t, "ja-JP", LocaleForCountry("JP"))
+	require.Equal(t, "", LocaleForCountry("ZZ"))
+	require.Equal(t, "", LocaleForCountry(""))
+}
+
 func TestPersonaTimezoneMatchesCountry(t *testing.T) {
 	// 一致
 	require.True(t, PersonaTimezoneMatchesCountry("Asia/Tokyo", "JP"))

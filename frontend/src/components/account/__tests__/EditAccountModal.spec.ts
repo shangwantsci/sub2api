@@ -316,6 +316,33 @@ describe('EditAccountModal', () => {
     authIsSimpleMode.value = true
   })
 
+  it('loads persona timezone/locale as selects and updates the locale preset with timezone', async () => {
+    const account = {
+      ...buildAccount(),
+      platform: 'anthropic',
+      type: 'setup-token',
+      credentials: { access_token: 'test-token' },
+      extra: {
+        persona_enabled: true,
+        persona_timezone: 'America/New_York',
+        persona_locale: 'en-US'
+      }
+    } as any
+
+    const wrapper = mountModal(account)
+    const timezone = wrapper.get<HTMLSelectElement>('[data-testid="persona-timezone-select"]')
+    const locale = wrapper.get<HTMLSelectElement>('[data-testid="persona-locale-select"]')
+
+    expect(timezone.element.value).toBe('America/New_York')
+    expect(locale.element.value).toBe('en-US')
+    expect(timezone.text()).toContain('admin.accounts.persona.timezoneOptions.china')
+    expect(timezone.text()).toContain('admin.accounts.persona.timezoneOptions.usPacific')
+
+    await timezone.setValue('Asia/Singapore')
+    await wrapper.vm.$nextTick()
+    expect(locale.element.value).toBe('en-SG')
+  })
+
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()

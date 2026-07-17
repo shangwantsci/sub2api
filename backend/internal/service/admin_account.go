@@ -459,9 +459,9 @@ func (s *adminServiceImpl) proxyExitLocation(ctx context.Context, proxyID *int64
 	return "", ""
 }
 
-// applyPersonaGeoDefaults 在账号启用 persona 但未填时区时，按代理出口国家自动 prefill
-// persona_timezone；若已填时区却与代理出口国家不自洽（如美国 IP 声称 Asia/Shanghai），
-// 记一条告警但不拦截（fail-open）。仅在本次确实带 persona 配置、且代理国家已知时动作。
+// applyPersonaGeoDefaults 在账号启用 persona 但未填时区/locale 时，按代理出口国家自动
+// prefill；若已填时区却与代理出口国家不自洽（如美国 IP 声称 Asia/Shanghai），记一条
+// 告警但不拦截（fail-open）。locale 只作组织元数据，不写入出站请求头。
 func (s *adminServiceImpl) applyPersonaGeoDefaults(ctx context.Context, extra map[string]any, proxyID *int64) {
 	if extra == nil {
 		return
@@ -480,10 +480,19 @@ func (s *adminServiceImpl) applyPersonaGeoDefaults(ctx context.Context, extra ma
 	if tz == "" {
 		if prefill := TimezoneForCountry(country, region); prefill != "" {
 			extra[extraPersonaTimezone] = prefill
+			tz = prefill
 		}
-		return
 	}
-	if !PersonaTimezoneMatchesCountry(tz, country) {
+	locale := ""
+	if v, ok := extra[extraPersonaLocale].(string); ok {
+		locale = strings.TrimSpace(v)
+	}
+	if locale == "" {
+		if prefill := LocaleForCountry(country); prefill != "" {
+			extra[extraPersonaLocale] = prefill
+		}
+	}
+	if tz != "" && !PersonaTimezoneMatchesCountry(tz, country) {
 		pid := int64(0)
 		if proxyID != nil {
 			pid = *proxyID
