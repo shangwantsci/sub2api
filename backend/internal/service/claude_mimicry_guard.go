@@ -44,10 +44,32 @@ func (s *GatewayService) enforceClaudeMimicryGuard(ctx context.Context, req *htt
 		profile = claude.ResolveClaudeCodeMimicryProfile(runtimeSettings.ProfileID)
 		guardMode = normalizeClaudeMimicryGuardMode(runtimeSettings.GuardMode)
 	}
-	modelProfile := claude.ResolveClaudeCodeMimicryModelProfile(gjson.GetBytes(body, "model").String())
+	modelID := gjson.GetBytes(body, "model").String()
+	modelProfile := claude.ResolveClaudeCodeMimicryModelProfile(modelID)
 	profile.MessageBetas = modelProfile.MessageBetas
-	if req != nil && req.URL != nil && strings.Contains(req.URL.Path, "count_tokens") {
+	isCountTokens := req != nil && req.URL != nil && strings.Contains(req.URL.Path, "count_tokens")
+	if isCountTokens {
 		profile.MessageBetas = modelProfile.CountTokensBetas
+	}
+	// 标定 profile 已加载时，守卫的期望值（headers / cc_version / betas）必须与实际
+	// 发出的字节同源，否则会对着编译内置常量产生假阳性 findings。按端点/模型族/特性
+	// 取标定分档；未命中该维度则保留编译内置期望。
+	if calProfile := s.calibratedProfile(ctx); calProfile != nil {
+		if t := calProfile.HeaderTemplate(); len(t) > 0 {
+			profile.Headers = t
+		}
+		if v := calProfile.Version(); v != "" {
+			profile.CLIVersion = v
+		}
+		hasTools := bodyHasToolsArray(body)
+		hasJSONSchema := bodyUsesStructuredOutputs(body)
+		if isCountTokens {
+			if betas, ok := calProfile.CountTokensBetas(modelID, hasTools, hasJSONSchema); ok {
+				profile.MessageBetas = betas
+			}
+		} else if betas, ok := calProfile.MessageBetas(modelID, hasTools, hasJSONSchema); ok {
+			profile.MessageBetas = betas
+		}
 	}
 	audit := evaluateClaudeMimicryGuard(req, body, profile, guardMode)
 	if !audit.OK {
@@ -99,9 +121,8 @@ func evaluateClaudeMimicryGuard(req *http.Request, body []byte, profile claude.C
 		if got := getHeaderRaw(req.Header, "Accept-Encoding"); got != "gzip, deflate, br, zstd" {
 			add("header_mismatch:Accept-Encoding")
 		}
-		if getHeaderRaw(req.Header, "x-client-request-id") == "" {
-			add("missing_x_client_request_id")
-		}
+		// 不再要求 x-client-request-id：真身 2.1.211 抓包（12/12）均未发送该 header，
+		// 故其缺失是正确形态而非破绽（与 applyClaudeCodeMimicHeaders 不再注入对齐）。
 		betaHeader := getHeaderRaw(req.Header, "anthropic-beta")
 		if betaHeader == "" {
 			add("missing_anthropic_beta")

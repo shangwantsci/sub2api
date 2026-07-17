@@ -62,6 +62,12 @@ type SettingService struct {
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
 
+	// claudeCalibratedProfileCache 缓存 tools/cc-calibrate 标定的 Claude Code wire profile。
+	// 网关伪装热路径每次请求都会读它，故进程内 atomic.Value 缓存（60s TTL）避免访问 DB。
+	// profile 为 nil 表示"未发布/无效/守卫未过"，热路径回退到编译内置常量。
+	claudeCalibratedProfileCache atomic.Value // *cachedClaudeCalibratedProfile
+	claudeCalibratedProfileSF    singleflight.Group
+
 	// openAIQuotaAutoPauseSettingsCache holds the most recently observed quota auto-pause
 	// settings. GetOpenAIQuotaAutoPauseSettings reads this atomic.Value on the request hot
 	// path without ever blocking on the DB; when the cached entry expires, a background

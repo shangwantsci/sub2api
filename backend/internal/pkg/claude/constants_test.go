@@ -22,18 +22,20 @@ func TestDefaultModelsContainsClaudeSonnet5(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "claude-sonnet-5")
 }
 
-func TestDefaultClaudeCodeMimicryProfileUsesCapturedClaudeCode2206Baseline(t *testing.T) {
+func TestDefaultClaudeCodeMimicryProfileUsesCapturedClaudeCode2211Baseline(t *testing.T) {
 	profile := DefaultClaudeCodeMimicryProfile()
 
 	require.Equal(t, DefaultClaudeCodeMimicryProfileID, profile.ID)
-	require.Equal(t, "cc-2.1.206-sdk-cli-macos-arm64", profile.ID)
-	require.Equal(t, "2.1.206", profile.CLIVersion)
-	require.Equal(t, "claude-cli/2.1.206 (external, sdk-cli)", profile.Headers["User-Agent"])
+	require.Equal(t, "cc-2.1.211-sdk-cli-linux-x64", profile.ID)
+	require.Equal(t, "2.1.211", profile.CLIVersion)
+	require.Equal(t, "claude-cli/2.1.211 (external, sdk-cli)", profile.Headers["User-Agent"])
+	require.Equal(t, "Linux", profile.Headers["X-Stainless-OS"])
+	require.Equal(t, "x64", profile.Headers["X-Stainless-Arch"])
 	require.Equal(t, "0.94.0", profile.Headers["X-Stainless-Package-Version"])
 	require.Equal(t, "v26.3.0", profile.Headers["X-Stainless-Runtime-Version"])
 }
 
-func TestResolveClaudeCodeMimicryModelProfileUsesCapturedClaudeCode2206MessageDefaults(t *testing.T) {
+func TestResolveClaudeCodeMimicryModelProfileUsesCapturedClaudeCode2211MessageDefaults(t *testing.T) {
 	tests := []struct {
 		name               string
 		model              string

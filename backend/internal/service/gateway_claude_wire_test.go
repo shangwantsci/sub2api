@@ -109,7 +109,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestUsesCaptured
 			assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
 			require.Equal(t, tt.wantHeader, getHeaderRaw(recorder.requests[0].req.Header, "anthropic-beta"))
 			billingText := findClaudeWireBillingText(gjson.GetBytes(recorder.requests[0].body, "system"))
-			require.Contains(t, billingText, "cc_version=2.1.206.")
+			require.Contains(t, billingText, "cc_version=2.1.211.")
 			require.Contains(t, billingText, "cc_entrypoint=sdk-cli;")
 			require.False(t, gjson.GetBytes(recorder.requests[0].body, "context_management").Exists())
 			assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "project rules", "hello")

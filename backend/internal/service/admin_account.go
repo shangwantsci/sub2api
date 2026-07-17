@@ -412,6 +412,10 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
 		}
+		// 人格信封配置校验（仅在出现 persona_enabled 键时才校验）
+		if err := ValidatePersonaConfig(account.Extra); err != nil {
+			return nil, err
+		}
 		ComputeQuotaResetAt(account.Extra)
 		NormalizeFixedQuotaWindows(account.Extra)
 	}
@@ -437,6 +441,56 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		account.LoadFactor = input.LoadFactor
 	}
 	return account, nil
+}
+
+// proxyExitLocation 返回账号代理出口的国家码与地区，best-effort（无代理/缓存未命中/
+// 出错均返回空）。仅用于人格时区 prefill 与一致性告警，绝不阻断调用方。
+func (s *adminServiceImpl) proxyExitLocation(ctx context.Context, proxyID *int64) (countryCode, region string) {
+	if proxyID == nil || *proxyID <= 0 || s.proxyLatencyCache == nil {
+		return "", ""
+	}
+	infos, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{*proxyID})
+	if err != nil {
+		return "", ""
+	}
+	if info := infos[*proxyID]; info != nil {
+		return info.CountryCode, info.Region
+	}
+	return "", ""
+}
+
+// applyPersonaGeoDefaults 在账号启用 persona 但未填时区时，按代理出口国家自动 prefill
+// persona_timezone；若已填时区却与代理出口国家不自洽（如美国 IP 声称 Asia/Shanghai），
+// 记一条告警但不拦截（fail-open）。仅在本次确实带 persona 配置、且代理国家已知时动作。
+func (s *adminServiceImpl) applyPersonaGeoDefaults(ctx context.Context, extra map[string]any, proxyID *int64) {
+	if extra == nil {
+		return
+	}
+	if _, ok := extra[extraPersonaEnabled]; !ok {
+		return
+	}
+	country, region := s.proxyExitLocation(ctx, proxyID)
+	if country == "" {
+		return
+	}
+	tz := ""
+	if v, ok := extra[extraPersonaTimezone].(string); ok {
+		tz = strings.TrimSpace(v)
+	}
+	if tz == "" {
+		if prefill := TimezoneForCountry(country, region); prefill != "" {
+			extra[extraPersonaTimezone] = prefill
+		}
+		return
+	}
+	if !PersonaTimezoneMatchesCountry(tz, country) {
+		pid := int64(0)
+		if proxyID != nil {
+			pid = *proxyID
+		}
+		slog.Warn("persona timezone inconsistent with proxy exit country (fail-open, not blocked)",
+			"persona_timezone", tz, "proxy_country", country, "proxy_id", pid)
+	}
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
@@ -477,6 +531,8 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	// 人格地理默认：按代理出口国家 prefill 时区 / 一致性告警（fail-open）。
+	s.applyPersonaGeoDefaults(ctx, account.Extra, account.ProxyID)
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -602,6 +658,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
 		}
+		// 人格信封配置校验（仅在出现 persona_enabled 键时才校验）
+		if err := ValidatePersonaConfig(account.Extra); err != nil {
+			return nil, err
+		}
 		ComputeQuotaResetAt(account.Extra)
 		NormalizeFixedQuotaWindows(account.Extra)
 	}
@@ -615,6 +675,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	// 人格地理默认：仅当本次带 extra（即 persona 配置可能被触及）时，按最终代理出口国家
+	// prefill 时区 / 一致性告警（fail-open，放在 proxy 应用之后以用最新出口国家）。
+	if input.Extra != nil {
+		s.applyPersonaGeoDefaults(ctx, account.Extra, account.ProxyID)
 	}
 	// 只在指针非 nil 时更新 Concurrency（支持设置为 0）
 	if input.Concurrency != nil {
@@ -707,6 +772,10 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			return err
 		}
 	}
+	// 闭合校验绕过口子：部分合并路径也校验其中出现的 persona_* 字段。
+	if err := ValidatePersonaExtraPatch(updates); err != nil {
+		return err
+	}
 	if len(updates) == 0 {
 		return nil
 	}
@@ -760,6 +829,12 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				return nil, err
 			}
 			break
+		}
+	}
+	// 闭合校验绕过口子：批量 extra 合并也校验其中出现的 persona_* 字段（对所有目标账号共用同一 patch）。
+	if len(input.Extra) > 0 {
+		if err := ValidatePersonaExtraPatch(input.Extra); err != nil {
+			return nil, err
 		}
 	}
 

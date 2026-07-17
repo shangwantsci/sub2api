@@ -29,6 +29,9 @@ const (
 	BetaAdvancedToolUse       = "advanced-tool-use-2025-11-20"
 	BetaServerSideFallback    = "server-side-fallback-2026-06-01"
 	BetaFallbackCredit        = "fallback-credit-2026-06-01"
+	// BetaStructuredOutputs 真身 2.1.211 仅在带 output_config.format.json_schema 的请求上追加，
+	// 故不放进静态默认集合，由出站层按请求特性条件追加。
+	BetaStructuredOutputs = "structured-outputs-2025-12-15"
 )
 
 // DroppedBetas 是转发时需要从 anthropic-beta header 中移除的 beta token 列表。
@@ -68,11 +71,17 @@ const DefaultCacheControlTTL = "5m"
 // CLICurrentVersion 是 sub2api 当前对外伪装的 Claude Code CLI 版本号（三段 semver）。
 // 用于 billing attribution block 中的 cc_version=X.Y.Z.{fp} 前缀以及 fingerprint 计算。
 // 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
-const CLICurrentVersion = "2.1.206"
+//
+// 2.1.211 = tools/cc-calibrate 在服务器上对真身 Claude Code 抓包标定所得（此前手抄的
+// 2.1.206 已过期：npm stable=2.1.204 / latest=2.1.211，真身用户无人在 2.1.206）。
+// 指纹守卫已用真身输出校验：sha256(salt+chars[4,7,20]+version)[:3] 对齐（MATCH）。
+const CLICurrentVersion = "2.1.211"
 
 const (
 	// DefaultClaudeCodeMimicryProfileID 是默认 Claude Code 伪装 profile。
-	DefaultClaudeCodeMimicryProfileID = "cc-2.1.206-sdk-cli-macos-arm64"
+	// linux-x64：harness/沙箱均在 Linux 上跑真身，故对外声称 Linux 与实际可标定/可复现的
+	// 环境自洽（避免声称 macOS 却只能手造 mac 专属字段而再次漂移）。
+	DefaultClaudeCodeMimicryProfileID = "cc-2.1.211-sdk-cli-linux-x64"
 	defaultClaudeAgentSDKSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 )
 
@@ -104,8 +113,8 @@ var defaultClaudeCodeMimicryHeaders = map[string]string{
 	"User-Agent":                                "claude-cli/" + CLICurrentVersion + " (external, sdk-cli)",
 	"X-Stainless-Lang":                          "js",
 	"X-Stainless-Package-Version":               "0.94.0",
-	"X-Stainless-OS":                            "MacOS",
-	"X-Stainless-Arch":                          "arm64",
+	"X-Stainless-OS":                            "Linux",
+	"X-Stainless-Arch":                          "x64",
 	"X-Stainless-Runtime":                       "node",
 	"X-Stainless-Runtime-Version":               "v26.3.0",
 	"X-Stainless-Retry-Count":                   "0",
@@ -114,6 +123,14 @@ var defaultClaudeCodeMimicryHeaders = map[string]string{
 	"Anthropic-Dangerous-Direct-Browser-Access": "true",
 }
 
+// defaultClaudeCodeMimicryMessageBetas 是 sonnet/opus 主对话轮的 anthropic-beta 集合。
+//
+// 注：tools/cc-calibrate 对真身 2.1.211 的抓包显示真身主轮集合为
+// {claude-code, interleaved-thinking, thinking-token-count, context-management,
+// prompt-caching-scope, mid-conversation-system, effort}（不含 tool-search-tool）。
+// 但把 context-management 加入会联动 body 层 sanitize（保留/剥离 body.context_management），
+// 影响面较大，属于需受控灰度的能力维度改动，因此 beta 集合的完整重标定交由标定 profile
+// 加载器（plan 阶段二 p2-loader）承载，此处暂保留既有集合以限定改动爆炸半径。
 var defaultClaudeCodeMimicryMessageBetas = []string{
 	BetaClaudeCode,
 	BetaInterleavedThinking,

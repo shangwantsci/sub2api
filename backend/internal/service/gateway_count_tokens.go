@@ -470,6 +470,8 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	var ctFingerprint *Fingerprint
 	var ctMetadataFingerprint *Fingerprint
 	ctBillingUserAgent := ""
+	// 一次性解析标定 profile，贯穿本 count_tokens 请求的 fingerprint / beta / header。
+	ctCalProfile := s.calibratedProfile(ctx)
 	if account.IsOAuth() && s.identityService != nil {
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
 		if err == nil {
@@ -480,7 +482,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			ctMetadataFingerprint = fp
 			ctRewriteFingerprint := fp
 			if mimicClaudeCode {
-				ctRewriteFingerprint = claudeCodeMimicryFingerprint(fp)
+				ctRewriteFingerprint = claudeCodeMimicryFingerprint(fp, ctCalProfile)
 				ctMetadataFingerprint = ctRewriteFingerprint
 				if ctRewriteFingerprint != nil {
 					ctBillingUserAgent = ctRewriteFingerprint.UserAgent
@@ -512,7 +514,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 顺序约束同 buildUpstreamRequest。
 	ctEffectiveDropSet := mergeDropSets(s.getBetaPolicyFilterSet(ctx, c, account, modelID))
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(
-		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet,
+		ctCalProfile, tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet,
 	)
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值：净化以覆写值为准
@@ -571,7 +573,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, false)
+		applyClaudeCodeMimicHeaders(ctCalProfile, req, false)
 	}
 
 	// 写入最终 anthropic-beta header（Del 一次避免白名单透传值残留）

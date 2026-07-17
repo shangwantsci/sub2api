@@ -2426,6 +2426,75 @@
           </div>
         </div>
 
+        <!-- 人格 / Persona（新号默认开启 Tier A；需全局 enable_persona_gating 同时开启才生效） -->
+        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.persona.label') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.persona.hint') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="personaEnabled = !personaEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                personaEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  personaEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+          <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+            {{ t('admin.accounts.persona.createDefaultHint') }}
+          </p>
+          <div v-if="personaEnabled" class="mt-3 space-y-3">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.persona.timezone') }}</label>
+              <input
+                v-model="personaTimezone"
+                type="text"
+                class="input"
+                :placeholder="t('admin.accounts.persona.timezonePlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.persona.timezoneHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.persona.locale') }}</label>
+              <input v-model="personaLocale" type="text" class="input" placeholder="en-US" />
+              <p class="input-hint">{{ t('admin.accounts.persona.localeHint') }}</p>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="input-label">{{ t('admin.accounts.persona.activeStart') }}</label>
+                <input v-model.number="personaActiveStart" type="number" min="0" max="23" class="input" placeholder="9" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.accounts.persona.activeEnd') }}</label>
+                <input v-model.number="personaActiveEnd" type="number" min="1" max="24" class="input" placeholder="24" />
+              </div>
+            </div>
+            <p class="input-hint">{{ t('admin.accounts.persona.activeHint') }}</p>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="input-label">{{ t('admin.accounts.persona.maxConcurrency') }}</label>
+                <input v-model.number="personaMaxConcurrency" type="number" min="0" class="input" placeholder="2" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.accounts.persona.dailyCap') }}</label>
+                <input v-model.number="personaDailyCap" type="number" min="0" class="input" placeholder="0" />
+              </div>
+            </div>
+            <p class="input-hint">{{ t('admin.accounts.persona.dailyCapHint') }}</p>
+          </div>
+        </div>
+
         <!-- RPM Limit -->
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
@@ -4003,6 +4072,18 @@ const rpmLimitEnabled = ref(false)
 const baseRpm = ref<number | null>(null)
 const rpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
 const rpmStickyBuffer = ref<number | null>(null)
+
+// Persona envelope — new accounts default to Tier A care (enabled + concurrency 2).
+// Runtime-inert until the global enable_persona_gating switch is on, so defaulting
+// enabled has zero effect on existing traffic. Timezone should be set to match the
+// account residential proxy region (see hint).
+const personaEnabled = ref(true)
+const personaTimezone = ref('')
+const personaLocale = ref('')
+const personaActiveStart = ref<number | null>(null)
+const personaActiveEnd = ref<number | null>(null)
+const personaMaxConcurrency = ref<number | null>(2)
+const personaDailyCap = ref<number | null>(null)
 const userMsgQueueMode = ref('')
 const umqModeOptions = computed(() => [
   { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },
@@ -4745,6 +4826,13 @@ const resetForm = () => {
   baseRpm.value = null
   rpmStrategy.value = 'tiered'
   rpmStickyBuffer.value = null
+  personaEnabled.value = true
+  personaTimezone.value = ''
+  personaLocale.value = ''
+  personaActiveStart.value = null
+  personaActiveEnd.value = null
+  personaMaxConcurrency.value = 2
+  personaDailyCap.value = null
   userMsgQueueMode.value = ''
   tlsFingerprintEnabled.value = false
   tlsFingerprintProfileId.value = null
@@ -4900,6 +4988,16 @@ const buildAnthropicSessionImportExtra = (): Record<string, unknown> => {
   if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
     extra.max_sessions = maxSessions.value
     extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+  }
+
+  if (personaEnabled.value) {
+    extra.persona_enabled = true
+    if (personaTimezone.value.trim()) extra.persona_timezone = personaTimezone.value.trim()
+    if (personaLocale.value.trim()) extra.persona_locale = personaLocale.value.trim()
+    if (personaActiveStart.value != null) extra.persona_active_start_hour = personaActiveStart.value
+    if (personaActiveEnd.value != null) extra.persona_active_end_hour = personaActiveEnd.value
+    if (personaMaxConcurrency.value != null) extra.persona_max_concurrency = personaMaxConcurrency.value
+    if (personaDailyCap.value != null) extra.persona_daily_request_cap = personaDailyCap.value
   }
 
   if (rpmLimitEnabled.value) {

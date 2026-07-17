@@ -711,6 +711,23 @@ export default {
 	  autoPause5hDisabled: '禁用 5h 自动暂停',
 	  autoPause7dDisabled: '禁用 7d 自动暂停',
 	  autoPauseDisabledHint: '开启后该账号永不进入自动暂停（即使全局默认阈值已配置）。',
+      // Persona envelope (Anthropic OAuth/SetupToken; 需系统设置里"账号人格门控"全局开关同时开启)
+      persona: {
+        label: '人格 / Persona',
+        hint: '把该账号整形成"一个在本机用 Claude Code 的真人"：按人格时区作息调度、压低并发。仅当系统设置里的"账号人格门控"全局开关同时开启时才生效；此处仅编辑本账号档位。',
+        timezone: '时区 (IANA)',
+        timezonePlaceholder: '如 Asia/Tokyo（建议跟随该账号住宅代理所在地区）',
+        timezoneHint: '应与该账号出口住宅代理的地理位置一致（如美国 IP 配美国时区）；不一致会成为破绽。',
+        locale: 'Locale',
+        localeHint: '仅作组织标记，不写入任何出站请求头（不下发 Accept-Language），避免引入真身 CLI 根本不发的头。',
+        activeStart: '活跃起始小时 (0-23)',
+        activeEnd: '活跃结束小时 (1-24)',
+        activeHint: '作息窗口（当地时区）。起<终为当日窗口；起>终为跨夜窗口；起=终不允许（歧义）。两者留空则不做作息门控；全天用 0/24。',
+        maxConcurrency: '并发上限',
+        dailyCap: '日请求上限 (0=不限)',
+        dailyCapHint: '按人格时区跨日零点重置；命中上限后该账号当日不再被调度（fail-open：计数异常时不拦截）。',
+        createDefaultHint: '新建账号默认开启人格并把并发压到 2（Tier A 养号）。仅当系统设置里的"账号人格门控"全局开关开启时才真正生效，且不影响任何存量账号。若这是美国 IP 老号或不希望被压并发，请在此关闭。',
+      },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: '配额控制',

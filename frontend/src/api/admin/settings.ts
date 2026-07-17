@@ -565,6 +565,7 @@ export interface SystemSettings {
   enable_anthropic_cache_ttl_1h_injection: boolean;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
+  enable_persona_gating: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
   // codex_cli_only 加固
@@ -842,6 +843,7 @@ export interface UpdateSettingsRequest {
   enable_anthropic_cache_ttl_1h_injection?: boolean;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
+  enable_persona_gating?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   // codex_cli_only 加固
@@ -1343,6 +1345,59 @@ export async function updateBetaPolicySettings(
   return data;
 }
 
+// ==================== Claude Code Calibrated Profile ====================
+
+/**
+ * Read-only status of the Claude Code calibrated wire profile that the gateway
+ * hot-loads (produced by tools/cc-calibrate). When not published (or invalid),
+ * the gateway falls back to compiled-in constants.
+ */
+export interface ClaudeCalibratedProfileStatus {
+  published: boolean;
+  valid: boolean;
+  cli_version: string;
+  captured_at: string;
+  source: string;
+  user_agent: string;
+  salt_verified: boolean;
+  guard_checked: number;
+  guard_ok: number;
+  beta_rule_keys: string[];
+  absent_headers: string[];
+  raw: string;
+  error?: string;
+}
+
+export async function getClaudeCalibratedProfile(): Promise<ClaudeCalibratedProfileStatus> {
+  const { data } = await apiClient.get<ClaudeCalibratedProfileStatus>(
+    "/admin/settings/claude-calibrated-profile",
+  );
+  return data;
+}
+
+/**
+ * Publish a calibrated profile. `raw` is the profile-<version>.json content
+ * produced by tools/cc-calibrate. The backend validates it (schema, UA↔version
+ * consistency, fingerprint guard) and rejects invalid profiles.
+ */
+export async function publishClaudeCalibratedProfile(
+  raw: string,
+): Promise<ClaudeCalibratedProfileStatus> {
+  const { data } = await apiClient.post<ClaudeCalibratedProfileStatus>(
+    "/admin/settings/claude-calibrated-profile",
+    raw,
+    { headers: { "Content-Type": "application/json" } },
+  );
+  return data;
+}
+
+export async function clearClaudeCalibratedProfile(): Promise<ClaudeCalibratedProfileStatus> {
+  const { data } = await apiClient.delete<ClaudeCalibratedProfileStatus>(
+    "/admin/settings/claude-calibrated-profile",
+  );
+  return data;
+}
+
 // --- Web Search Emulation Config ---
 
 export interface WebSearchProviderConfig {
@@ -1426,6 +1481,9 @@ export const settingsAPI = {
   updateRectifierSettings,
   getBetaPolicySettings,
   updateBetaPolicySettings,
+  getClaudeCalibratedProfile,
+  publishClaudeCalibratedProfile,
+  clearClaudeCalibratedProfile,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,

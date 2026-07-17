@@ -503,6 +503,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
+			// 人格日请求上限计数（自守卫：仅在开关开+persona 启用+配置了正上限时写入）
+			h.gatewayService.IncrementAccountPersonaDailyRequest(c.Request.Context(), account)
 
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
@@ -926,6 +928,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
+			// 人格日请求上限计数（自守卫：仅在开关开+persona 启用+配置了正上限时写入）
+			h.gatewayService.IncrementAccountPersonaDailyRequest(c.Request.Context(), account)
 
 			// 绑定粘性会话（成功转发后绑定/刷新）
 			// - 无现有绑定（首次请求）：创建绑定

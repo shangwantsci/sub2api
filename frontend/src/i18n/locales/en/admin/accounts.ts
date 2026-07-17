@@ -618,6 +618,23 @@ export default {
 	  autoPause5hDisabled: 'Disable 5h auto-pause',
 	  autoPause7dDisabled: 'Disable 7d auto-pause',
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
+      // Persona envelope (Anthropic OAuth/SetupToken; requires the global enable_persona_gating switch)
+      persona: {
+        label: 'Persona',
+        hint: 'Shape this account to look like a single person using Claude Code locally: scheduled within the persona timezone active-hours and capped concurrency. Only takes effect when the global "Account Persona Gating" switch is on; this edits per-account settings.',
+        timezone: 'Timezone (IANA)',
+        timezonePlaceholder: 'e.g. Asia/Tokyo (match the account residential proxy region)',
+        timezoneHint: 'Must match the geolocation of this account egress residential proxy (a US IP needs a US timezone); a mismatch is a tell.',
+        locale: 'Locale',
+        localeHint: 'Organizational label only; never written to outbound requests (no Accept-Language), to avoid adding a header the real CLI does not send.',
+        activeStart: 'Active start hour (0-23)',
+        activeEnd: 'Active end hour (1-24)',
+        activeHint: 'Active-hours window in local time. start<end = same-day; start>end = overnight; start=end is rejected (ambiguous). Leave both empty for no gating; use 0/24 for all-day.',
+        maxConcurrency: 'Max concurrency',
+        dailyCap: 'Daily request cap (0=unlimited)',
+        dailyCapHint: 'Resets at midnight in the persona timezone; once the cap is hit the account is not scheduled for the rest of the day (fail-open: not enforced if the counter errors).',
+        createDefaultHint: 'New accounts default to persona ON with concurrency capped to 2 (Tier A warming). Only takes real effect when the global "Account Persona Gating" switch is on, and existing accounts are never affected. Turn this off here for US-IP legacy accounts or if you do not want concurrency capped.',
+      },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: 'Quota Control',

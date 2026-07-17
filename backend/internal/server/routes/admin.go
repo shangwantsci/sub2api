@@ -491,6 +491,10 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Beta 策略配置
 		adminSettings.GET("/beta-policy", h.Admin.Setting.GetBetaPolicySettings)
 		adminSettings.PUT("/beta-policy", h.Admin.Setting.UpdateBetaPolicySettings)
+		// Claude Code 标定 profile（真身抓包 → 热加载出站字节）
+		adminSettings.GET("/claude-calibrated-profile", h.Admin.Setting.GetClaudeCalibratedProfile)
+		adminSettings.POST("/claude-calibrated-profile", h.Admin.Setting.PublishClaudeCalibratedProfile)
+		adminSettings.DELETE("/claude-calibrated-profile", h.Admin.Setting.ClearClaudeCalibratedProfile)
 		// Web Search 模拟配置
 		adminSettings.GET("/web-search-emulation", h.Admin.Setting.GetWebSearchEmulationConfig)
 		adminSettings.PUT("/web-search-emulation", h.Admin.Setting.UpdateWebSearchEmulationConfig)

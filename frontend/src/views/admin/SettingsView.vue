@@ -4232,6 +4232,163 @@
                 </div>
               </div>
 
+              <!-- Claude Code Calibrated Profile (real-CLI auto-calibration) -->
+              <div
+                class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"
+              >
+                <div class="mb-2 flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <label
+                      class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.calibratedProfile.title") }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.calibratedProfile.description") }}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm shrink-0"
+                    :disabled="calibratedProfileLoading"
+                    @click="loadCalibratedProfile"
+                  >
+                    {{ t("admin.settings.calibratedProfile.refresh") }}
+                  </button>
+                </div>
+
+                <div
+                  v-if="calibratedProfileLoading"
+                  class="text-xs text-gray-500 dark:text-gray-400"
+                >
+                  {{ t("common.loading") }}
+                </div>
+
+                <template v-else>
+                  <!-- Status summary -->
+                  <div
+                    v-if="calibratedProfile && calibratedProfile.published && calibratedProfile.valid"
+                    class="space-y-2 rounded-md bg-gray-50 p-3 text-xs dark:bg-dark-800/60"
+                  >
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span
+                        class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                      >
+                        {{ t("admin.settings.calibratedProfile.active") }}
+                      </span>
+                      <span class="font-mono text-gray-700 dark:text-gray-300">
+                        v{{ calibratedProfile.cli_version }}
+                      </span>
+                      <span
+                        v-if="calibratedProfile.salt_verified"
+                        class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                      >
+                        {{ t("admin.settings.calibratedProfile.guardPassed") }}
+                        ({{ calibratedProfile.guard_ok }}/{{ calibratedProfile.guard_checked }})
+                      </span>
+                    </div>
+                    <div class="text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.calibratedProfile.userAgent") }}:
+                      <span class="font-mono">{{ calibratedProfile.user_agent }}</span>
+                    </div>
+                    <div
+                      v-if="calibratedProfile.captured_at"
+                      class="text-gray-500 dark:text-gray-400"
+                    >
+                      {{ t("admin.settings.calibratedProfile.capturedAt") }}:
+                      {{ calibratedProfile.captured_at }}
+                    </div>
+                    <div
+                      v-if="calibratedProfile.source"
+                      class="text-gray-500 dark:text-gray-400"
+                    >
+                      {{ t("admin.settings.calibratedProfile.source") }}:
+                      <span class="font-mono">{{ calibratedProfile.source }}</span>
+                      <span
+                        v-if="calibratedProfile.source === 'cc-calibrate'"
+                        class="ml-1 text-gray-400"
+                      >
+                        {{ t("admin.settings.calibratedProfile.sourceAutoHint") }}
+                      </span>
+                    </div>
+                    <div
+                      v-if="calibratedProfile.beta_rule_keys.length"
+                      class="flex flex-wrap gap-1"
+                    >
+                      <span
+                        v-for="key in calibratedProfile.beta_rule_keys"
+                        :key="key"
+                        class="rounded bg-gray-200 px-1.5 py-0.5 font-mono text-[11px] text-gray-700 dark:bg-dark-700 dark:text-gray-300"
+                      >
+                        {{ key }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    v-else-if="calibratedProfile && calibratedProfile.published && !calibratedProfile.valid"
+                    class="rounded-md bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  >
+                    {{ t("admin.settings.calibratedProfile.invalid") }}
+                    <span v-if="calibratedProfile.error" class="font-mono">
+                      — {{ calibratedProfile.error }}
+                    </span>
+                    <div class="mt-1">
+                      {{ t("admin.settings.calibratedProfile.fallbackNote") }}
+                    </div>
+                  </div>
+
+                  <div
+                    v-else
+                    class="rounded-md bg-gray-50 p-3 text-xs text-gray-500 dark:bg-dark-800/60 dark:text-gray-400"
+                  >
+                    {{ t("admin.settings.calibratedProfile.notPublished") }}
+                    <div class="mt-1">
+                      {{ t("admin.settings.calibratedProfile.fallbackNote") }}
+                    </div>
+                  </div>
+
+                  <!-- Publish / clear -->
+                  <div class="mt-3">
+                    <label
+                      class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400"
+                    >
+                      {{ t("admin.settings.calibratedProfile.rawLabel") }}
+                    </label>
+                    <textarea
+                      v-model="calibratedProfileRaw"
+                      rows="4"
+                      spellcheck="false"
+                      class="input w-full font-mono text-xs"
+                      :placeholder="t('admin.settings.calibratedProfile.rawPlaceholder')"
+                    ></textarea>
+                    <div class="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        class="btn btn-primary btn-sm"
+                        :disabled="calibratedProfilePublishing"
+                        @click="publishCalibratedProfile"
+                      >
+                        {{
+                          calibratedProfilePublishing
+                            ? t("common.saving")
+                            : t("admin.settings.calibratedProfile.publish")
+                        }}
+                      </button>
+                      <button
+                        v-if="calibratedProfile && calibratedProfile.published"
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        :disabled="calibratedProfilePublishing"
+                        @click="clearCalibratedProfile"
+                      >
+                        {{ t("admin.settings.calibratedProfile.clear") }}
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
               <!-- Claude OAuth System Prompt Injection -->
               <div class="flex items-center justify-between">
                 <div>
@@ -4534,6 +4691,23 @@
                 <Toggle
                   v-model="form.enable_client_dateline_normalization"
                 />
+              </div>
+
+              <!-- 账号人格门控（作息窗口 + 人格并发上限；默认关，需每账号 persona_enabled 同时开启） -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.gatewayForwarding.personaGating") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t("admin.settings.gatewayForwarding.personaGatingHint")
+                    }}
+                  </p>
+                </div>
+                <Toggle v-model="form.enable_persona_gating" />
               </div>
 
               <!-- Antigravity UA 版本 -->
@@ -7419,6 +7593,7 @@ import type {
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
   WebSearchTestResult,
+  ClaudeCalibratedProfileStatus,
 } from "@/api/admin/settings";
 import type {
   AdminGroup,
@@ -8318,6 +8493,7 @@ const form = reactive<SettingsForm>({
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
+  enable_persona_gating: false,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   // codex_cli_only 加固
@@ -9629,6 +9805,7 @@ async function saveSettings() {
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       enable_client_dateline_normalization:
         form.enable_client_dateline_normalization,
+      enable_persona_gating: form.enable_persona_gating,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
       openai_codex_user_agent:
@@ -10188,6 +10365,67 @@ function addQuickPattern(
   }
 }
 
+const calibratedProfile = ref<ClaudeCalibratedProfileStatus | null>(null);
+const calibratedProfileLoading = ref(true);
+const calibratedProfilePublishing = ref(false);
+const calibratedProfileRaw = ref("");
+
+async function loadCalibratedProfile() {
+  calibratedProfileLoading.value = true;
+  try {
+    calibratedProfile.value =
+      await adminAPI.settings.getClaudeCalibratedProfile();
+  } catch (_error: unknown) {
+    calibratedProfile.value = null;
+  } finally {
+    calibratedProfileLoading.value = false;
+  }
+}
+
+async function publishCalibratedProfile() {
+  const raw = calibratedProfileRaw.value.trim();
+  if (!raw) {
+    appStore.showError(
+      t("admin.settings.calibratedProfile.emptyError"),
+    );
+    return;
+  }
+  calibratedProfilePublishing.value = true;
+  try {
+    calibratedProfile.value =
+      await adminAPI.settings.publishClaudeCalibratedProfile(raw);
+    calibratedProfileRaw.value = "";
+    appStore.showSuccess(t("admin.settings.calibratedProfile.published"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.calibratedProfile.publishError"),
+      ),
+    );
+  } finally {
+    calibratedProfilePublishing.value = false;
+  }
+}
+
+async function clearCalibratedProfile() {
+  calibratedProfilePublishing.value = true;
+  try {
+    calibratedProfile.value =
+      await adminAPI.settings.clearClaudeCalibratedProfile();
+    appStore.showSuccess(t("admin.settings.calibratedProfile.cleared"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.calibratedProfile.clearError"),
+      ),
+    );
+  } finally {
+    calibratedProfilePublishing.value = false;
+  }
+}
+
 async function loadBetaPolicySettings() {
   betaPolicyLoading.value = true;
   try {
@@ -10665,6 +10903,7 @@ onMounted(() => {
   loadStreamTimeoutSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();
+  loadCalibratedProfile();
   loadProviders();
 });
 

@@ -195,7 +195,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if s.identityService != nil && c != nil {
 			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
 			if err == nil && fp != nil {
-				metadataFP := claudeCodeMimicryFingerprint(fp)
+				metadataFP := claudeCodeMimicryFingerprint(fp, s.calibratedProfile(ctx))
 				// metadata 透传开启时跳过 metadata 注入
 				_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)
 				if !mimicMPT {

@@ -465,20 +465,43 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
 }
 
-func claudeCodeMimicryFingerprint(fp *Fingerprint) *Fingerprint {
+// claudeCodeMimicryFingerprint 把指纹的 UA / x-stainless-* 重写成 Claude Code 真身值。
+// profile 非 nil 时用标定 headers 模板（真身抓包），否则用编译内置常量。UA 版本会经
+// billingUserAgent → syncBillingHeaderVersion 传导到 billing block 的 cc_version，故这里
+// 用 profile UA 即可让 cc_version 跟随标定版本，无需在别处再传版本号。
+func claudeCodeMimicryFingerprint(fp *Fingerprint, profile *claude.CalibratedProfile) *Fingerprint {
 	if fp == nil {
 		return nil
 	}
 	out := *fp
 	headers := claude.DefaultClaudeCodeMimicryProfile().Headers
-	out.UserAgent = headers["User-Agent"]
-	out.StainlessLang = headers["X-Stainless-Lang"]
-	out.StainlessPackageVersion = headers["X-Stainless-Package-Version"]
-	out.StainlessOS = headers["X-Stainless-OS"]
-	out.StainlessArch = headers["X-Stainless-Arch"]
-	out.StainlessRuntime = headers["X-Stainless-Runtime"]
-	out.StainlessRuntimeVersion = headers["X-Stainless-Runtime-Version"]
+	if profile != nil {
+		if t := profile.HeaderTemplate(); len(t) > 0 {
+			headers = t
+		}
+	}
+	out.UserAgent = mimicHeaderValue(headers, "User-Agent")
+	out.StainlessLang = mimicHeaderValue(headers, "X-Stainless-Lang")
+	out.StainlessPackageVersion = mimicHeaderValue(headers, "X-Stainless-Package-Version")
+	out.StainlessOS = mimicHeaderValue(headers, "X-Stainless-OS")
+	out.StainlessArch = mimicHeaderValue(headers, "X-Stainless-Arch")
+	out.StainlessRuntime = mimicHeaderValue(headers, "X-Stainless-Runtime")
+	out.StainlessRuntimeVersion = mimicHeaderValue(headers, "X-Stainless-Runtime-Version")
 	return &out
+}
+
+// mimicHeaderValue 大小写不敏感地从 header 模板取值（标定模板与内置常量键形态一致，
+// 但用不敏感匹配更稳）。
+func mimicHeaderValue(headers map[string]string, key string) string {
+	if v, ok := headers[key]; ok {
+		return v
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
 }
 
 func syncClaudeCodeSessionHeaderFromBody(req *http.Request, body []byte) {
@@ -594,7 +617,7 @@ func (s *GatewayService) ensureClaudeOAuthMimicMetadata(
 			fp = got
 		}
 	}
-	fp = claudeCodeMimicryFingerprint(fp)
+	fp = claudeCodeMimicryFingerprint(fp, s.calibratedProfile(ctx))
 
 	uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body)
 	next, changed := ensureClaudeOAuthMetadataUserID(body, uid)

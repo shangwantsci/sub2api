@@ -262,6 +262,47 @@ services:
       start_period: 5s
     # 注意：不暴露端口到宿主机，应用通过内部网络连接
     # 如需调试，可临时添加：ports: ["127.0.0.1:6379:6379"]
+
+  # ===========================================================================
+  # Claude Code Calibrator (OPTIONAL, opt-in via profile "calibrate")
+  # ===========================================================================
+  # 在同一台生产服务器上，自动跟随 Claude Code CLI 新版本 → 用真身抓包标定 profile →
+  # 自动发布到网关热加载。全程用 dummy token 指向本地抓包 shim，不接触真实 Anthropic、
+  # 不消耗任何账号。
+  #
+  # 默认不启动（属于 profile "calibrate"），不影响现有部署。启用：
+  #   1) 在 Admin → 设置 → 网关服务 生成/复制 Admin API Key
+  #   2) 在 .env 里设置 CC_CALIBRATE_ADMIN_API_KEY=<该 key>
+  #   3) docker compose --profile calibrate up -d
+  # 之后无需任何手动操作：CLI 一发新版就自动标定+发布，网关约 60s 热加载。
+  # 需要仓库源码在宿主机上（bind mount ../tools/cc-calibrate）。首跑会 npm 安装 CLI，
+  # 因此该容器需要出网访问 npm。
+  cc-calibrate:
+    image: node:22-bookworm-slim
+    container_name: sub2api-cc-calibrate
+    restart: unless-stopped
+    profiles: ["calibrate"]
+    depends_on:
+      sub2api:
+        condition: service_healthy
+    environment:
+      # 网关内部地址（同 compose 网络）；发布用 Admin API Key（x-api-key）。
+      - GATEWAY_URL=${CC_CALIBRATE_GATEWAY_URL:-http://sub2api:8080}
+      - ADMIN_API_KEY=${CC_CALIBRATE_ADMIN_API_KEY:-}
+      # 在 node 容器内直跑标定核心（不嵌套 Docker）。
+      - CC_CALIBRATE_INPROC=1
+      - CC_CALIBRATE_MODELS=${CC_CALIBRATE_MODELS:-haiku sonnet opus fable}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      # 只读挂载标定脚本（需要仓库源码在宿主机上）。
+      - ../tools/cc-calibrate:/cal:ro
+      # 持久化产出的 profile-<版本>.json（多版本并存）。
+      - cc_calibrate_out:/out
+    # 轮询间隔默认 6h；检测到新版才标定，已存在则跳过。
+    command:
+      ["bash", "/cal/watch.sh", "/out", "${CC_CALIBRATE_POLL_SECONDS:-21600}"]
+    networks:
+      - sub2api-network
 # =============================================================================
 # Volumes
 # =============================================================================
@@ -271,6 +312,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  cc_calibrate_out:
     driver: local
 
 # =============================================================================

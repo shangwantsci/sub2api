@@ -467,6 +467,11 @@ const (
 	SettingKeyClaudeCodeMimicryProfile = "claude_code_mimicry_profile"
 	// SettingKeyClaudeMimicryGuardMode Claude Code 伪装审计模式：off/warn/block（默认 warn）
 	SettingKeyClaudeMimicryGuardMode = "claude_mimicry_guard_mode"
+	// SettingKeyClaudeCodeCalibratedProfile 存放 tools/cc-calibrate 对真身 Claude Code CLI
+	// 抓包标定所得的机器可读 profile JSON（headers 模板 + 分档 anthropic-beta + cc_version +
+	// 指纹守卫结果）。网关热加载它覆盖 constants.go 里的硬编码出站字节；空值/无效/守卫未过
+	// 时回退到编译内置常量。见 backend/internal/pkg/claude/calibrated_profile.go。
+	SettingKeyClaudeCodeCalibratedProfile = "claude_code_calibrated_profile"
 	// SettingKeyEnableClaudeOAuthSystemPromptInjection 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
 	SettingKeyEnableClaudeOAuthSystemPromptInjection = "enable_claude_oauth_system_prompt_injection"
 	// SettingKeyClaudeOAuthSystemPrompt Claude OAuth mimic 路径注入的通用扩展 system prompt（空值使用内置默认）
@@ -484,6 +489,9 @@ const (
 	SettingKeyEnableClientDatelineNormalization = "enable_client_dateline_normalization"
 	// SettingKeyRewriteMessageCacheControl 是否改写 messages[*].content[*].cache_control（默认 false）
 	SettingKeyRewriteMessageCacheControl = "rewrite_message_cache_control"
+	// SettingKeyEnablePersonaGating 是否启用账号人格门控（作息窗口 + 人格并发上限，默认 false）。
+	// 开启后仅影响 Extra 中 persona_enabled=true 的账号（双重开关）；关闭时调度行为与既有完全一致。
+	SettingKeyEnablePersonaGating = "enable_persona_gating"
 	// SettingKeyAntigravityUserAgentVersion Antigravity 上游 User-Agent 版本号（空值使用环境变量/默认值）
 	SettingKeyAntigravityUserAgentVersion = "antigravity_user_agent_version"
 	// SettingKeyOpenAICodexUserAgent OpenAI Codex 完整 User-Agent（空值使用内置默认）

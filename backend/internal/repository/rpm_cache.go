@@ -33,6 +33,13 @@ const (
 
 	// RPM 计数器 TTL（120 秒，覆盖当前分钟窗口 + 冗余）
 	rpmKeyTTL = 120 * time.Second
+
+	// 人格日请求计数器键前缀
+	// 格式: persona_daily:{accountID}:{dayKey}（dayKey 由服务层按人格时区算 YYYYMMDD）
+	personaDailyKeyPrefix = "persona_daily:"
+
+	// 人格日计数器 TTL（48 小时，覆盖任意时区当日窗口 + 跨日冗余）
+	personaDailyKeyTTL = 48 * time.Hour
 )
 
 // RPMCacheImpl RPM 计数器缓存 Redis 实现
@@ -86,6 +93,32 @@ func (c *RPMCacheImpl) IncrementRPM(ctx context.Context, accountID int64) (int, 
 	}
 
 	return int(incrCmd.Val()), nil
+}
+
+// IncrementAccountDaily 原子递增账号在给定 dayKey 下的累计请求数（TxPipeline: INCR + EXPIRE）。
+// dayKey 由服务层按人格时区计算，键随人格本地日历跨日自动切换。
+func (c *RPMCacheImpl) IncrementAccountDaily(ctx context.Context, accountID int64, dayKey string) (int, error) {
+	key := fmt.Sprintf("%s%d:%s", personaDailyKeyPrefix, accountID, dayKey)
+	pipe := c.rdb.TxPipeline()
+	incrCmd := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, personaDailyKeyTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("persona daily increment: %w", err)
+	}
+	return int(incrCmd.Val()), nil
+}
+
+// GetAccountDaily 获取账号在给定 dayKey 下的累计请求数（无记录返回 0）。
+func (c *RPMCacheImpl) GetAccountDaily(ctx context.Context, accountID int64, dayKey string) (int, error) {
+	key := fmt.Sprintf("%s%d:%s", personaDailyKeyPrefix, accountID, dayKey)
+	val, err := c.rdb.Get(ctx, key).Int()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("persona daily get: %w", err)
+	}
+	return val, nil
 }
 
 // GetRPM 获取当前分钟的 RPM 计数

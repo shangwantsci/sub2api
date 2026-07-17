@@ -139,23 +139,23 @@ func TestFullClaudeCodeMimicryBetas_DoesNotDefaultRedactThinking(t *testing.T) {
 	require.NotContains(t, required, claude.BetaFineGrainedToolStreaming)
 }
 
-func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2206Baseline(t *testing.T) {
+func TestDefaultClaudeCodeMimicryProfile_UsesCapturedClaudeCode2211Baseline(t *testing.T) {
 	profile := claude.DefaultClaudeCodeMimicryProfile()
 
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, profile.ID)
-	require.Equal(t, "cc-2.1.206-sdk-cli-macos-arm64", profile.ID)
-	require.Equal(t, "2.1.206", profile.CLIVersion)
+	require.Equal(t, "cc-2.1.211-sdk-cli-linux-x64", profile.ID)
+	require.Equal(t, "2.1.211", profile.CLIVersion)
 	require.Equal(t, "sdk-cli", profile.BillingEntrypoint)
 	require.Equal(t, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", profile.SystemPrompt)
-	require.Equal(t, "claude-cli/2.1.206 (external, sdk-cli)", profile.Headers["User-Agent"])
+	require.Equal(t, "claude-cli/2.1.211 (external, sdk-cli)", profile.Headers["User-Agent"])
 	require.Equal(t, "0.94.0", profile.Headers["X-Stainless-Package-Version"])
 	require.Equal(t, "v26.3.0", profile.Headers["X-Stainless-Runtime-Version"])
-	require.Equal(t, "MacOS", profile.Headers["X-Stainless-OS"])
-	require.Equal(t, "arm64", profile.Headers["X-Stainless-Arch"])
+	require.Equal(t, "Linux", profile.Headers["X-Stainless-OS"])
+	require.Equal(t, "x64", profile.Headers["X-Stainless-Arch"])
 	require.Equal(t, strings.Join(profile.MessageBetas, ","), strings.Join(claude.FullClaudeCodeMimicryBetas(), ","))
 }
 
-func TestComputeFinalAnthropicBeta_OAuthMimicUsesCapturedClaudeCode2206MessageBetas(t *testing.T) {
+func TestComputeFinalAnthropicBeta_OAuthMimicUsesMimicryMessageBetas(t *testing.T) {
 	svc := &GatewayService{}
 	tests := []struct {
 		name       string
@@ -186,7 +186,7 @@ func TestComputeFinalAnthropicBeta_OAuthMimicUsesCapturedClaudeCode2206MessageBe
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, shouldSet := svc.computeFinalAnthropicBeta("oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil)
+			got, shouldSet := svc.computeFinalAnthropicBeta(nil, "oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil)
 
 			require.True(t, shouldSet)
 			require.Equal(t, tt.wantHeader, got)
@@ -234,7 +234,7 @@ func TestComputeFinalCountTokensAnthropicBeta_OAuthMimicPreservesPre2206Betas(t 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, shouldSet := svc.computeFinalCountTokensAnthropicBeta(
-				"oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil,
+				nil, "oauth", true, tt.model, nil, []byte(`{"model":"`+tt.model+`"}`), nil,
 			)
 
 			require.True(t, shouldSet)
@@ -252,7 +252,7 @@ func TestComputeFinalAnthropicBeta_RealClaudeCodeDoesNotAppendOAuth(t *testing.T
 		claude.BetaThinkingTokenCount,
 	}, ","))
 
-	got, shouldSet := svc.computeFinalAnthropicBeta("oauth", false, "claude-sonnet-4-6", headers, []byte(`{"model":"claude-sonnet-4-6"}`), nil)
+	got, shouldSet := svc.computeFinalAnthropicBeta(nil, "oauth", false, "claude-sonnet-4-6", headers, []byte(`{"model":"claude-sonnet-4-6"}`), nil)
 
 	require.True(t, shouldSet)
 	require.NotContains(t, got, claude.BetaOAuth)
@@ -266,7 +266,7 @@ func TestApplyClaudeCodeMimicHeaders_UsesCapturedProfileHeaders(t *testing.T) {
 	req.Header.Set("User-Agent", "curl/8")
 	req.Header.Set("X-Stainless-OS", "Linux")
 
-	applyClaudeCodeMimicHeaders(req, true)
+	applyClaudeCodeMimicHeaders(nil, req, true)
 
 	for key, want := range profile.Headers {
 		require.Equal(t, want, getHeaderRaw(req.Header, key), key)
@@ -274,7 +274,8 @@ func TestApplyClaudeCodeMimicHeaders_UsesCapturedProfileHeaders(t *testing.T) {
 	require.Equal(t, "application/json", getHeaderRaw(req.Header, "Accept"))
 	require.Equal(t, "gzip, deflate, br, zstd", getHeaderRaw(req.Header, "Accept-Encoding"))
 	require.Empty(t, getHeaderRaw(req.Header, "x-stainless-helper-method"))
-	require.NotEmpty(t, getHeaderRaw(req.Header, "x-client-request-id"))
+	// 真身 2.1.211 不发 x-client-request-id，故不再注入（见 applyClaudeCodeMimicHeaders）。
+	require.Empty(t, getHeaderRaw(req.Header, "x-client-request-id"))
 }
 
 func TestMergeAnthropicBetaDropping_PreservesIncomingRedactThinking(t *testing.T) {

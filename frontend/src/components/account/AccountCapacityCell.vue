@@ -28,6 +28,18 @@
       </svg>
     </CapacityBadge>
 
+    <!-- 人格 Persona（启用时显示时区档 + 在班/下班） -->
+    <span
+      v-if="showPersona"
+      :class="['inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium', personaClass]"
+      :title="personaTooltip"
+    >
+      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+      </svg>
+      {{ personaLabel }}
+    </span>
+
     <!-- API Key 账号配额限制 -->
     <QuotaBadge v-if="showDailyQuota" :used="account.quota_daily_used ?? 0" :limit="account.quota_daily_limit!" label="D" />
     <QuotaBadge v-if="showWeeklyQuota" :used="account.quota_weekly_used ?? 0" :limit="account.quota_weekly_limit!" label="W" />
@@ -174,6 +186,53 @@ const formatCost = (value: number | null | undefined) => {
   if (value === null || value === undefined) return '0'
   return value.toFixed(2)
 }
+
+// ====== 人格 Persona ======
+const personaExtra = computed(() => (props.account.extra || {}) as Record<string, unknown>)
+const showPersona = computed(() => personaExtra.value.persona_enabled === true)
+const personaTz = computed(() =>
+  typeof personaExtra.value.persona_timezone === 'string' ? (personaExtra.value.persona_timezone as string) : ''
+)
+const personaStart = computed(() =>
+  typeof personaExtra.value.persona_active_start_hour === 'number' ? (personaExtra.value.persona_active_start_hour as number) : null
+)
+const personaEnd = computed(() =>
+  typeof personaExtra.value.persona_active_end_hour === 'number' ? (personaExtra.value.persona_active_end_hour as number) : null
+)
+const personaHasWindow = computed(() => !(personaStart.value == null && personaEnd.value == null) && !(personaStart.value === 0 && personaEnd.value === 0))
+// 在班判定：无作息窗口视为恒在班；否则用浏览器 Intl 换算到人格时区的当前小时。
+const personaOnShift = computed(() => {
+  if (!personaHasWindow.value) return true
+  const start = personaStart.value ?? 0
+  const end = personaEnd.value ?? 24
+  let hour: number
+  try {
+    const s = new Date().toLocaleString('en-US', {
+      timeZone: personaTz.value || 'UTC',
+      hour12: false,
+      hour: '2-digit',
+    })
+    hour = parseInt(s, 10) % 24
+  } catch {
+    return true
+  }
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end
+})
+const personaLabel = computed(() => {
+  const seg = personaTz.value ? personaTz.value.split('/').pop() : 'persona'
+  return seg || 'persona'
+})
+const personaClass = computed(() =>
+  personaOnShift.value
+    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+    : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+)
+const personaTooltip = computed(() => {
+  const parts = ['Persona ' + (personaOnShift.value ? '· on shift' : '· off shift')]
+  if (personaTz.value) parts.push(personaTz.value)
+  if (personaHasWindow.value) parts.push(`${personaStart.value ?? 0}:00-${personaEnd.value ?? 24}:00`)
+  return parts.join(' · ')
+})
 
 // ====== 配额 ======
 const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')

@@ -9,12 +9,21 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// ccVersionInBillingRe matches the semver part of cc_version (X.Y.Z), preserving
-// the trailing message-derived suffix (e.g. ".c02") if present.
+// ccVersionWithFpRe matches the full cc_version=X.Y.Z.{fp} form (fp = 3 hex chars),
+// which is what the mimic billing block always emits. The fp DEPENDS on the version
+// (sha256(salt+chars+version)[:3]), so when the version changes the fp must be
+// recomputed — otherwise the block carries a fp for the old version and gets flagged.
+var ccVersionWithFpRe = regexp.MustCompile(`cc_version=(\d+\.\d+\.\d+)\.([0-9a-f]{3})`)
+
+// ccVersionInBillingRe matches the bare semver part of cc_version (X.Y.Z), used as a
+// fallback for any billing block that lacks the fp suffix.
 var ccVersionInBillingRe = regexp.MustCompile(`cc_version=\d+\.\d+\.\d+`)
 
-// syncBillingHeaderVersion rewrites cc_version in x-anthropic-billing-header
-// system text blocks to match the version extracted from userAgent.
+// syncBillingHeaderVersion rewrites cc_version in x-anthropic-billing-header system
+// text blocks to match the version extracted from userAgent, RECOMPUTING the fingerprint
+// suffix for the new version. This is what lets the calibrated-profile loader bump the
+// CLI version (via the profile's User-Agent) with zero code changes: the billing block
+// follows the emitted UA version and stays internally consistent (cc_version + fp).
 // Only touches system array blocks whose text starts with "x-anthropic-billing-header".
 func syncBillingHeaderVersion(body []byte, userAgent string) []byte {
 	version := ExtractCLIVersion(userAgent)
@@ -27,14 +36,20 @@ func syncBillingHeaderVersion(body []byte, userAgent string) []byte {
 		return body
 	}
 
-	replacement := "cc_version=" + version
 	idx := 0
 	systemResult.ForEach(func(_, item gjson.Result) bool {
 		text := item.Get("text")
 		if text.Exists() && text.Type == gjson.String &&
 			strings.HasPrefix(text.String(), "x-anthropic-billing-header") {
-			newText := ccVersionInBillingRe.ReplaceAllString(text.String(), replacement)
-			if newText != text.String() {
+			original := text.String()
+			var newText string
+			if ccVersionWithFpRe.MatchString(original) {
+				fp := computeClaudeCodeFingerprint(body, version)
+				newText = ccVersionWithFpRe.ReplaceAllString(original, "cc_version="+version+"."+fp)
+			} else {
+				newText = ccVersionInBillingRe.ReplaceAllString(original, "cc_version="+version)
+			}
+			if newText != original {
 				if updated, err := sjson.SetBytes(body, fmt.Sprintf("system.%d.text", idx), newText); err == nil {
 					body = updated
 				}

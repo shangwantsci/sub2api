@@ -12,7 +12,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 
 	"github.com/gin-gonic/gin"
@@ -60,6 +59,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if s.settingService != nil {
 		enableFP, enableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
+	// 一次性解析标定 profile（进程内缓存读取），贯穿本请求的 fingerprint / beta / header /
+	// guard，避免多次读取，且保证同一请求内出站字节使用同一份 profile。
+	calProfile := s.calibratedProfile(ctx)
 	if account.IsOAuth() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
@@ -74,7 +76,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			metadataFingerprint = fp
 			rewriteFingerprint := fp
 			if mimicClaudeCode {
-				rewriteFingerprint = claudeCodeMimicryFingerprint(fp)
+				rewriteFingerprint = claudeCodeMimicryFingerprint(fp, calProfile)
 				metadataFingerprint = rewriteFingerprint
 				if rewriteFingerprint != nil {
 					billingUserAgent = rewriteFingerprint.UserAgent
@@ -117,7 +119,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	policyFilterSet := s.getBetaPolicyFilterSet(ctx, c, account, modelID)
 	effectiveDropSet := mergeDropSets(policyFilterSet)
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
-		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
+		calProfile, tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
 	)
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值（由下方 ApplyHeaderOverrides 写入）：
@@ -180,7 +182,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
 	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, reqStream)
+		applyClaudeCodeMimicHeaders(calProfile, req, reqStream)
 	}
 
 	// 写入最终 anthropic-beta header
@@ -364,6 +366,12 @@ func (s *GatewayService) getBetaHeader(modelID string, clientBetaHeader string) 
 	return claude.DefaultBetaHeader
 }
 
+// bodyUsesStructuredOutputs 报告请求体是否使用了 output_config.format json_schema
+// （真身 2.1.211 在此类请求上会追加 structured-outputs beta）。
+func bodyUsesStructuredOutputs(body []byte) bool {
+	return gjson.GetBytes(body, "output_config.format.type").String() == "json_schema"
+}
+
 func requestNeedsBetaFeatures(body []byte) bool {
 	tools := gjson.GetBytes(body, "tools")
 	if tools.Exists() && tools.IsArray() && len(tools.Array()) > 0 {
@@ -464,6 +472,7 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 // 未传”处理。body 是已经 metadata 重写 / billing version sync 之后但未 sanitize 上游
 // 不兼容字段之前的版本。
 func (s *GatewayService) computeFinalAnthropicBeta(
+	profile *claude.CalibratedProfile,
 	tokenType string,
 	mimicClaudeCode bool,
 	modelID string,
@@ -480,7 +489,23 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
 			// mimic 路径强制使用当前 Claude Code profile beta，不透传客户端 beta。
-			requiredBetas := claude.ClaudeCodeMimicryMessageBetasForModel(modelID)
+			// 标定 profile 优先（按端点/模型族/特性分档），未命中回退编译内置常量。
+			hasJSONSchema := bodyUsesStructuredOutputs(body)
+			var requiredBetas []string
+			if profile != nil {
+				if betas, ok := profile.MessageBetas(modelID, bodyHasToolsArray(body), hasJSONSchema); ok {
+					requiredBetas = betas
+				}
+			}
+			if requiredBetas == nil {
+				requiredBetas = claude.ClaudeCodeMimicryMessageBetasForModel(modelID)
+			}
+			// 真身仅在 output_config.format=json_schema 的请求上追加 structured-outputs，
+			// 按请求特性条件追加（而非放进静态默认集合），与抓包一致。mergeAnthropicBetaDropping
+			// 会去重，故即便标定分档已含该 token 也无副作用。
+			if hasJSONSchema {
+				requiredBetas = append(requiredBetas, claude.BetaStructuredOutputs)
+			}
 			if needsExtendedCacheTTL {
 				requiredBetas = append(requiredBetas, claude.BetaExtendedCacheTTL)
 			}
@@ -525,6 +550,7 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 //
 // 返回语义同 computeFinalAnthropicBeta。
 func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
+	profile *claude.CalibratedProfile,
 	tokenType string,
 	mimicClaudeCode bool,
 	modelID string,
@@ -540,7 +566,17 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
-			requiredBetas := claude.ClaudeCodeMimicryCountTokensBetasForModel(modelID)
+			// 标定 profile 的 count_tokens 端点分档优先；未命中回退编译内置常量。
+			// count_tokens 端点不跨端点回退到 messages（两者 beta 集合不同）。
+			var requiredBetas []string
+			if profile != nil {
+				if betas, ok := profile.CountTokensBetas(modelID, bodyHasToolsArray(body), bodyUsesStructuredOutputs(body)); ok {
+					requiredBetas = betas
+				}
+			}
+			if requiredBetas == nil {
+				requiredBetas = claude.ClaudeCodeMimicryCountTokensBetasForModel(modelID)
+			}
 			if needsExtendedCacheTTL {
 				requiredBetas = append(requiredBetas, claude.BetaExtendedCacheTTL)
 			}
@@ -854,28 +890,63 @@ var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream
 // headers when using Claude Code-scoped OAuth credentials.
-func applyClaudeCodeMimicHeaders(req *http.Request, _ bool) {
+//
+// profile 为标定加载器提供的真身 wire profile；非 nil 时其 headers 模板即出站真值，
+// 覆盖编译内置常量；同时删除真身根本不发送的头（profile.absent）。nil 时回退到
+// claude.DefaultHeaders（编译内置常量）。
+func applyClaudeCodeMimicHeaders(profile *claude.CalibratedProfile, req *http.Request, _ bool) {
 	if req == nil {
 		return
 	}
 	// Start with the standard defaults (fill missing).
 	applyClaudeOAuthHeaderDefaults(req)
+	// 选择 header 模板：标定 profile 优先，否则编译内置常量。
+	headers := claude.DefaultHeaders
+	var absent []string
+	if profile != nil {
+		if t := profile.HeaderTemplate(); len(t) > 0 {
+			headers = t
+		}
+		absent = profile.AbsentHeaders()
+	}
 	// Then force key headers to match Claude Code fingerprint regardless of what the client sent.
 	// 使用 resolveWireCasing 确保 key 与真实 wire format 一致（如 "x-app" 而非 "X-App"）
-	for key, value := range claude.DefaultHeaders {
+	for key, value := range headers {
 		if value == "" {
 			continue
 		}
 		setHeaderRaw(req.Header, resolveWireCasing(key), value)
 	}
-	// Real Claude CLI uses Accept: application/json (even for streaming).
-	setHeaderRaw(req.Header, "Accept", "application/json")
-	setHeaderRaw(req.Header, "Accept-Encoding", "gzip, deflate, br, zstd")
-	// Real Claude CLI 每个请求都会生成一个新的 UUID 放在 x-client-request-id。
-	// 上游会以此作为会话/请求指纹的一部分，缺失或重复都可能触发第三方判定。
-	if getHeaderRaw(req.Header, "x-client-request-id") == "" {
-		setHeaderRaw(req.Header, "x-client-request-id", uuid.NewString())
+	// Real Claude CLI uses Accept: application/json (even for streaming). 标定模板若已带
+	// Accept/Accept-Encoding 则以模板为准；否则补齐已知真值（编译内置常量不含这两项）。
+	if getHeaderRaw(req.Header, "Accept") == "" {
+		setHeaderRaw(req.Header, "Accept", "application/json")
 	}
+	if getHeaderRaw(req.Header, "Accept-Encoding") == "" {
+		setHeaderRaw(req.Header, "Accept-Encoding", "gzip, deflate, br, zstd")
+	}
+	// 删除真身不发送的头（如 x-client-request-id）：注入一个真身根本不发的 header 本身
+	// 就是过度伪造、构成第三方特征。标定 profile 用 absent 显式声明这些头。
+	for _, h := range absent {
+		if strings.TrimSpace(h) != "" {
+			deleteHeaderAllForms(req.Header, h)
+		}
+	}
+}
+
+// calibratedProfile 返回当前已加载的标定 profile；无 settingService 或未发布/无效/守卫
+// 未过时返回 nil，调用方回退到编译内置常量（constants.go）。
+func (s *GatewayService) calibratedProfile(ctx context.Context) *claude.CalibratedProfile {
+	if s == nil || s.settingService == nil {
+		return nil
+	}
+	return s.settingService.GetClaudeCalibratedProfile(ctx)
+}
+
+// bodyHasToolsArray 报告请求体是否携带非空 tools 数组（用于标定 beta 分档的 tools 维度）。
+func bodyHasToolsArray(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools")
+	return tools.Exists() && tools.IsArray() && len(tools.Array()) > 0
 }
 
 func truncateForLog(b []byte, maxBytes int) string {
