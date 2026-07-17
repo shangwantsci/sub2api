@@ -67,9 +67,59 @@ echo "COMMIT=${COMMIT}"
 
 如果官方发布了新版本，应先合并/同步上游，让 `backend/cmd/server/VERSION` 跟着更新，再重新构建部署。不要为了消除更新提醒手改成一个不存在的版本号。
 
-## 生产部署流程
+## 生产部署流程（推荐：GitHub Actions 构建 GHCR）
 
-当前服务器使用 Docker Compose 本地镜像部署：
+生产机内存较小，**禁止在生产机执行 `docker build`**。本仓
+`.github/workflows/release.yml` 的 `custom_image_only` 模式会从指定分支构建 GHCR，
+不创建、也不要求新的 Git tag：
+
+```bash
+APP_VERSION="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+
+gh workflow run release.yml \
+  --repo shangwantsci/sub2api \
+  --ref custom/prod \
+  -f tag="v${APP_VERSION}" \
+  -f custom_image_only=true \
+  -f source_ref=custom/prod \
+  -f simple_release=true
+
+gh run list --workflow Release --repo shangwantsci/sub2api --limit 3
+gh run watch --repo shangwantsci/sub2api
+```
+
+其中 `tag` 只是现有 workflow 的兼容必填输入；`custom_image_only=true` 时不会 checkout
+该 tag、不会创建 Release，实际构建 `source_ref`。工作流发布两个镜像 tag：
+
+```text
+ghcr.io/shangwantsci/sub2api:<官方 VERSION>
+ghcr.io/shangwantsci/sub2api:<官方 VERSION>-<8位 commit>
+```
+
+前者供生产 `.env` 延续官方版本 tag；后者是不可变回滚/审计 tag。二进制内部：
+
+- `VERSION` = `backend/cmd/server/VERSION`（官方语义版本）；
+- `COMMIT` = 二开源码 commit。
+
+GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
+
+```bash
+cd /opt/sub2api-production
+APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
+cp .env "backups/.env.$(date +%Y%m%d-%H%M%S)"
+sed -i "s#^SUB2API_IMAGE=.*#SUB2API_IMAGE=ghcr.io/shangwantsci/sub2api:${APP_VERSION}#" .env
+docker compose -f docker-compose.local.yml -f docker-compose.override.yml pull sub2api
+docker compose -f docker-compose.local.yml -f docker-compose.override.yml up -d --no-deps sub2api
+curl -fsS http://127.0.0.1:18080/health
+docker exec sub2api /app/sub2api --version
+```
+
+这样镜像构建完全在 GitHub runner 上完成，不占用生产机 CPU/内存。
+
+## 生产部署流程（仅应急：服务器本地构建）
+
+以下流程仅在 GHCR/GitHub Actions 不可用时应急使用。服务器本地构建会显著争抢
+CPU/内存，可能同时造成管理页加载超时和网关 TTFT 升高。
 
 - 生产目录：`/opt/sub2api-production`
 - release 目录：`/opt/sub2api-production/releases/<commit>`

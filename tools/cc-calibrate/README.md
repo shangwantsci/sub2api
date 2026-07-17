@@ -97,27 +97,37 @@ built-in bytes.
 - `publish.js` — POST a profile to the gateway admin API using Node's fetch (no curl).
 - `watch.sh` — self-update loop (detect new version → calibrate → publish).
 
-## Fully automatic on the production server (recommended)
+## Fully automatic via GitHub Actions (recommended for production)
 
-`deploy/docker-compose.yml` ships an **opt-in `cc-calibrate` sidecar** that runs on the
-same host as the gateway and closes the whole loop with zero manual steps after a
-one-time setup: it follows new Claude Code CLI versions, calibrates the profile (real
-CLI, dummy token, no account spent), and auto-publishes it to the gateway (hot-loaded
-in ~60s). It runs the calibration **in-process inside its own node container**
-(`CC_CALIBRATE_INPROC=1`), so the host does **not** need Docker-in-Docker.
+The `claude-calibration` job in `.github/workflows/release.yml` runs every 6 hours on a
+GitHub-hosted Linux x64 runner. It installs the latest real CLI, captures it with the
+dummy-token shim, requires the fingerprint guard to pass, retains raw capture + profile
+as a 14-day artifact, then publishes the profile to the gateway. The production host
+does no npm install/CLI execution, so gateway CPU/RAM and TTFT are unaffected.
 
-Enable once:
+Configure repository secrets once:
 
 ```bash
-# 1) Admin → Settings → Gateway: create/copy the Admin API Key
-# 2) put it in .env
-echo "CC_CALIBRATE_ADMIN_API_KEY=<key>" >> deploy/.env
-# 3) start the sidecar (default profile stays untouched without --profile)
-docker compose --profile calibrate up -d
+gh secret set CC_CALIBRATE_GATEWAY_URL \
+  --repo shangwantsci/sub2api --body "https://your-gateway.example.com"
+gh secret set CC_CALIBRATE_ADMIN_API_KEY \
+  --repo shangwantsci/sub2api --body "<Admin API Key>"
 ```
 
-Tunables (`.env`): `CC_CALIBRATE_POLL_SECONDS` (default 21600 = 6h),
-`CC_CALIBRATE_MODELS`, `CC_CALIBRATE_GATEWAY_URL` (default `http://sub2api:8080`).
+The scheduled workflow becomes active when this workflow version is present on the
+repository default branch. It can also be run manually (without a Git tag):
+
+```bash
+gh workflow run release.yml --repo shangwantsci/sub2api --ref custom/prod \
+  -f tag=v0.1.156 -f calibrate_only=true -f source_ref=custom/prod
+```
+
+## Optional production-host sidecar
+
+`deploy/docker-compose.yml` still includes an opt-in `cc-calibrate` sidecar for hosts
+with ample spare CPU/RAM. Do **not** use it on a small shared production host: npm install
+and multiple real CLI processes can temporarily increase gateway TTFT. Enable only with
+`docker compose --profile calibrate up -d` after configuring `CC_CALIBRATE_ADMIN_API_KEY`.
 
 ## Self-update loop (manual / other hosts)
 
