@@ -2,12 +2,19 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
+当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
+
+```text
+docs/FORK_PROJECT_MEMORY.md
+```
+
 ## 核心原则
 
-- **镜像 tag 用二开 commit**：例如 `sub2api-local:8885fdf5`，方便回滚和定位代码。
+- **生产镜像由 GitHub Actions 构建**：生产机只 pull，不执行 `docker build`。
+- **GHCR 同时保留两种 tag**：官方版本 tag（生产）与 `<官方版本>-<commit>`（不可变审计/回滚）。
 - **应用版本号用官方版本号**：即 `backend/cmd/server/VERSION`，例如 `0.1.139`。不要把 commit hash 当作 `VERSION`，否则后台会把当前版本识别成非官方语义版本，并持续提示有新版本。
 - **只切换应用容器镜像**：生产数据目录、Postgres、Redis、Caddy 配置不随应用发布改动。
-- **先构建镜像，再切换 `.env`**：构建失败时旧容器继续运行，不进入半部署状态。
+- **先完成 Actions 构建，再在生产 pull/recreate**：构建失败时旧容器继续运行，不进入半部署状态。
 - **生产构建使用仓库根 `Dockerfile` 或已对齐的 `deploy/Dockerfile`**：两者都应固定 `pnpm@9` 并支持 `VERSION` 注入。
 
 ## 本地提交流程
@@ -63,7 +70,8 @@ echo "COMMIT=${COMMIT}"
 
 - `VERSION`：给后台更新检查使用，必须保持官方语义版本。
 - `COMMIT`：给排查问题使用，记录当前二开代码提交。
-- Docker 镜像 tag：使用 commit，例如 `sub2api-local:${COMMIT}`。
+- Docker 镜像 tag：`ghcr.io/shangwantsci/sub2api:${VERSION}` 与
+  `ghcr.io/shangwantsci/sub2api:${VERSION}-${COMMIT}`。
 
 如果官方发布了新版本，应先合并/同步上游，让 `backend/cmd/server/VERSION` 跟着更新，再重新构建部署。不要为了消除更新提醒手改成一个不存在的版本号。
 
