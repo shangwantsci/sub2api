@@ -1533,6 +1533,22 @@ func (h *AccountHandler) RefreshCookieAuth(c *gin.Context) {
 			)
 		}
 	}
+	if h.rateLimitService != nil &&
+		(account.TempUnschedulableUntil != nil || strings.TrimSpace(account.TempUnschedulableReason) != "") {
+		if clearErr := h.rateLimitService.ClearOAuthRefreshTemporaryBlock(ctx, accountID); clearErr != nil {
+			slog.Warn("refresh_cookie_auth.clear_temporary_block_failed",
+				"account_id", accountID,
+				"error", clearErr,
+			)
+		} else if reloaded, reloadErr := h.adminService.GetAccount(ctx, accountID); reloadErr != nil {
+			slog.Warn("refresh_cookie_auth.reload_account_failed",
+				"account_id", accountID,
+				"error", reloadErr,
+			)
+		} else {
+			updatedAccount = reloaded
+		}
+	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
 }
@@ -1685,6 +1701,23 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 			)
 		} else if cleared != nil {
 			updatedAccount = cleared
+		}
+	}
+	if replaceChromeCredentials &&
+		h.rateLimitService != nil &&
+		(existing.TempUnschedulableUntil != nil || strings.TrimSpace(existing.TempUnschedulableReason) != "") {
+		if clearErr := h.rateLimitService.ClearOAuthRefreshTemporaryBlock(ctx, accountID); clearErr != nil {
+			slog.Warn("apply_oauth_credentials.clear_temporary_block_failed",
+				"account_id", accountID,
+				"err", clearErr,
+			)
+		} else if reloaded, reloadErr := h.adminService.GetAccount(ctx, accountID); reloadErr != nil {
+			slog.Warn("apply_oauth_credentials.reload_account_failed",
+				"account_id", accountID,
+				"err", reloadErr,
+			)
+		} else {
+			updatedAccount = reloaded
 		}
 	}
 

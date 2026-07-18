@@ -52,11 +52,28 @@ func (r *ClaudeTokenRefresher) CanRefresh(account *Account) bool {
 // NeedsRefresh 检查token是否需要刷新
 // 基于 expires_at 字段判断是否在刷新窗口内
 func (r *ClaudeTokenRefresher) NeedsRefresh(account *Account, refreshWindow time.Duration) bool {
+	if accountNeedsClaudeChromeOAuth401Recovery(account) {
+		return true
+	}
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	if expiresAt == nil {
 		return false
 	}
 	return time.Until(*expiresAt) < refreshWindow
+}
+
+// accountNeedsClaudeChromeOAuth401Recovery detects the temporary quarantine
+// written by RateLimitService after Anthropic rejects an access token. Chrome
+// OAuth tokens can be revoked before their advertised expires_at, so expiry
+// alone is not a sufficient refresh trigger. Legacy Claude OAuth profiles are
+// deliberately excluded.
+func accountNeedsClaudeChromeOAuth401Recovery(account *Account) bool {
+	if account == nil || !account.IsClaudeChromeOAuth() {
+		return false
+	}
+	reason := strings.ToLower(strings.TrimSpace(account.TempUnschedulableReason))
+	return strings.HasPrefix(reason, "oauth 401:") ||
+		strings.HasPrefix(reason, "authentication failed (401):")
 }
 
 // Refresh 执行token刷新

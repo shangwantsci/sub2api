@@ -446,9 +446,13 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 					slog.Warn("oauth_401_invalidate_cache_failed", "account_id", authAccount.ID, "error", err)
 				}
 			}
-			// 缺少 refresh_token 的 OAuth 账号无法在冷却期内自愈（后台刷新服务也会跳过），
-			// 直接走 SetError 永久禁用，避免冷却结束后再被选中产生一发无意义的 502。
-			if strings.TrimSpace(authAccount.GetCredential("refresh_token")) == "" {
+			// 普通 OAuth 账号缺少 refresh_token 时无法自愈。Claude Chrome 是例外：
+			// 只要保留了 sessionKey，后台刷新器就能从 "no refresh token available"
+			// 自动回退到完整的 cookie re-authorization。
+			hasRefreshToken := strings.TrimSpace(authAccount.GetCredential("refresh_token")) != ""
+			hasClaudeChromeSessionFallback := authAccount.IsClaudeChromeOAuth() &&
+				strings.TrimSpace(authAccount.GetCredential("session_key")) != ""
+			if !hasRefreshToken && !hasClaudeChromeSessionFallback {
 				msg := "Authentication failed (401): refresh_token missing, cannot recover"
 				if upstreamMsg != "" {
 					msg = "OAuth 401 (no refresh_token): " + upstreamMsg
@@ -2019,6 +2023,22 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	// 同时清除模型级别限流
 	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
+	}
+	s.notifyAccountSchedulingBlockCleared(accountID)
+	return nil
+}
+
+// ClearOAuthRefreshTemporaryBlock clears only the account-wide temporary
+// scheduling block recovered by a successful OAuth credential rotation. Model
+// rate limits are intentionally preserved.
+func (s *RateLimitService) ClearOAuthRefreshTemporaryBlock(ctx context.Context, accountID int64) error {
+	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
+		return err
+	}
+	if s.tempUnschedCache != nil {
+		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, accountID); err != nil {
+			slog.Warn("oauth_refresh_temp_unsched_cache_delete_failed", "account_id", accountID, "error", err)
+		}
 	}
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil

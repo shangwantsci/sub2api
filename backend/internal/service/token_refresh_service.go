@@ -75,6 +75,7 @@ type TokenRefreshService struct {
 	tempUnschedCache TempUnschedCache // 用于清除 Redis 中的临时不可调度缓存
 	refreshAPI       *OAuthRefreshAPI // 统一刷新 API
 	runtimeBlocker   AccountRuntimeBlocker
+	rateLimitService *RateLimitService
 
 	// OpenAI privacy: 刷新成功后检查并设置 training opt-out
 	privacyClientFactory PrivacyClientFactory
@@ -192,6 +193,10 @@ func (s *TokenRefreshService) SetRefreshPolicy(policy BackgroundRefreshPolicy) {
 
 func (s *TokenRefreshService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocker) {
 	s.runtimeBlocker = blocker
+}
+
+func (s *TokenRefreshService) SetRateLimitService(rateLimitService *RateLimitService) {
+	s.rateLimitService = rateLimitService
 }
 
 func (s *TokenRefreshService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {
@@ -871,6 +876,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 ) error {
 	var lastErr error
 	maxRetries := s.maxRetries()
+	recoveringClaudeChromeOAuth401 := accountNeedsClaudeChromeOAuth401Recovery(account)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -981,7 +987,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				s.postRefreshStateSyncWithCleanup(ctx, account)
 				return nil
 			}
-			s.postRefreshActions(ctx, account)
+			s.postRefreshActions(ctx, account, recoveringClaudeChromeOAuth401)
 			return nil
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -1301,7 +1307,11 @@ func (s *TokenRefreshService) retryBackoff(accountID int64, attempt int) time.Du
 }
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
-func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *Account) {
+func (s *TokenRefreshService) postRefreshActions(
+	ctx context.Context,
+	account *Account,
+	recoveringClaudeChromeOAuth401 bool,
+) {
 	s.clearAntigravityForceTokenRefresh(ctx, account, "success")
 
 	// Antigravity 账户：如果之前是因为缺少 project_id 而标记为 error，现在成功获取到了，清除错误状态
@@ -1319,7 +1329,16 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 		}
 	}
 	// 刷新成功后清除临时不可调度状态（处理 OAuth 401 恢复场景）
-	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
+	tempStateAlreadyCleared := recoveringClaudeChromeOAuth401 &&
+		account.IsClaudeChromeOAuth() &&
+		account.TempUnschedulableUntil == nil &&
+		strings.TrimSpace(account.TempUnschedulableReason) == ""
+	clearTempRuntimeBlock := tempStateAlreadyCleared
+	clearTempCache := tempStateAlreadyCleared
+	hasActiveTempBlock := account.TempUnschedulableUntil != nil &&
+		time.Now().Before(*account.TempUnschedulableUntil)
+	if hasActiveTempBlock && (!account.IsClaudeChromeOAuth() || recoveringClaudeChromeOAuth401) {
+		clearTempCache = true
 		if clearErr := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); clearErr != nil {
 			slog.Warn("token_refresh.clear_temp_unschedulable_failed",
 				"account_id", account.ID,
@@ -1327,9 +1346,19 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 			)
 		} else {
 			slog.Info("token_refresh.cleared_temp_unschedulable", "account_id", account.ID)
-			s.notifyAccountSchedulingBlockCleared(account.ID)
+			clearTempRuntimeBlock = true
 		}
-		// 同步清除 Redis 缓存，避免调度器读到过期的临时不可调度状态
+	}
+	if clearTempRuntimeBlock {
+		if account.IsClaudeChromeOAuth() && s.rateLimitService != nil {
+			s.rateLimitService.clearLocalAccountSchedulingBlock(account.ID)
+		}
+		s.notifyAccountSchedulingBlockCleared(account.ID)
+	}
+	// 同步清除 Redis 缓存，避免调度器读到过期的临时不可调度状态。
+	// Claude Chrome 的 CAS 会原子清空数据库字段，因此即使回读快照中已无
+	// TempUnschedulableUntil，也仍需清理运行时阻断与 Redis 镜像。
+	if clearTempCache {
 		if s.tempUnschedCache != nil {
 			if clearErr := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); clearErr != nil {
 				slog.Warn("token_refresh.clear_temp_unsched_cache_failed",

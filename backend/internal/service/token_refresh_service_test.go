@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 	"time"
@@ -315,6 +316,8 @@ func (r *tokenRefreshAccountRepo) UpdateClaudeChromeOAuthCredentialsIfUnchanged(
 	r.updateCalls++
 	r.updateCredentialsCalls++
 	account.Credentials = shallowCopyMap(credentials)
+	account.TempUnschedulableUntil = nil
+	account.TempUnschedulableReason = ""
 	r.lastAccount = account
 	return true, nil
 }
@@ -1061,7 +1064,9 @@ func TestTokenRefreshService_RefreshWithRetry_NonRetryableErrorAllPlatforms(t *t
 				ID:       16,
 				Platform: tt.platform,
 				Type:     AccountTypeOAuth,
+				Status:   StatusActive,
 			}
+			repo.accountsByID = map[int64]*Account{account.ID: account}
 			refresher := &tokenRefresherStub{
 				err: errors.New("invalid_grant: token revoked"),
 			}
@@ -1223,6 +1228,194 @@ func TestPathA_Success(t *testing.T) {
 	require.Equal(t, 1, repo.updateCalls)   // DB 更新被调用
 	require.Equal(t, 1, invalidator.calls)  // 缓存失效被调用
 	require.Equal(t, 1, cache.releaseCalls) // 锁被释放
+}
+
+func TestPathA_ClaudeChromeOAuth401BeforeExpiryForcesSessionFallbackAndClearsCooldown(t *testing.T) {
+	until := time.Now().Add(10 * time.Minute)
+	account := &Account{
+		ID:                      105,
+		Platform:                PlatformAnthropic,
+		Type:                    AccountTypeOAuth,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &until,
+		TempUnschedulableReason: "OAuth 401: OAuth access token has been revoked.",
+		Credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "revoked-access",
+			"refresh_token": "current-refresh",
+			"session_key":   "valid-session",
+			"expires_at":    time.Now().Add(8 * time.Hour).Unix(),
+		},
+	}
+	repo := &tokenRefreshAccountRepo{snapshotReads: true}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	cache := &mockTokenCacheForRefreshAPI{lockResult: true}
+	invalidator := &tokenCacheInvalidatorStub{}
+
+	refreshCalls := 0
+	sessionFallbackCalls := 0
+	oauthService := NewOAuthService(nil, &mockClaudeOAuthClient{
+		refreshTokenFunc: func(_ context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
+			refreshCalls++
+			require.Equal(t, "current-refresh", refreshToken)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return nil, errors.New("token refresh failed: status 400, body: invalid_grant")
+		},
+		getOrgUUIDFunc: func(_ context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			sessionFallbackCalls++
+			require.Equal(t, "valid-session", sessionKey)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return "org-uuid", nil
+		},
+		getAuthCodeFunc: func(_ context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			require.Equal(t, "valid-session", sessionKey)
+			require.Equal(t, "org-uuid", orgUUID)
+			require.Equal(t, oauth.ScopeChrome, scope)
+			require.NotEmpty(t, codeChallenge)
+			require.NotEmpty(t, state)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return "authorization-code", nil
+		},
+		exchangeCodeFunc: func(_ context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
+			require.Equal(t, "authorization-code", code)
+			require.NotEmpty(t, codeVerifier)
+			require.NotEmpty(t, state)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return &oauth.TokenResponse{
+				AccessToken:  "fresh-access",
+				RefreshToken: "fresh-refresh",
+				TokenType:    "Bearer",
+				ExpiresIn:    28800,
+				Scope:        oauth.ScopeChrome,
+			}, nil
+		},
+	})
+	defer oauthService.Stop()
+	refresher := NewClaudeTokenRefresher(oauthService)
+	cfg := &config.Config{TokenRefresh: config.TokenRefreshConfig{MaxRetries: 1}}
+	tempCache := &tempUnschedCacheStub{}
+	runtimeBlocker := &tokenRefreshRuntimeBlocker{}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, tempCache)
+	rateLimitService.blockLocalAccountScheduling(account.ID, until, account.TempUnschedulableReason, http.StatusUnauthorized)
+	require.True(t, rateLimitService.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
+	refreshService := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, tempCache)
+	refreshService.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache))
+	refreshService.SetAccountRuntimeBlocker(runtimeBlocker)
+	refreshService.SetRateLimitService(rateLimitService)
+
+	err := refreshService.refreshWithRetry(context.Background(), account, refresher, refresher, 30*time.Minute)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, refreshCalls)
+	require.Equal(t, 1, sessionFallbackCalls)
+	require.Equal(t, "fresh-access", account.GetCredential("access_token"))
+	require.Equal(t, "fresh-refresh", account.GetCredential("refresh_token"))
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Empty(t, account.TempUnschedulableReason)
+	require.Zero(t, repo.clearTempCalls, "Chrome success CAS should clear the OAuth 401 cooldown atomically")
+	require.Equal(t, 1, tempCache.deleteCalls, "the stale Redis cooldown mirror must be removed")
+	require.Equal(t, 1, runtimeBlocker.clearCalls, "the in-process scheduling block must be removed")
+	require.False(t, rateLimitService.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
+}
+
+func TestPathA_ClaudeChromeOAuth401WithoutRefreshTokenUsesSessionFallback(t *testing.T) {
+	until := time.Now().Add(10 * time.Minute)
+	account := &Account{
+		ID:                      106,
+		Platform:                PlatformAnthropic,
+		Type:                    AccountTypeOAuth,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &until,
+		TempUnschedulableReason: "OAuth 401: OAuth access token has been revoked.",
+		Credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+			"access_token": "revoked-access",
+			"session_key":  "valid-session",
+			"expires_at":   time.Now().Add(8 * time.Hour).Unix(),
+		},
+	}
+	repo := &tokenRefreshAccountRepo{snapshotReads: true}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	cache := &mockTokenCacheForRefreshAPI{lockResult: true}
+	invalidator := &tokenCacheInvalidatorStub{}
+
+	sessionFallbackCalls := 0
+	oauthService := NewOAuthService(nil, &mockClaudeOAuthClient{
+		refreshTokenFunc: func(context.Context, string, string, oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
+			t.Fatal("refresh endpoint must not be called without a refresh_token")
+			return nil, nil
+		},
+		getOrgUUIDFunc: func(_ context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			sessionFallbackCalls++
+			require.Equal(t, "valid-session", sessionKey)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return "org-uuid", nil
+		},
+		getAuthCodeFunc: func(_ context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			require.Equal(t, "valid-session", sessionKey)
+			require.Equal(t, "org-uuid", orgUUID)
+			require.Equal(t, oauth.ScopeChrome, scope)
+			require.NotEmpty(t, codeChallenge)
+			require.NotEmpty(t, state)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return "authorization-code", nil
+		},
+		exchangeCodeFunc: func(_ context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
+			require.Equal(t, "authorization-code", code)
+			require.NotEmpty(t, codeVerifier)
+			require.NotEmpty(t, state)
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return &oauth.TokenResponse{
+				AccessToken:  "fresh-access",
+				RefreshToken: "fresh-refresh",
+				TokenType:    "Bearer",
+				ExpiresIn:    28800,
+				Scope:        oauth.ScopeChrome,
+			}, nil
+		},
+	})
+	defer oauthService.Stop()
+
+	refresher := NewClaudeTokenRefresher(oauthService)
+	tempCache := &tempUnschedCacheStub{}
+	runtimeBlocker := &tokenRefreshRuntimeBlocker{}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, tempCache)
+	rateLimitService.blockLocalAccountScheduling(account.ID, until, account.TempUnschedulableReason, http.StatusUnauthorized)
+	refreshService := NewTokenRefreshService(
+		repo,
+		nil,
+		nil,
+		nil,
+		nil,
+		invalidator,
+		nil,
+		&config.Config{TokenRefresh: config.TokenRefreshConfig{MaxRetries: 1}},
+		tempCache,
+	)
+	refreshService.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache))
+	refreshService.SetAccountRuntimeBlocker(runtimeBlocker)
+	refreshService.SetRateLimitService(rateLimitService)
+
+	err := refreshService.refreshWithRetry(context.Background(), account, refresher, refresher, 30*time.Minute)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, sessionFallbackCalls)
+	require.Equal(t, "fresh-access", account.GetCredential("access_token"))
+	require.Equal(t, "fresh-refresh", account.GetCredential("refresh_token"))
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Empty(t, account.TempUnschedulableReason)
+	require.Equal(t, 1, tempCache.deleteCalls)
+	require.Equal(t, 1, runtimeBlocker.clearCalls)
+	require.False(t, rateLimitService.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
 }
 
 func TestPathA_GrokSuccessPersistenceFailureContainsProviderWithoutRetryOrMutation(t *testing.T) {

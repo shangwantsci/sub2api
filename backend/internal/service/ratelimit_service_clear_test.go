@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -117,6 +118,24 @@ func TestRateLimitService_ClearRateLimit_ClearTempUnschedulableFailed(t *testing
 
 	require.Equal(t, 1, repo.clearTempUnschedCalls)
 	require.Empty(t, cache.deletedIDs)
+}
+
+func TestRateLimitService_ClearOAuthRefreshTemporaryBlock_PreservesModelLimits(t *testing.T) {
+	repo := &rateLimitClearRepoStub{}
+	cache := &tempUnschedCacheRecorder{}
+	blocker := &runtimeBlockRecorder{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+	svc.SetAccountRuntimeBlocker(blocker)
+	svc.blockLocalAccountScheduling(16, time.Now().Add(time.Minute), "oauth 401", http.StatusUnauthorized)
+
+	err := svc.ClearOAuthRefreshTemporaryBlock(context.Background(), 16)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.clearTempUnschedCalls)
+	require.Zero(t, repo.clearModelRateLimitCalls)
+	require.Equal(t, []int64{16}, cache.deletedIDs)
+	require.Equal(t, []int64{16}, blocker.clearedIDs)
+	require.False(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), &Account{ID: 16}))
 }
 
 func TestRateLimitService_ClearRateLimit_ClearRateLimitFailed(t *testing.T) {

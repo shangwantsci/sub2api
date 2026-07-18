@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -175,6 +176,59 @@ func TestClaudeTokenRefresher_NeedsRefresh_OutsideWindow(t *testing.T) {
 
 			got := refresher.NeedsRefresh(account, refreshWindow)
 			require.False(t, got, "should not need refresh when outside window")
+		})
+	}
+}
+
+func TestClaudeTokenRefresher_NeedsRefresh_ClaudeChromeOAuth401BeforeExpiry(t *testing.T) {
+	refresher := &ClaudeTokenRefresher{}
+	futureExpiry := strconv.FormatInt(time.Now().Add(8*time.Hour).Unix(), 10)
+
+	tests := []struct {
+		name        string
+		oauthClient string
+		reason      string
+		want        bool
+	}{
+		{
+			name:        "revoked Chrome token forces refresh",
+			oauthClient: oauth.OAuthClientClaudeChrome,
+			reason:      "OAuth 401: OAuth access token has been revoked.",
+			want:        true,
+		},
+		{
+			name:        "generic Chrome 401 forces refresh",
+			oauthClient: oauth.OAuthClientClaudeChrome,
+			reason:      "Authentication failed (401): invalid or expired credentials",
+			want:        true,
+		},
+		{
+			name:        "unrelated Chrome cooldown does not force refresh",
+			oauthClient: oauth.OAuthClientClaudeChrome,
+			reason:      "upstream overloaded",
+			want:        false,
+		},
+		{
+			name:        "legacy Claude OAuth behavior is unchanged",
+			oauthClient: oauth.OAuthClientClaudeCode,
+			reason:      "OAuth 401: invalid credentials",
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{
+				Platform: PlatformAnthropic,
+				Type:     AccountTypeOAuth,
+				Credentials: map[string]any{
+					"oauth_client": tt.oauthClient,
+					"expires_at":   futureExpiry,
+				},
+				TempUnschedulableReason: tt.reason,
+			}
+
+			require.Equal(t, tt.want, refresher.NeedsRefresh(account, 30*time.Minute))
 		})
 	}
 }

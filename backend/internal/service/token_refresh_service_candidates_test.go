@@ -40,6 +40,8 @@ func (r *tokenRefreshCandidateRepo) ListOAuthRefreshCandidatePage(_ context.Cont
 			continue
 		}
 		refreshToken, _ := account.Credentials["refresh_token"].(string)
+		hasClaudeChromeSessionFallback := account.IsClaudeChromeOAuth() &&
+			strings.TrimSpace(account.GetCredential("session_key")) != ""
 		inRetryCooldown := account.TempUnschedulableUntil != nil &&
 			account.TempUnschedulableUntil.After(now) &&
 			strings.HasPrefix(account.TempUnschedulableReason, "token refresh retry exhausted:")
@@ -53,7 +55,7 @@ func (r *tokenRefreshCandidateRepo) ListOAuthRefreshCandidatePage(_ context.Cont
 		if options.ActiveOnly && account.Status != StatusActive ||
 			account.Type != AccountTypeOAuth ||
 			!platformAllowed ||
-			options.RequireRefreshToken && strings.TrimSpace(refreshToken) == "" ||
+			options.RequireRefreshToken && strings.TrimSpace(refreshToken) == "" && !hasClaudeChromeSessionFallback ||
 			options.ExcludeRetryCooldown && inRetryCooldown {
 			continue
 		}
@@ -164,6 +166,18 @@ func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing
 				TempUnschedulableUntil:  &future,
 				TempUnschedulableReason: "OAuth 401: unauthorized",
 			},
+			{
+				ID:       7,
+				Platform: PlatformAnthropic,
+				Type:     AccountTypeOAuth,
+				Status:   StatusActive,
+				Credentials: map[string]any{
+					"oauth_client": "claude_chrome",
+					"session_key":  "valid-session",
+				},
+				TempUnschedulableUntil:  &future,
+				TempUnschedulableReason: "OAuth 401: access token revoked",
+			},
 		},
 	}
 	svc := &TokenRefreshService{
@@ -173,6 +187,7 @@ func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing
 			{platform: PlatformOpenAI, refresher: &tokenRefreshTestRefresher{}},
 			{platform: PlatformGemini, refresher: &tokenRefreshTestRefresher{}},
 			{platform: PlatformAntigravity, refresher: &tokenRefreshTestRefresher{}},
+			{platform: PlatformAnthropic, refresher: &tokenRefreshTestRefresher{}},
 		},
 		refreshPolicy: DefaultBackgroundRefreshPolicy(),
 		cfg:           &config.TokenRefreshConfig{RefreshBeforeExpiryHours: 1, MaxRetries: 1},
@@ -181,8 +196,8 @@ func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing
 	svc.processRefresh()
 
 	require.Zero(t, repo.listActiveCalls, "TokenRefreshService should not use the broad active-account query")
-	require.ElementsMatch(t, []int64{1, 6}, repo.updatedCredentialIDs)
-	require.Equal(t, 1, repo.clearTempCalls, "successful refresh should clear the OAuth 401 temp-unschedulable state")
+	require.ElementsMatch(t, []int64{1, 6, 7}, repo.updatedCredentialIDs)
+	require.Equal(t, 2, repo.clearTempCalls, "successful refresh should clear the OAuth 401 temp-unschedulable state")
 }
 
 func TestTokenRefreshService_RefreshFailureDoesNotCallPrivacy(t *testing.T) {

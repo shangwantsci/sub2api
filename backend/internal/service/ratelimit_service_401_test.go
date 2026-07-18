@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,6 +148,41 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 		require.Equal(t, true, account.Extra[antigravityForceTokenRefreshExtraKey])
 		require.Len(t, invalidator.accounts, 1)
 		require.Equal(t, int64(100), invalidator.accounts[0].ID)
+	})
+
+	t.Run("claude_chrome_401_marks_automatic_refresh_signal", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		invalidator := &tokenCacheInvalidatorRecorder{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetTokenCacheInvalidator(invalidator)
+		account := &Account{
+			ID:       102,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"oauth_client":  oauth.OAuthClientClaudeChrome,
+				"access_token":  "revoked-at",
+				"refresh_token": "rt-102",
+				"expires_at":    time.Now().Add(8 * time.Hour).Unix(),
+			},
+		}
+
+		shouldDisable := service.HandleUpstreamError(
+			context.Background(),
+			account,
+			http.StatusUnauthorized,
+			http.Header{},
+			[]byte(`{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."}}`),
+		)
+
+		require.True(t, shouldDisable)
+		require.Equal(t, 0, repo.setErrorCalls)
+		require.Equal(t, 1, repo.tempCalls)
+		require.Contains(t, repo.lastTempReason, "OAuth access token has been revoked")
+		account.TempUnschedulableReason = repo.lastTempReason
+		require.True(t, accountNeedsClaudeChromeOAuth401Recovery(account))
+		require.Len(t, invalidator.accounts, 1)
 	})
 }
 
@@ -310,13 +346,42 @@ func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t 
 		require.Equal(t, 0, repo.tempCalls)
 	})
 
-	t.Run("antigravity_no_refresh_token_sets_error", func(t *testing.T) {
+	t.Run("claude_chrome_session_fallback_without_refresh_token_stays_recoverable", func(t *testing.T) {
 		repo := &rateLimitAccountRepoStub{}
 		invalidator := &tokenCacheInvalidatorRecorder{}
 		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 		service.SetTokenCacheInvalidator(invalidator)
 		account := &Account{
 			ID:       2883,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"oauth_client": oauth.OAuthClientClaudeChrome,
+				"access_token": "revoked-at",
+				"session_key":  "valid-session",
+				"expires_at":   time.Now().Add(8 * time.Hour).Unix(),
+			},
+		}
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("unauthorized"))
+
+		require.True(t, shouldDisable)
+		require.Zero(t, repo.setErrorCalls, "a stored sessionKey keeps Claude Chrome recoverable")
+		require.Equal(t, 1, repo.tempCalls)
+		require.Contains(t, repo.lastTempReason, "Authentication failed (401)")
+		account.TempUnschedulableReason = repo.lastTempReason
+		require.True(t, accountNeedsClaudeChromeOAuth401Recovery(account))
+		require.Len(t, invalidator.accounts, 1)
+	})
+
+	t.Run("antigravity_no_refresh_token_sets_error", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		invalidator := &tokenCacheInvalidatorRecorder{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetTokenCacheInvalidator(invalidator)
+		account := &Account{
+			ID:       2884,
 			Platform: PlatformAntigravity,
 			Type:     AccountTypeOAuth,
 			Credentials: map[string]any{

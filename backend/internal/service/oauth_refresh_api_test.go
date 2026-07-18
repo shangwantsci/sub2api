@@ -133,6 +133,8 @@ func (r *refreshAPIAccountRepo) UpdateClaudeChromeOAuthCredentialsIfUnchanged(
 	r.updateCalls++
 	r.updateCredentialsCalls++
 	r.account.Credentials = shallowCopyMap(credentials)
+	r.account.TempUnschedulableUntil = nil
+	r.account.TempUnschedulableReason = ""
 	return true, nil
 }
 

@@ -827,8 +827,19 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	}
 	if options.RequireRefreshToken {
 		query += `
-			AND credentials ? 'refresh_token'
-			AND btrim(credentials->>'refresh_token') <> ''`
+			AND (
+				(
+					credentials ? 'refresh_token'
+					AND btrim(credentials->>'refresh_token') <> ''
+				)
+				OR (
+					platform = 'anthropic'
+					AND type = 'oauth'
+					AND credentials->>'oauth_client' = 'claude_chrome'
+					AND credentials ? 'session_key'
+					AND btrim(credentials->>'session_key') <> ''
+				)
+			)`
 	}
 	if options.ExcludeRetryCooldown {
 		query += `
@@ -1168,6 +1179,8 @@ func (r *accountRepository) UpdateClaudeChromeOAuthCredentialsIfUnchanged(
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET credentials = $1::jsonb,
+			temp_unschedulable_until = NULL,
+			temp_unschedulable_reason = NULL,
 			updated_at = NOW()
 		WHERE a.id = $2
 			AND a.deleted_at IS NULL
@@ -1308,8 +1321,8 @@ func (r *accountRepository) ApplyClaudeOAuthProfileCredentialsIfUnchanged(
 			status = CASE WHEN a.status = $3 THEN $4 ELSE a.status END,
 			error_message = CASE WHEN a.status = $3 THEN '' ELSE a.error_message END,
 			schedulable = CASE WHEN a.status = $3 THEN TRUE ELSE a.schedulable END,
-			temp_unschedulable_until = CASE WHEN a.status = $3 THEN NULL ELSE a.temp_unschedulable_until END,
-			temp_unschedulable_reason = CASE WHEN a.status = $3 THEN '' ELSE a.temp_unschedulable_reason END,
+			temp_unschedulable_until = NULL,
+			temp_unschedulable_reason = NULL,
 			extra = COALESCE(a.extra, '{}'::jsonb) || $5::jsonb,
 			updated_at = NOW()
 		WHERE a.id = $6
