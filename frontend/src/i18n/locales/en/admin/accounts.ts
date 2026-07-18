@@ -301,6 +301,9 @@ export default {
       testConnection: 'Test Connection',
       reAuthorize: 'Re-Authorize',
       refreshToken: 'Refresh Token',
+      refreshWithSessionKey: 'Re-authorize with SessionKey',
+      refreshWithSessionKeySuccess: 'Tokens updated with SessionKey',
+      refreshWithSessionKeyFailed: 'SessionKey re-authorization failed',
       noAccountsYet: 'No accounts yet',
       createFirstAccount: 'Create your first account to start using AI services.',
       tokenRefreshed: 'Token refreshed successfully',
@@ -809,6 +812,9 @@ export default {
         cookieAutoAuth: 'Cookie Auto-Auth',
         cookieAutoAuthDesc:
           'Use claude.ai sessionKey to automatically complete OAuth authorization without manually opening browser.',
+        chromeCookieAuth: 'Chrome Cookie Authorization',
+        chromeCookieAuthDesc:
+          'Authorize with the Claude for Chrome OAuth client. Tokens refresh automatically and the stored sessionKey recovers an invalid refresh token.',
         anthropicSessionBulkImport: 'Bulk import sessionKeys',
         anthropicSessionBulkImportDesc:
           'Paste one claude.ai sessionKey per line. Import exchanges setup tokens, assigns proxies automatically, and names accounts by email + subscription type.',
@@ -829,7 +835,7 @@ export default {
         step4: 'Find Cookies → https://claude.ai',
         step5: 'Find the row with key sessionKey',
         step6: 'Copy the Value',
-        sessionKeyFormat: 'sessionKey usually starts with sk-ant-sid01-',
+        sessionKeyFormat: 'sessionKey usually starts with sk-ant-sid01- or sk-ant-sid02-',
         startAutoAuth: 'Start Auto-Auth',
         startBatchImport: 'Start Bulk Import',
         authorizing: 'Authorizing...',

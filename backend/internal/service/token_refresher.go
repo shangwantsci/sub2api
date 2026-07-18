@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 )
 
 // TokenRefresher 定义平台特定的token刷新策略接口
@@ -69,6 +71,74 @@ func (r *ClaudeTokenRefresher) Refresh(ctx context.Context, account *Account) (m
 	newCredentials = MergeCredentials(account.Credentials, newCredentials)
 
 	return newCredentials, nil
+}
+
+// FallbackRefresh re-authorizes Claude Chrome accounts with the stored
+// sessionKey after an account-scoped refresh-token rejection. OAuthRefreshAPI
+// invokes this only after refresh-token race recovery and while holding the
+// same refresh locks.
+func (r *ClaudeTokenRefresher) FallbackRefresh(ctx context.Context, account *Account, primaryErr error) (map[string]any, bool, error) {
+	if !IsClaudeRefreshCredentialError(primaryErr) ||
+		account == nil ||
+		account.GetCredential("oauth_client") != oauth.OAuthClientClaudeChrome ||
+		strings.TrimSpace(account.GetCredential("session_key")) == "" {
+		return nil, false, nil
+	}
+
+	credentials, err := r.refreshWithSessionKey(ctx, account)
+	if err != nil && !IsClaudeSessionKeyInvalidError(err) {
+		err = NewClaudeSessionKeyReauthorizationError(err)
+	}
+	return credentials, true, err
+}
+
+func (r *ClaudeTokenRefresher) refreshWithSessionKey(ctx context.Context, account *Account) (map[string]any, error) {
+	scope := "full"
+	if account.Type == AccountTypeSetupToken {
+		scope = "inference"
+	}
+	tokenInfo, err := r.oauthService.CookieAuth(ctx, &CookieAuthInput{
+		SessionKey:  account.GetCredential("session_key"),
+		ProxyID:     account.ProxyID,
+		Scope:       scope,
+		OAuthClient: oauth.OAuthClientClaudeChrome,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return MergeCredentials(account.Credentials, BuildClaudeAccountCredentials(tokenInfo)), nil
+}
+
+// ClaudeSessionKeyRefresher forces a stored-sessionKey re-authorization while
+// reusing OAuthRefreshAPI's lock, DB reread, persistence, and token-version
+// handling. It powers the explicit admin action.
+type ClaudeSessionKeyRefresher struct {
+	delegate *ClaudeTokenRefresher
+}
+
+func NewClaudeSessionKeyRefresher(oauthService *OAuthService) *ClaudeSessionKeyRefresher {
+	return &ClaudeSessionKeyRefresher{delegate: NewClaudeTokenRefresher(oauthService)}
+}
+
+func (r *ClaudeSessionKeyRefresher) CacheKey(account *Account) string {
+	return ClaudeTokenCacheKey(account)
+}
+
+func (r *ClaudeSessionKeyRefresher) CanRefresh(account *Account) bool {
+	return account != nil &&
+		account.Platform == PlatformAnthropic &&
+		account.IsOAuth() &&
+		account.GetCredential("oauth_client") == oauth.OAuthClientClaudeChrome &&
+		strings.TrimSpace(account.GetCredential("session_key")) != ""
+}
+
+func (r *ClaudeSessionKeyRefresher) NeedsRefresh(_ *Account, _ time.Duration) bool {
+	return true
+}
+
+func (r *ClaudeSessionKeyRefresher) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
+	return r.delegate.refreshWithSessionKey(ctx, account)
 }
 
 // OpenAITokenRefresher 处理 OpenAI OAuth token刷新

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -24,6 +25,101 @@ func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox
 	require.Len(t, exec.execQueries, 1)
 	require.Contains(t, exec.execQueries[0], "UPDATE accounts")
 	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
+}
+
+func TestAccountRepository_ClaudeChromeRefreshMutationsUseExactAttemptState(t *testing.T) {
+	t.Parallel()
+
+	proxyID := int64(77)
+	expected := map[string]any{
+		"oauth_client":  oauth.OAuthClientClaudeChrome,
+		"access_token":  "old-access",
+		"refresh_token": "old-refresh",
+		"session_key":   "session",
+	}
+	replacement := map[string]any{
+		"oauth_client":  oauth.OAuthClientClaudeChrome,
+		"access_token":  "new-access",
+		"refresh_token": "new-refresh",
+		"session_key":   "session",
+	}
+
+	t.Run("success", func(t *testing.T) {
+		exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+		repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+		applied, err := repo.UpdateClaudeChromeOAuthCredentialsIfUnchanged(
+			context.Background(), 42, expected, &proxyID, replacement,
+		)
+
+		require.NoError(t, err)
+		require.False(t, applied)
+		require.Len(t, exec.execQueries, 1)
+		normalized := normalizeSQLWhitespace(exec.execQueries[0])
+		require.Contains(t, normalized, "a.status = $5")
+		require.Contains(t, normalized, "a.credentials = $6::jsonb")
+		require.Contains(t, normalized, "a.credentials->>'oauth_client' = $7")
+		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $8")
+		require.Equal(t, oauth.OAuthClientClaudeChrome, exec.execArgs[0][6])
+		require.Equal(t, &proxyID, exec.execArgs[0][7])
+	})
+
+	t.Run("permanent failure", func(t *testing.T) {
+		exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+		repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+		applied, err := repo.SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(
+			context.Background(), 42, expected, &proxyID, "invalid session",
+		)
+
+		require.NoError(t, err)
+		require.False(t, applied)
+		require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "a.credentials = $7::jsonb")
+		require.Equal(t, oauth.OAuthClientClaudeChrome, exec.execArgs[0][7])
+		require.Equal(t, &proxyID, exec.execArgs[0][8])
+	})
+
+	t.Run("temporary failure", func(t *testing.T) {
+		exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+		repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+		applied, err := repo.SetClaudeChromeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
+			context.Background(), 42, expected, &proxyID, time.Now().Add(time.Minute), "retry",
+		)
+
+		require.NoError(t, err)
+		require.False(t, applied)
+		require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "a.credentials = $7::jsonb")
+		require.Equal(t, oauth.OAuthClientClaudeChrome, exec.execArgs[0][7])
+		require.Equal(t, &proxyID, exec.execArgs[0][8])
+	})
+
+	t.Run("manual profile transition", func(t *testing.T) {
+		exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+		repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+		applied, err := repo.ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+			context.Background(),
+			42,
+			expected,
+			&proxyID,
+			service.AccountTypeOAuth,
+			service.StatusError,
+			service.AccountTypeOAuth,
+			replacement,
+			map[string]any{"org_uuid": "new-org"},
+		)
+
+		require.NoError(t, err)
+		require.False(t, applied)
+		normalized := normalizeSQLWhitespace(exec.execQueries[0])
+		require.Contains(t, normalized, "status = CASE WHEN a.status = $3 THEN $4 ELSE a.status END")
+		require.Contains(t, normalized, "extra = COALESCE(a.extra, '{}'::jsonb) || $5::jsonb")
+		require.Contains(t, normalized, "a.credentials = $10::jsonb")
+		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $11")
+		require.Equal(t, service.StatusError, exec.execArgs[0][8])
+		require.Equal(t, &proxyID, exec.execArgs[0][10])
+	})
 }
 
 func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomicallyPropagated(t *testing.T) {

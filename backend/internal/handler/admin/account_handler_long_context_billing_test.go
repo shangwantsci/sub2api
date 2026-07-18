@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -140,6 +141,50 @@ func TestApplyOAuthCredentialsRejectsMalformedOpenAILongContextBillingBeforeMuta
 	require.Equal(t, "OPENAI_LONG_CONTEXT_BILLING_INVALID", responseBody.Reason)
 	require.Zero(t, stub.updateAccountCalls)
 	require.Zero(t, stub.updateAccountExtraCalls)
+}
+
+func TestApplyOAuthCredentialsPreservesClaudeChromeAccountConfiguration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := newStubAdminService()
+	stub.getAccountResult = &service.Account{
+		ID:       1,
+		Platform: service.PlatformAnthropic,
+		Type:     service.AccountTypeOAuth,
+		Status:   service.StatusActive,
+		Credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "old-access",
+			"refresh_token": "old-refresh",
+			"session_key":   "old-session",
+			"account_uuid":  "stale-account",
+			"model_mapping": map[string]any{"old": "mapped"},
+			"header_override": map[string]any{
+				"x-test": "kept",
+			},
+		},
+	}
+	handler := NewAccountHandler(stub, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.POST("/accounts/:id/apply-oauth-credentials", handler.ApplyOAuthCredentials)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/accounts/1/apply-oauth-credentials", bytes.NewBufferString(
+		`{"type":"oauth","credentials":{"oauth_client":"claude_chrome","access_token":"new-access","refresh_token":"new-refresh","session_key":"new-session"},"extra":{"org_uuid":"new-org"}}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotNil(t, stub.lastUpdateAccountInput)
+	credentials := stub.lastUpdateAccountInput.Credentials
+	require.Equal(t, "new-access", credentials["access_token"])
+	require.Equal(t, "new-refresh", credentials["refresh_token"])
+	require.Equal(t, "new-session", credentials["session_key"])
+	require.Equal(t, map[string]any{"old": "mapped"}, credentials["model_mapping"])
+	require.Equal(t, map[string]any{"x-test": "kept"}, credentials["header_override"])
+	require.NotContains(t, credentials, "account_uuid")
+	require.NotNil(t, credentials["_token_version"])
+	require.Equal(t, "new-org", stub.lastUpdateAccountInput.Extra["org_uuid"])
 }
 
 func TestOpenAIOAuthCodexPATBoundaryRejectsMalformedOpenAILongContextBillingValueBeforeTokenValidation(t *testing.T) {

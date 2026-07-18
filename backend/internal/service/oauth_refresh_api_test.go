@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,16 +104,86 @@ func (r *refreshAPIAccountRepo) UpdateGrokOAuthCredentialsIfUnchanged(
 	return true, nil
 }
 
+func (r *refreshAPIAccountRepo) UpdateClaudeChromeOAuthCredentialsIfUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	credentials map[string]any,
+) (bool, error) {
+	r.successCASCalls++
+	r.lastExpectedCredentials = shallowCopyMap(expectedCredentials)
+	if expectedProxyID != nil {
+		proxyID := *expectedProxyID
+		r.lastExpectedProxyID = &proxyID
+	} else {
+		r.lastExpectedProxyID = nil
+	}
+	if r.beforeSuccessCAS != nil {
+		r.beforeSuccessCAS(r)
+	}
+	if r.updateErr != nil {
+		return false, r.updateErr
+	}
+	if r.account == nil || r.account.ID != id || !r.account.IsClaudeChromeOAuth() ||
+		!reflect.DeepEqual(r.account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(r.account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	r.updateCalls++
+	r.updateCredentialsCalls++
+	r.account.Credentials = shallowCopyMap(credentials)
+	return true, nil
+}
+
+func (r *refreshAPIAccountRepo) UpdateClaudeOAuthCredentialsIfUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	expectedType string,
+	credentials map[string]any,
+) (bool, error) {
+	r.successCASCalls++
+	r.lastExpectedCredentials = shallowCopyMap(expectedCredentials)
+	if expectedProxyID != nil {
+		proxyID := *expectedProxyID
+		r.lastExpectedProxyID = &proxyID
+	} else {
+		r.lastExpectedProxyID = nil
+	}
+	if r.beforeSuccessCAS != nil {
+		r.beforeSuccessCAS(r)
+	}
+	if r.updateErr != nil {
+		return false, r.updateErr
+	}
+	if r.account == nil || r.account.ID != id || r.account.Platform != PlatformAnthropic ||
+		r.account.Type != expectedType || r.account.Status != StatusActive ||
+		!reflect.DeepEqual(r.account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(r.account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	r.updateCalls++
+	r.updateCredentialsCalls++
+	r.account.Credentials = shallowCopyMap(credentials)
+	return true, nil
+}
+
 // refreshAPIExecutorStub implements OAuthRefreshExecutor for tests.
 type refreshAPIExecutorStub struct {
-	needsRefresh  bool
-	cannotRefresh bool
-	credentials   map[string]any
-	err           error
-	refreshCalls  int
-	canRefresh    func(*Account) bool
-	onRefresh     func()
-	delay         time.Duration
+	needsRefresh        bool
+	cannotRefresh       bool
+	credentials         map[string]any
+	err                 error
+	refreshCalls        int
+	canRefresh          func(*Account) bool
+	onRefresh           func()
+	delay               time.Duration
+	fallbackAttempted   bool
+	fallbackCredentials map[string]any
+	fallbackErr         error
+	fallbackCalls       int
 }
 
 func (e *refreshAPIExecutorStub) CanRefresh(account *Account) bool {
@@ -147,6 +218,11 @@ func (e *refreshAPIExecutorStub) CacheKey(account *Account) string {
 	return "test:api:" + account.Platform
 }
 
+func (e *refreshAPIExecutorStub) FallbackRefresh(_ context.Context, _ *Account, _ error) (map[string]any, bool, error) {
+	e.fallbackCalls++
+	return e.fallbackCredentials, e.fallbackAttempted, e.fallbackErr
+}
+
 // refreshAPICacheStub implements GeminiTokenCache for OAuthRefreshAPI tests.
 type refreshAPICacheStub struct {
 	lockResult    bool
@@ -156,6 +232,10 @@ type refreshAPICacheStub struct {
 	deleteCalls   int
 	deleteKey     string
 	deleteCtxErr  error
+	ownedOwner    string
+	releasedOwner string
+	renewCalls    int
+	renewLost     bool
 }
 
 func (c *refreshAPICacheStub) GetAccessToken(context.Context, string) (string, error) {
@@ -183,10 +263,85 @@ func (c *refreshAPICacheStub) ReleaseRefreshLock(ctx context.Context, _ string) 
 	return nil
 }
 
+func (c *refreshAPICacheStub) AcquireOwnedRefreshLock(_ context.Context, _ string, owner string, _ time.Duration) (bool, error) {
+	c.ownedOwner = owner
+	return c.lockResult, c.lockErr
+}
+
+func (c *refreshAPICacheStub) RenewOwnedRefreshLock(_ context.Context, _ string, _ string, _ time.Duration) (bool, error) {
+	c.renewCalls++
+	return !c.renewLost, c.lockErr
+}
+
+func (c *refreshAPICacheStub) ReleaseOwnedRefreshLock(ctx context.Context, _ string, owner string) error {
+	c.releaseCalls++
+	c.releaseCtxErr = ctx.Err()
+	c.releasedOwner = owner
+	return nil
+}
+
 // ========== RefreshIfNeeded tests ==========
 
+func TestRateLimitedOAuthRefreshExecutorPreservesFallbackCapability(t *testing.T) {
+	base := &refreshAPIExecutorStub{
+		fallbackAttempted:   true,
+		fallbackCredentials: map[string]any{"access_token": "fallback"},
+	}
+	acquired := 0
+	released := 0
+	wrapped := &rateLimitedOAuthRefreshExecutor{
+		OAuthRefreshExecutor: base,
+		acquireRate: func(context.Context) (func(), error) {
+			acquired++
+			return func() { released++ }, nil
+		},
+	}
+
+	credentials, attempted, err := wrapped.FallbackRefresh(
+		context.Background(),
+		&Account{ID: 1},
+		errors.New("invalid_grant"),
+	)
+
+	require.NoError(t, err)
+	require.True(t, attempted)
+	require.Equal(t, "fallback", credentials["access_token"])
+	require.Equal(t, 1, base.fallbackCalls)
+	require.Equal(t, 1, acquired)
+	require.Equal(t, 1, released)
+}
+
+func TestRateLimitedOAuthRefreshExecutorDoesNotDelayLegacyClaudeFailures(t *testing.T) {
+	base := &refreshAPIExecutorStub{fallbackAttempted: true}
+	acquired := 0
+	wrapped := &rateLimitedOAuthRefreshExecutor{
+		OAuthRefreshExecutor: base,
+		acquireRate: func(context.Context) (func(), error) {
+			acquired++
+			return func() {}, nil
+		},
+	}
+
+	_, attempted, err := wrapped.FallbackRefresh(
+		context.Background(),
+		&Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth},
+		errors.New("invalid_grant"),
+	)
+
+	require.NoError(t, err)
+	require.False(t, attempted)
+	require.Zero(t, acquired)
+	require.Zero(t, base.fallbackCalls)
+}
+
 func TestRefreshIfNeeded_Success(t *testing.T) {
-	account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive}
+	account := &Account{
+		ID:          1,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Credentials: map[string]any{},
+	}
 	repo := &refreshAPIAccountRepo{account: account}
 	cache := &refreshAPICacheStub{lockResult: true}
 	executor := &refreshAPIExecutorStub{
@@ -390,6 +545,280 @@ func TestRefreshIfNeeded_GrokSuccessCASLetsConcurrentReauthorizationWin(t *testi
 	require.NotNil(t, repo.lastExpectedProxyID)
 	require.Equal(t, proxyID, *repo.lastExpectedProxyID)
 	require.Zero(t, repo.updateCredentialsCalls, "the provider result must not overwrite a concurrent repair")
+}
+
+func TestRefreshIfNeeded_ClaudeChromeOwnedLockAndCASLetConcurrentReauthorizationWin(t *testing.T) {
+	proxyID := int64(17)
+	account := &Account{
+		ID:       72,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		ProxyID:  &proxyID,
+		Credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "attempted-access",
+			"refresh_token": "attempted-refresh",
+			"session_key":   "attempted-session",
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	repo.beforeSuccessCAS = func(r *refreshAPIAccountRepo) {
+		repairedProxyID := int64(23)
+		r.account.ProxyID = &repairedProxyID
+		r.account.Credentials = map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "reauthorized-access",
+			"refresh_token": "reauthorized-refresh",
+			"session_key":   "reauthorized-session",
+		}
+	}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "provider-access",
+			"refresh_token": "provider-refresh",
+			"session_key":   "attempted-session",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, cache).RefreshIfNeeded(context.Background(), account, executor, time.Hour)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Refreshed)
+	require.Nil(t, result.NewCredentials)
+	require.Equal(t, "reauthorized-refresh", result.Account.GetCredential("refresh_token"))
+	require.Equal(t, 1, repo.successCASCalls)
+	require.Zero(t, repo.updateCredentialsCalls)
+	require.NotEmpty(t, cache.ownedOwner)
+	require.Equal(t, cache.ownedOwner, cache.releasedOwner)
+}
+
+func TestRefreshIfNeeded_ClaudeChromeDoesNotBypassDistributedLockFailure(t *testing.T) {
+	account := &Account{
+		ID:       73,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{
+		lockResult: false,
+		lockErr:    errors.New("redis unavailable"),
+	}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+
+	result, err := NewOAuthRefreshAPI(repo, cache).RefreshIfNeeded(context.Background(), account, executor, time.Hour)
+
+	require.Nil(t, result)
+	var contained *providerCycleContainmentRefreshError
+	require.ErrorAs(t, err, &contained)
+	require.ErrorContains(t, contained.err, "distributed refresh lock failed")
+	require.Zero(t, executor.refreshCalls)
+}
+
+func TestRefreshIfNeeded_ProfileChangeDoesNotRefreshUnderStaleLockPolicy(t *testing.T) {
+	callerSnapshot := &Account{
+		ID:       76,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+	}
+	current := &Account{
+		ID:       76,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: current}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+
+	result, err := NewOAuthRefreshAPI(repo, cache).
+		RefreshIfNeeded(context.Background(), callerSnapshot, executor, time.Hour)
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Account)
+	require.True(t, result.Account.IsClaudeChromeOAuth())
+	require.False(t, result.Refreshed)
+	require.Zero(t, executor.refreshCalls)
+}
+
+func TestRefreshIfNeeded_StaleChromeSnapshotKeepsCurrentLegacyLockBehavior(t *testing.T) {
+	callerSnapshot := &Account{
+		ID:       79,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+		},
+	}
+	current := &Account{
+		ID:       79,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"access_token":  "legacy-access",
+			"refresh_token": "legacy-refresh",
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: current}
+	cache := &refreshAPICacheStub{lockErr: errors.New("redis unavailable")}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		credentials: map[string]any{
+			"access_token":  "new-legacy-access",
+			"refresh_token": "new-legacy-refresh",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, cache).
+		RefreshIfNeeded(context.Background(), callerSnapshot, executor, time.Hour)
+
+	require.NoError(t, err)
+	require.True(t, result.Refreshed)
+	require.Equal(t, "new-legacy-refresh", result.Account.GetCredential("refresh_token"))
+	require.Empty(t, cache.ownedOwner)
+}
+
+func TestRefreshIfNeeded_LegacyClaudeSuccessCASLetsChromeTransitionWin(t *testing.T) {
+	account := &Account{
+		ID:       78,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"access_token":  "legacy-access",
+			"refresh_token": "legacy-refresh",
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	repo.beforeSuccessCAS = func(r *refreshAPIAccountRepo) {
+		r.account.Credentials = map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "chrome-access",
+			"refresh_token": "chrome-refresh",
+			"session_key":   "chrome-session",
+		}
+	}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		credentials: map[string]any{
+			"access_token":  "late-legacy-access",
+			"refresh_token": "late-legacy-refresh",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, cache).
+		RefreshIfNeeded(context.Background(), account, executor, time.Hour)
+
+	require.NoError(t, err)
+	require.False(t, result.Refreshed)
+	require.True(t, result.Account.IsClaudeChromeOAuth())
+	require.Equal(t, "chrome-refresh", result.Account.GetCredential("refresh_token"))
+	require.Zero(t, repo.updateCredentialsCalls)
+}
+
+func TestRefreshIfNeeded_ClaudeChromeRequiresDistributedLockCache(t *testing.T) {
+	account := &Account{
+		ID:       77,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	executor := &refreshAPIExecutorStub{needsRefresh: true}
+
+	result, err := NewOAuthRefreshAPI(repo, nil).
+		RefreshIfNeeded(context.Background(), account, executor, time.Hour)
+
+	require.Nil(t, result)
+	var configurationErr *providerConfigurationRefreshError
+	require.ErrorAs(t, err, &configurationErr)
+	require.ErrorContains(t, configurationErr.err, "distributed refresh lock cache is not configured")
+	require.Zero(t, executor.refreshCalls)
+}
+
+func TestRefreshIfNeeded_ClaudeChromeRenewsOwnedLockDuringSlowRefresh(t *testing.T) {
+	account := &Account{
+		ID:       74,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "old-access",
+			"refresh_token": "old-refresh",
+			"session_key":   "session",
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		delay:        60 * time.Millisecond,
+		credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "new-access",
+			"refresh_token": "new-refresh",
+			"session_key":   "session",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, cache, 30*time.Millisecond).
+		RefreshIfNeeded(context.Background(), account, executor, time.Hour)
+
+	require.NoError(t, err)
+	require.True(t, result.Refreshed)
+	require.GreaterOrEqual(t, cache.renewCalls, 1)
+	require.Equal(t, cache.ownedOwner, cache.releasedOwner)
+}
+
+func TestRefreshIfNeeded_ClaudeChromeLostLeaseDoesNotPersistLateCredentials(t *testing.T) {
+	account := &Account{
+		ID:       75,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true, renewLost: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		delay:        60 * time.Millisecond,
+		credentials: map[string]any{
+			"oauth_client": oauth.OAuthClientClaudeChrome,
+			"access_token": "late-access",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, cache, 30*time.Millisecond).
+		RefreshIfNeeded(context.Background(), account, executor, time.Hour)
+
+	require.Nil(t, result)
+	var contained *providerCycleContainmentRefreshError
+	require.ErrorAs(t, err, &contained)
+	require.ErrorContains(t, contained.err, "lock lease lost")
+	require.Zero(t, repo.updateCredentialsCalls)
+	require.GreaterOrEqual(t, cache.renewCalls, 1)
 }
 
 func TestRefreshIfNeeded_GrokSuccessPersistenceFailureIsProviderContainment(t *testing.T) {
@@ -845,6 +1274,48 @@ func TestRefreshIfNeeded_InvalidGrantGenuine(t *testing.T) {
 	require.NotNil(t, result.Account)
 	require.Equal(t, "revoked-rt", result.Account.GetCredential("refresh_token"))
 	require.Contains(t, err.Error(), "invalid_grant")
+}
+
+func TestRefreshIfNeeded_FallbackRunsAfterRaceRecoveryAndPersists(t *testing.T) {
+	account := &Account{
+		ID:       111,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"access_token":  "old-at",
+			"refresh_token": "revoked-rt",
+			"session_key":   "session",
+		},
+	}
+	repo := &refreshAPIAccountRepoWithRace{
+		refreshAPIAccountRepo: refreshAPIAccountRepo{account: account},
+		raceAccount:           account,
+	}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh:      true,
+		err:               errors.New("invalid_grant: refresh token revoked"),
+		fallbackAttempted: true,
+		fallbackCredentials: map[string]any{
+			"access_token":  "cookie-at",
+			"refresh_token": "cookie-rt",
+			"session_key":   "session",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, nil).RefreshIfNeeded(
+		context.Background(),
+		account,
+		executor,
+		3*time.Minute,
+	)
+
+	require.NoError(t, err)
+	require.True(t, result.Refreshed)
+	require.Equal(t, 1, executor.fallbackCalls)
+	require.Equal(t, "cookie-at", repo.account.GetCredential("access_token"))
+	require.Equal(t, "cookie-rt", repo.account.GetCredential("refresh_token"))
+	require.Equal(t, "session", repo.account.GetCredential("session_key"))
 }
 
 func TestRefreshIfNeeded_InvalidGrantDBRereadFailsOnRecovery(t *testing.T) {

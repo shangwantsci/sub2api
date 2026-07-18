@@ -21,12 +21,13 @@ type ClaudeOAuthServiceSuite struct {
 
 // requestCapture holds captured request data for assertions in the main goroutine.
 type requestCapture struct {
-	path        string
-	method      string
-	cookies     []*http.Cookie
-	body        []byte
-	bodyJSON    map[string]any
-	contentType string
+	path          string
+	method        string
+	cookies       []*http.Cookie
+	body          []byte
+	bodyJSON      map[string]any
+	contentType   string
+	anthropicBeta string
 }
 
 func newTestReqClient(rt http.RoundTripper) *req.Client {
@@ -93,7 +94,7 @@ func (s *ClaudeOAuthServiceSuite) TestGetOrganizationUUID() {
 			s.client.baseURL = "http://in-process"
 			s.client.clientFactory = func(string) (*req.Client, error) { return newTestReqClient(rt), nil }
 
-			got, err := s.client.GetOrganizationUUID(context.Background(), "sess", "")
+			got, err := s.client.GetOrganizationUUID(context.Background(), "sess", "", oauth.ClaudeCodeProfile)
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
@@ -137,7 +138,7 @@ func (s *ClaudeOAuthServiceSuite) TestGetAuthorizationCode() {
 				require.Equal(s.T(), "org-1", captured.bodyJSON["organization_uuid"])
 				require.Equal(s.T(), oauth.ClientID, captured.bodyJSON["client_id"])
 				require.Equal(s.T(), oauth.RedirectURI, captured.bodyJSON["redirect_uri"])
-				require.Equal(s.T(), "st", captured.bodyJSON["state"])
+				require.Equal(s.T(), "STATE", captured.bodyJSON["state"])
 			},
 		},
 		{
@@ -171,7 +172,7 @@ func (s *ClaudeOAuthServiceSuite) TestGetAuthorizationCode() {
 			s.client.baseURL = "http://in-process"
 			s.client.clientFactory = func(string) (*req.Client, error) { return newTestReqClient(rt), nil }
 
-			code, err := s.client.GetAuthorizationCode(context.Background(), "sess", "org-1", oauth.ScopeInference, "cc", "st", "")
+			code, err := s.client.GetAuthorizationCode(context.Background(), "sess", "org-1", oauth.ScopeInference, "cc", "STATE", "", oauth.ClaudeCodeProfile)
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
@@ -276,7 +277,7 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 			s.client.tokenURL = "http://in-process/token"
 			s.client.clientFactory = func(string) (*req.Client, error) { return newTestReqClient(rt), nil }
 
-			resp, err := s.client.ExchangeCodeForToken(context.Background(), tt.code, "ver", "", "", tt.isSetupToken)
+			resp, err := s.client.ExchangeCodeForToken(context.Background(), tt.code, "ver", "", "", oauth.ClaudeCodeProfile)
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
@@ -372,7 +373,7 @@ func (s *ClaudeOAuthServiceSuite) TestRefreshToken() {
 			s.client.tokenURL = "http://in-process/token"
 			s.client.clientFactory = func(string) (*req.Client, error) { return newTestReqClient(rt), nil }
 
-			resp, err := s.client.RefreshToken(context.Background(), "rt", "")
+			resp, err := s.client.RefreshToken(context.Background(), "rt", "", oauth.ClaudeCodeProfile)
 
 			if tt.wantErr {
 				require.Error(s.T(), err)
@@ -385,6 +386,106 @@ func (s *ClaudeOAuthServiceSuite) TestRefreshToken() {
 			if tt.validate != nil {
 				tt.validate(captured)
 			}
+		})
+	}
+}
+
+func (s *ClaudeOAuthServiceSuite) TestChromeProfileAuthorizeUsesConfiguredProxyAndClient() {
+	var captured requestCapture
+	var capturedProxy string
+	rt := newInProcessTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured.method = r.Method
+		captured.cookies = r.Cookies()
+		captured.body, _ = io.ReadAll(r.Body)
+		_ = json.Unmarshal(captured.body, &captured.bodyJSON)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"redirect_uri": oauth.ChromeRedirectURI + "?code=AUTH&state=STATE",
+		})
+	}), nil)
+
+	client := NewClaudeOAuthClient().(*claudeOAuthService)
+	client.clientFactory = func(proxyURL string) (*req.Client, error) {
+		capturedProxy = proxyURL
+		return newTestReqClient(rt), nil
+	}
+
+	code, err := client.GetAuthorizationCode(
+		context.Background(),
+		"session",
+		"org-1",
+		oauth.ScopeChrome,
+		"challenge",
+		"STATE",
+		"http://proxy.example:8080",
+		oauth.ClaudeChromeProfile,
+	)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "AUTH#STATE", code)
+	require.Equal(s.T(), "http://proxy.example:8080", capturedProxy)
+	require.Equal(s.T(), oauth.ChromeClientID, captured.bodyJSON["client_id"])
+	require.Equal(s.T(), oauth.ChromeRedirectURI, captured.bodyJSON["redirect_uri"])
+	require.Equal(s.T(), oauth.ScopeChrome, captured.bodyJSON["scope"])
+	require.Len(s.T(), captured.cookies, 1)
+	require.Equal(s.T(), "session", captured.cookies[0].Value)
+}
+
+func (s *ClaudeOAuthServiceSuite) TestChromeProfileTokenOperationsUseBetaAndClient() {
+	tests := []struct {
+		name       string
+		call       func(context.Context, *claudeOAuthService) (*oauth.TokenResponse, error)
+		assertBody func(map[string]any)
+	}{
+		{
+			name: "exchange",
+			call: func(ctx context.Context, client *claudeOAuthService) (*oauth.TokenResponse, error) {
+				return client.ExchangeCodeForToken(ctx, "AUTH#STATE", "verifier", "STATE", "socks5://proxy:1080", oauth.ClaudeChromeProfile)
+			},
+			assertBody: func(body map[string]any) {
+				require.Equal(s.T(), "authorization_code", body["grant_type"])
+				require.Equal(s.T(), oauth.ChromeRedirectURI, body["redirect_uri"])
+			},
+		},
+		{
+			name: "refresh",
+			call: func(ctx context.Context, client *claudeOAuthService) (*oauth.TokenResponse, error) {
+				return client.RefreshToken(ctx, "refresh-token", "socks5://proxy:1080", oauth.ClaudeChromeProfile)
+			},
+			assertBody: func(body map[string]any) {
+				require.Equal(s.T(), "refresh_token", body["grant_type"])
+				require.Equal(s.T(), "refresh-token", body["refresh_token"])
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			var captured requestCapture
+			var capturedProxy string
+			rt := newInProcessTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				captured.anthropicBeta = r.Header.Get("anthropic-beta")
+				captured.body, _ = io.ReadAll(r.Body)
+				_ = json.Unmarshal(captured.body, &captured.bodyJSON)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(oauth.TokenResponse{
+					AccessToken: "access-token",
+					ExpiresIn:   28800,
+				})
+			}), nil)
+
+			client := NewClaudeOAuthClient().(*claudeOAuthService)
+			client.tokenURL = "http://in-process/token"
+			client.clientFactory = func(proxyURL string) (*req.Client, error) {
+				capturedProxy = proxyURL
+				return newTestReqClient(rt), nil
+			}
+
+			_, err := tt.call(context.Background(), client)
+			require.NoError(s.T(), err)
+			require.Equal(s.T(), "socks5://proxy:1080", capturedProxy)
+			require.Equal(s.T(), oauth.OAuthBetaHeader, captured.anthropicBeta)
+			require.Equal(s.T(), oauth.ChromeClientID, captured.bodyJSON["client_id"])
+			tt.assertBody(captured.bodyJSON)
 		})
 	}
 }

@@ -52,6 +52,16 @@ type GrokOAuthRefreshMutationRepository interface {
 	SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged(ctx context.Context, id int64, expectedCredentials map[string]any, expectedProxyID *int64, until time.Time, reason string) (bool, error)
 }
 
+type ClaudeChromeOAuthRefreshMutationRepository interface {
+	SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(ctx context.Context, id int64, expectedCredentials map[string]any, expectedProxyID *int64, errorMsg string) (bool, error)
+	SetClaudeChromeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(ctx context.Context, id int64, expectedCredentials map[string]any, expectedProxyID *int64, until time.Time, reason string) (bool, error)
+}
+
+type ClaudeOAuthRefreshMutationRepository interface {
+	SetClaudeOAuthRefreshErrorIfCredentialsUnchanged(ctx context.Context, id int64, expectedCredentials map[string]any, expectedProxyID *int64, expectedType string, errorMsg string) (bool, error)
+	SetClaudeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(ctx context.Context, id int64, expectedCredentials map[string]any, expectedProxyID *int64, expectedType string, until time.Time, reason string) (bool, error)
+}
+
 // TokenRefreshService OAuth token自动刷新服务
 // 定期检查并刷新即将过期的token
 type TokenRefreshService struct {
@@ -316,6 +326,29 @@ func (e *rateLimitedOAuthRefreshExecutor) Refresh(ctx context.Context, account *
 	}
 	defer release()
 	return e.OAuthRefreshExecutor.Refresh(ctx, account)
+}
+
+func (e *rateLimitedOAuthRefreshExecutor) FallbackRefresh(ctx context.Context, account *Account, primaryErr error) (map[string]any, bool, error) {
+	if e == nil || e.OAuthRefreshExecutor == nil {
+		return nil, false, errors.New("OAuth refresh executor is not configured")
+	}
+	if account != nil && account.Platform == PlatformAnthropic && !account.IsClaudeChromeOAuth() {
+		return nil, false, nil
+	}
+	fallback, ok := e.OAuthRefreshExecutor.(OAuthRefreshFallbackExecutor)
+	if !ok {
+		return nil, false, nil
+	}
+	release := func() {}
+	if e.acquireRate != nil {
+		var err error
+		release, err = e.acquireRate(ctx)
+		if err != nil {
+			return nil, true, err
+		}
+	}
+	defer release()
+	return fallback.FallbackRefresh(ctx, account, primaryErr)
 }
 
 func newTokenRefreshRateGate(qps int) *tokenRefreshRateGate {
@@ -986,7 +1019,10 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		if isNonRetryableRefreshError(err) {
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			isGrokOAuth := account.IsGrokOAuth()
-			if !isGrokOAuth {
+			isClaudeChromeOAuth := account.IsClaudeChromeOAuth()
+			isClaudeOAuth := account.Platform == PlatformAnthropic && account.IsOAuth()
+			isConditionalOAuth := isGrokOAuth || isClaudeOAuth
+			if !isConditionalOAuth {
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			}
 			s.clearAntigravityForceTokenRefresh(ctx, account, "non_retryable")
@@ -1011,6 +1047,43 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 						return errRefreshSkipped
 					}
 				}
+			} else if isClaudeChromeOAuth {
+				conditionalRepo, ok := s.accountRepo.(ClaudeChromeOAuthRefreshMutationRepository)
+				if !ok {
+					return &providerConfigurationRefreshError{
+						err: errors.New("Claude Chrome OAuth conditional refresh mutation repository is not configured"),
+					}
+				}
+				persistentlyBlocked, setErr = conditionalRepo.SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(
+					ctx,
+					account.ID,
+					account.Credentials,
+					account.ProxyID,
+					errorMsg,
+				)
+				if setErr == nil && !persistentlyBlocked {
+					slog.Info("token_refresh.claude_chrome_error_status_skipped_stale_credentials", "account_id", account.ID)
+					return errRefreshSkipped
+				}
+			} else if isClaudeOAuth {
+				conditionalRepo, ok := s.accountRepo.(ClaudeOAuthRefreshMutationRepository)
+				if !ok {
+					return &providerConfigurationRefreshError{
+						err: errors.New("Claude OAuth conditional refresh mutation repository is not configured"),
+					}
+				}
+				persistentlyBlocked, setErr = conditionalRepo.SetClaudeOAuthRefreshErrorIfCredentialsUnchanged(
+					ctx,
+					account.ID,
+					account.Credentials,
+					account.ProxyID,
+					account.Type,
+					errorMsg,
+				)
+				if setErr == nil && !persistentlyBlocked {
+					slog.Info("token_refresh.claude_error_status_skipped_stale_credentials", "account_id", account.ID)
+					return errRefreshSkipped
+				}
 			} else {
 				setErr = s.accountRepo.SetError(ctx, account.ID, errorMsg)
 				persistentlyBlocked = setErr == nil
@@ -1020,16 +1093,16 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 					"account_id", account.ID,
 					"error", setErr,
 				)
-				if isGrokOAuth {
+				if isConditionalOAuth {
 					return &providerCycleContainmentRefreshError{
-						err: fmt.Errorf("failed to conditionally persist Grok OAuth refresh failure: %w", setErr),
+						err: fmt.Errorf("failed to conditionally persist OAuth refresh failure: %w", setErr),
 					}
 				}
-			} else if isGrokOAuth && persistentlyBlocked {
+			} else if isConditionalOAuth && persistentlyBlocked {
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			}
 			cacheInvalidationFailed := false
-			if account.Type == AccountTypeOAuth && (!isGrokOAuth || persistentlyBlocked) {
+			if account.Type == AccountTypeOAuth && (!isConditionalOAuth || persistentlyBlocked) {
 				if s.cacheInvalidator == nil {
 					cacheInvalidationFailed = true
 				} else if invalidateErr := s.cacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {
@@ -1112,6 +1185,77 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			}
 		} else if !applied {
 			slog.Info("token_refresh.grok_temp_unschedulable_skipped_stale_credentials", "account_id", account.ID)
+			return errRefreshSkipped
+		} else {
+			s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
+			slog.Info("token_refresh.temp_unschedulable_set",
+				"account_id", account.ID,
+				"until", until.Format(time.RFC3339),
+			)
+		}
+		return lastErr
+	}
+	if account.IsClaudeChromeOAuth() {
+		conditionalRepo, ok := s.accountRepo.(ClaudeChromeOAuthRefreshMutationRepository)
+		if !ok {
+			return &providerConfigurationRefreshError{
+				err: errors.New("Claude Chrome OAuth conditional refresh mutation repository is not configured"),
+			}
+		}
+		applied, setErr := conditionalRepo.SetClaudeChromeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
+			ctx,
+			account.ID,
+			account.Credentials,
+			account.ProxyID,
+			until,
+			reason,
+		)
+		if setErr != nil {
+			slog.Warn("token_refresh.set_temp_unschedulable_failed",
+				"account_id", account.ID,
+				"error", setErr,
+			)
+			return &providerCycleContainmentRefreshError{
+				err: fmt.Errorf("failed to conditionally persist Claude Chrome OAuth refresh cooldown: %w", setErr),
+			}
+		} else if !applied {
+			slog.Info("token_refresh.claude_chrome_temp_unschedulable_skipped_stale_credentials", "account_id", account.ID)
+			return errRefreshSkipped
+		} else {
+			s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
+			slog.Info("token_refresh.temp_unschedulable_set",
+				"account_id", account.ID,
+				"until", until.Format(time.RFC3339),
+			)
+		}
+		return lastErr
+	}
+	if account.Platform == PlatformAnthropic && account.IsOAuth() {
+		conditionalRepo, ok := s.accountRepo.(ClaudeOAuthRefreshMutationRepository)
+		if !ok {
+			return &providerConfigurationRefreshError{
+				err: errors.New("Claude OAuth conditional refresh mutation repository is not configured"),
+			}
+		}
+		applied, setErr := conditionalRepo.SetClaudeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
+			ctx,
+			account.ID,
+			account.Credentials,
+			account.ProxyID,
+			account.Type,
+			until,
+			reason,
+		)
+		if setErr != nil {
+			slog.Warn("token_refresh.set_temp_unschedulable_failed",
+				"account_id", account.ID,
+				"error", setErr,
+			)
+			return &providerCycleContainmentRefreshError{
+				err: fmt.Errorf("failed to conditionally persist Claude OAuth refresh cooldown: %w", setErr),
+			}
+		} else if !applied {
+			slog.Info("token_refresh.claude_temp_unschedulable_skipped_stale_credentials", "account_id", account.ID)
 			return errRefreshSkipped
 		} else {
 			s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
@@ -1225,7 +1369,10 @@ func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account 
 		}
 	}
 	// 同步更新调度器缓存，确保调度获取的 Account 对象包含最新的 credentials
-	if s.schedulerCache != nil {
+	// Claude Chrome success persistence already publishes an outbox event and
+	// reloads the scheduler snapshot from the database. Writing this in-memory
+	// attempt snapshot afterward could overwrite a concurrent re-authorization.
+	if s.schedulerCache != nil && !account.IsClaudeChromeOAuth() {
 		if err := s.schedulerCache.SetAccount(ctx, account); err != nil {
 			slog.Warn("token_refresh.sync_scheduler_cache_failed",
 				"account_id", account.ID,
@@ -1385,6 +1532,9 @@ func isSharedProviderRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if IsClaudeSessionKeyReauthorizationError(err) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	for _, needle := range []string{
 		"invalid_client",
@@ -1406,6 +1556,9 @@ func isNonRetryableRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if IsClaudeSessionKeyReauthorizationError(err) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	nonRetryable := []string{
 		"invalid_grant",             // refresh_token 已失效
@@ -1423,6 +1576,7 @@ func isNonRetryableRefreshError(err error) bool {
 		"entitlement_denied",
 		"invalid_scope",
 		"unknown scope",
+		"claude_session_key_invalid",
 		"subscription required",
 		"no active grok subscription",
 	}

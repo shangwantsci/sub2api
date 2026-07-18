@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -290,6 +291,184 @@ func (r *tokenRefreshAccountRepo) SetGrokOAuthRefreshTempUnschedulableIfCredenti
 	r.setTempUnschedCalls++
 	r.lastTempUnschedReason = reason
 	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) UpdateClaudeChromeOAuthCredentialsIfUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	credentials map[string]any,
+) (bool, error) {
+	r.conditionalSuccessCalls++
+	if r.conditionalSuccessErr != nil {
+		return false, r.conditionalSuccessErr
+	}
+	account := r.accountsByID[id]
+	if account == nil || !account.IsClaudeChromeOAuth() || account.Status != StatusActive ||
+		!reflect.DeepEqual(account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	r.updateCalls++
+	r.updateCredentialsCalls++
+	account.Credentials = shallowCopyMap(credentials)
+	r.lastAccount = account
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	errorMsg string,
+) (bool, error) {
+	r.conditionalErrorCalls++
+	if r.conditionalErrorErr != nil {
+		return false, r.conditionalErrorErr
+	}
+	account := r.accountsByID[id]
+	if account == nil {
+		return false, nil
+	}
+	if r.reauthorizeOnErrorCAS {
+		r.reauthorizeOnErrorCAS = false
+		account.Credentials = map[string]any{"access_token": "fresh-access"}
+	}
+	if !account.IsClaudeChromeOAuth() || account.Status != StatusActive ||
+		!reflect.DeepEqual(account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	r.setErrorCalls++
+	account.Status = StatusError
+	account.Schedulable = false
+	account.ErrorMessage = errorMsg
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) SetClaudeChromeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	until time.Time,
+	reason string,
+) (bool, error) {
+	r.conditionalTempCalls++
+	if r.conditionalTempErr != nil {
+		return false, r.conditionalTempErr
+	}
+	account := r.accountsByID[id]
+	if account == nil {
+		return false, nil
+	}
+	if r.reauthorizeOnTempCAS {
+		r.reauthorizeOnTempCAS = false
+		account.Credentials = map[string]any{"access_token": "fresh-access"}
+	}
+	if !account.IsClaudeChromeOAuth() || account.Status != StatusActive ||
+		!reflect.DeepEqual(account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	value := until
+	account.TempUnschedulableUntil = &value
+	account.TempUnschedulableReason = reason
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) UpdateClaudeOAuthCredentialsIfUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	expectedType string,
+	credentials map[string]any,
+) (bool, error) {
+	r.conditionalSuccessCalls++
+	if r.conditionalSuccessErr != nil {
+		return false, r.conditionalSuccessErr
+	}
+	account := r.accountsByID[id]
+	if account == nil || account.Platform != PlatformAnthropic ||
+		account.Type != expectedType || account.Status != StatusActive ||
+		!reflect.DeepEqual(account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	r.updateCalls++
+	r.updateCredentialsCalls++
+	account.Credentials = shallowCopyMap(credentials)
+	r.lastAccount = account
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) SetClaudeOAuthRefreshErrorIfCredentialsUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	expectedType string,
+	errorMsg string,
+) (bool, error) {
+	r.conditionalErrorCalls++
+	if r.conditionalErrorErr != nil {
+		return false, r.conditionalErrorErr
+	}
+	account := r.accountsByID[id]
+	if account == nil {
+		return false, nil
+	}
+	if r.reauthorizeOnErrorCAS {
+		r.reauthorizeOnErrorCAS = false
+		account.Credentials = map[string]any{"access_token": "fresh-access"}
+	}
+	if account.Platform != PlatformAnthropic || account.Type != expectedType ||
+		account.Status != StatusActive ||
+		!reflect.DeepEqual(account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	r.setErrorCalls++
+	account.Status = StatusError
+	account.Schedulable = false
+	account.ErrorMessage = errorMsg
+	return true, nil
+}
+
+func (r *tokenRefreshAccountRepo) SetClaudeOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
+	_ context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	expectedProxyID *int64,
+	expectedType string,
+	until time.Time,
+	reason string,
+) (bool, error) {
+	r.conditionalTempCalls++
+	if r.conditionalTempErr != nil {
+		return false, r.conditionalTempErr
+	}
+	account := r.accountsByID[id]
+	if account == nil {
+		return false, nil
+	}
+	if r.reauthorizeOnTempCAS {
+		r.reauthorizeOnTempCAS = false
+		account.Credentials = map[string]any{"access_token": "fresh-access"}
+	}
+	if account.Platform != PlatformAnthropic || account.Type != expectedType ||
+		account.Status != StatusActive ||
+		!reflect.DeepEqual(account.Credentials, expectedCredentials) ||
+		!reflect.DeepEqual(account.ProxyID, expectedProxyID) {
+		return false, nil
+	}
+	value := until
+	account.TempUnschedulableUntil = &value
 	account.TempUnschedulableReason = reason
 	return true, nil
 }
@@ -939,6 +1118,7 @@ func TestIsNonRetryableRefreshError(t *testing.T) {
 		{name: "no_refresh_token", err: errors.New("no refresh token available"), expected: true},
 		{name: "grok_entitlement_denied", err: errors.New("GROK_OAUTH_ENTITLEMENT_DENIED: subscription required"), expected: true},
 		{name: "invalid_scope", err: errors.New("invalid_scope: requested scope is not allowed"), expected: true},
+		{name: "claude_session_key_invalid", err: NewClaudeSessionKeyInvalidError(errors.New("session expired")), expected: true},
 		{name: "invalid_grant_with_desc", err: errors.New("Error: invalid_grant - token revoked"), expected: true},
 		{name: "case_insensitive", err: errors.New("INVALID_GRANT"), expected: true},
 	}
@@ -981,6 +1161,19 @@ func (m *mockTokenCacheForRefreshAPI) AcquireRefreshLock(_ context.Context, _ st
 }
 
 func (m *mockTokenCacheForRefreshAPI) ReleaseRefreshLock(_ context.Context, _ string) error {
+	m.releaseCalls++
+	return nil
+}
+
+func (m *mockTokenCacheForRefreshAPI) AcquireOwnedRefreshLock(_ context.Context, _ string, _ string, _ time.Duration) (bool, error) {
+	return m.lockResult, m.lockErr
+}
+
+func (m *mockTokenCacheForRefreshAPI) RenewOwnedRefreshLock(_ context.Context, _ string, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (m *mockTokenCacheForRefreshAPI) ReleaseOwnedRefreshLock(_ context.Context, _ string, _ string) error {
 	m.releaseCalls++
 	return nil
 }
@@ -1424,6 +1617,71 @@ func TestPathA_GrokPermanentFailureCASLetsConcurrentAccountRepairWin(t *testing.
 			tt.assert(t, account)
 		})
 	}
+}
+
+func TestPathA_ClaudeChromePermanentFailureCASLetsConcurrentReauthorizationWin(t *testing.T) {
+	account := &Account{
+		ID:          122,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"oauth_client":  oauth.OAuthClientClaudeChrome,
+			"access_token":  "attempted-access",
+			"refresh_token": "attempted-refresh",
+			"session_key":   "attempted-session",
+		},
+	}
+	repo := &tokenRefreshAccountRepo{reauthorizeOnErrorCAS: true}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	invalidator := &tokenCacheInvalidatorStub{}
+	cache := &mockTokenCacheForRefreshAPI{lockResult: true}
+	refreshService, _ := buildPathAService(repo, cache, invalidator)
+	blocker := &tokenRefreshRuntimeBlocker{}
+	refreshService.SetAccountRuntimeBlocker(blocker)
+	refresher := &tokenRefresherStub{err: errors.New("claude_session_key_invalid")}
+
+	err := refreshService.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.ErrorIs(t, err, errRefreshSkipped)
+	require.Equal(t, 1, repo.conditionalErrorCalls)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, blocker.blockCalls)
+	require.Zero(t, invalidator.calls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Equal(t, "fresh-access", account.GetCredential("access_token"))
+}
+
+func TestPathA_LegacyClaudePermanentFailureCASLetsProfileTransitionWin(t *testing.T) {
+	account := &Account{
+		ID:          123,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"access_token":  "attempted-access",
+			"refresh_token": "attempted-refresh",
+		},
+	}
+	repo := &tokenRefreshAccountRepo{reauthorizeOnErrorCAS: true}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	invalidator := &tokenCacheInvalidatorStub{}
+	cache := &mockTokenCacheForRefreshAPI{lockResult: true}
+	refreshService, _ := buildPathAService(repo, cache, invalidator)
+	refresher := &tokenRefresherStub{err: errors.New("invalid_grant: revoked")}
+
+	err := refreshService.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.ErrorIs(t, err, errRefreshSkipped)
+	require.Equal(t, 1, repo.conditionalErrorCalls)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, invalidator.calls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Equal(t, "fresh-access", account.GetCredential("access_token"))
 }
 
 func TestPathA_GrokTransientFailureCASLetsConcurrentAccountRepairWin(t *testing.T) {

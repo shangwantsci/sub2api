@@ -259,6 +259,27 @@ func TestComputeFinalAnthropicBeta_RealClaudeCodeDoesNotAppendOAuth(t *testing.T
 	require.Contains(t, got, claude.BetaThinkingTokenCount)
 }
 
+func TestEnsureClaudeChromeOAuthBetaAlwaysAppendsRequiredToken(t *testing.T) {
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_client": "claude_chrome",
+		},
+	}
+
+	got, shouldSet := ensureClaudeChromeOAuthBeta(
+		account,
+		"oauth",
+		"custom-beta-2026-01-01",
+		false,
+	)
+
+	require.True(t, shouldSet)
+	require.Contains(t, got, "custom-beta-2026-01-01")
+	require.Contains(t, got, claude.BetaOAuth)
+}
+
 func TestApplyClaudeCodeMimicHeaders_UsesCapturedProfileHeaders(t *testing.T) {
 	profile := claude.DefaultClaudeCodeMimicryProfile()
 	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true", nil)

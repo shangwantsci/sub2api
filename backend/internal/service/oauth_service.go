@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -33,10 +34,10 @@ type GrokOAuthTokenService interface {
 
 // ClaudeOAuthClient handles HTTP requests for Claude OAuth flows
 type ClaudeOAuthClient interface {
-	GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error)
-	GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error)
-	ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error)
-	RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
+	GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error)
+	GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error)
+	ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error)
+	RefreshToken(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error)
 }
 
 // OAuthService handles OAuth authentication flows
@@ -95,8 +96,8 @@ func (s *OAuthService) generateAuthURLWithScope(ctx context.Context, scope strin
 	// Get proxy URL if specified
 	var proxyURL string
 	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err == nil && proxy != nil {
+		proxy, proxyErr := s.proxyRepo.GetByID(ctx, *proxyID)
+		if proxyErr == nil && proxy != nil {
 			proxyURL = proxy.URL()
 		}
 	}
@@ -138,6 +139,8 @@ type TokenInfo struct {
 	OrgUUID      string `json:"org_uuid,omitempty"`
 	AccountUUID  string `json:"account_uuid,omitempty"`
 	EmailAddress string `json:"email_address,omitempty"`
+	OAuthClient  string `json:"oauth_client,omitempty"`
+	SessionKey   string `json:"session_key,omitempty"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
@@ -151,17 +154,14 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 	// Get proxy URL
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err == nil && proxy != nil {
+		proxy, proxyErr := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+		if proxyErr == nil && proxy != nil {
 			proxyURL = proxy.URL()
 		}
 	}
 
-	// Determine if this is a setup token (scope is inference only)
-	isSetupToken := session.Scope == oauth.ScopeInference
-
 	// Exchange code for token
-	tokenInfo, err := s.exchangeCodeForToken(ctx, input.Code, session.CodeVerifier, session.State, proxyURL, isSetupToken)
+	tokenInfo, err := s.exchangeCodeForToken(ctx, input.Code, session.CodeVerifier, session.State, proxyURL, oauth.ClaudeCodeProfile)
 	if err != nil {
 		return nil, err
 	}
@@ -174,33 +174,51 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, input *ExchangeCodeInpu
 
 // CookieAuthInput represents the input for cookie-based authentication
 type CookieAuthInput struct {
-	SessionKey string
-	ProxyID    *int64
-	Scope      string // "full" or "inference"
+	SessionKey  string
+	ProxyID     *int64
+	Scope       string // "full" or "inference"
+	OAuthClient string
 }
 
 // CookieAuth performs OAuth using sessionKey (cookie-based auto-auth)
 func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (*TokenInfo, error) {
-	// Get proxy URL if specified
+	if input == nil {
+		return nil, fmt.Errorf("cookie auth input is nil")
+	}
+	profile := oauth.ClaudeProfile(input.OAuthClient)
+	sessionKey := input.SessionKey
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		sessionKey = strings.TrimSpace(sessionKey)
+		if sessionKey == "" {
+			return nil, fmt.Errorf("sessionKey is required")
+		}
+	}
 	var proxyURL string
-	if input.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
-		if err == nil && proxy != nil {
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		var err error
+		proxyURL, err = s.resolveProxyURL(ctx, input.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+	} else if input.ProxyID != nil {
+		proxy, proxyErr := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+		if proxyErr == nil && proxy != nil {
 			proxyURL = proxy.URL()
 		}
 	}
 
-	// Determine scope and if this is a setup token
+	// Determine scope.
 	// Internal API call uses ScopeAPI (org:create_api_key not supported)
 	scope := oauth.ScopeAPI
-	isSetupToken := false
 	if input.Scope == "inference" {
 		scope = oauth.ScopeInference
-		isSetupToken = true
+	}
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		scope = oauth.ScopeChrome
 	}
 
 	// Step 1: Get organization info using sessionKey
-	orgUUID, err := s.getOrganizationUUID(ctx, input.SessionKey, proxyURL)
+	orgUUID, err := s.getOrganizationUUID(ctx, sessionKey, proxyURL, profile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get organization info: %w", err)
 	}
@@ -218,13 +236,13 @@ func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (
 	}
 
 	// Step 3: Get authorization code using cookie
-	authCode, err := s.getAuthorizationCode(ctx, input.SessionKey, orgUUID, scope, codeChallenge, state, proxyURL)
+	authCode, err := s.getAuthorizationCode(ctx, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL, profile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get authorization code: %w", err)
 	}
 
 	// Step 4: Exchange code for token
-	tokenInfo, err := s.exchangeCodeForToken(ctx, authCode, codeVerifier, state, proxyURL, isSetupToken)
+	tokenInfo, err := s.exchangeCodeForToken(ctx, authCode, codeVerifier, state, proxyURL, profile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -234,23 +252,27 @@ func (s *OAuthService) CookieAuth(ctx context.Context, input *CookieAuthInput) (
 		tokenInfo.OrgUUID = orgUUID
 		log.Printf("[OAuth] Set org_uuid from cookie auth")
 	}
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		tokenInfo.OAuthClient = profile.Name
+		tokenInfo.SessionKey = sessionKey
+	}
 
 	return tokenInfo, nil
 }
 
 // getOrganizationUUID gets the organization UUID from claude.ai using sessionKey
-func (s *OAuthService) getOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error) {
-	return s.oauthClient.GetOrganizationUUID(ctx, sessionKey, proxyURL)
+func (s *OAuthService) getOrganizationUUID(ctx context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+	return s.oauthClient.GetOrganizationUUID(ctx, sessionKey, proxyURL, profile)
 }
 
 // getAuthorizationCode gets the authorization code using sessionKey
-func (s *OAuthService) getAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error) {
-	return s.oauthClient.GetAuthorizationCode(ctx, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL)
+func (s *OAuthService) getAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+	return s.oauthClient.GetAuthorizationCode(ctx, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL, profile)
 }
 
 // exchangeCodeForToken exchanges authorization code for tokens
-func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*TokenInfo, error) {
-	tokenResp, err := s.oauthClient.ExchangeCodeForToken(ctx, code, codeVerifier, state, proxyURL, isSetupToken)
+func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*TokenInfo, error) {
+	tokenResp, err := s.oauthClient.ExchangeCodeForToken(ctx, code, codeVerifier, state, proxyURL, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -283,20 +305,24 @@ func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerif
 }
 
 // RefreshToken refreshes an OAuth token
-func (s *OAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string) (*TokenInfo, error) {
-	tokenResp, err := s.oauthClient.RefreshToken(ctx, refreshToken, proxyURL)
+func (s *OAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string, profile oauth.ClaudeOAuthProfile) (*TokenInfo, error) {
+	tokenResp, err := s.oauthClient.RefreshToken(ctx, refreshToken, proxyURL, profile)
 	if err != nil {
 		return nil, err
 	}
 
-	return &TokenInfo{
+	tokenInfo := &TokenInfo{
 		AccessToken:  tokenResp.AccessToken,
 		TokenType:    tokenResp.TokenType,
 		ExpiresIn:    tokenResp.ExpiresIn,
 		ExpiresAt:    time.Now().Unix() + tokenResp.ExpiresIn,
 		RefreshToken: tokenResp.RefreshToken,
 		Scope:        tokenResp.Scope,
-	}, nil
+	}
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		tokenInfo.OAuthClient = profile.Name
+	}
+	return tokenInfo, nil
 }
 
 // RefreshAccountToken refreshes token for an account
@@ -306,15 +332,42 @@ func (s *OAuthService) RefreshAccountToken(ctx context.Context, account *Account
 		return nil, fmt.Errorf("no refresh token available")
 	}
 
+	profile := oauth.ClaudeProfile(account.GetCredential("oauth_client"))
 	var proxyURL string
-	if account.ProxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
-		if err == nil && proxy != nil {
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		var err error
+		proxyURL, err = s.resolveProxyURL(ctx, account.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+	} else if account.ProxyID != nil {
+		proxy, proxyErr := s.proxyRepo.GetByID(ctx, *account.ProxyID)
+		if proxyErr == nil && proxy != nil {
 			proxyURL = proxy.URL()
 		}
 	}
+	return s.RefreshToken(ctx, refreshToken, proxyURL, profile)
+}
 
-	return s.RefreshToken(ctx, refreshToken, proxyURL)
+func (s *OAuthService) resolveProxyURL(ctx context.Context, proxyID *int64) (string, error) {
+	if proxyID == nil {
+		return "", nil
+	}
+	if s.proxyRepo == nil {
+		return "", fmt.Errorf("proxy repository is not configured for proxy %d", *proxyID)
+	}
+	proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
+	if err != nil {
+		return "", fmt.Errorf("resolve proxy %d: %w", *proxyID, err)
+	}
+	if proxy == nil {
+		return "", fmt.Errorf("resolve proxy %d: proxy not found", *proxyID)
+	}
+	proxyURL := proxy.URL()
+	if proxyURL == "" {
+		return "", fmt.Errorf("resolve proxy %d: proxy URL is empty", *proxyID)
+	}
+	return proxyURL, nil
 }
 
 // Stop stops the session store cleanup goroutine

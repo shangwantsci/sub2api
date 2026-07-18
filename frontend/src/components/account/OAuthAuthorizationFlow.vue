@@ -37,6 +37,17 @@
                 cookieAuthMethodLabel
               }}</span>
             </label>
+            <label v-if="showChromeCookieOption" class="flex cursor-pointer items-center gap-2">
+              <input
+                v-model="inputMethod"
+                type="radio"
+                value="cookie_chrome"
+                class="text-blue-600 focus:ring-blue-500"
+              />
+              <span class="text-sm text-blue-900 dark:text-blue-200">{{
+                t('admin.accounts.oauth.chromeCookieAuth')
+              }}</span>
+            </label>
             <label v-if="showRefreshTokenOption" class="flex cursor-pointer items-center gap-2">
               <input
                 v-model="inputMethod"
@@ -440,7 +451,7 @@
         </div>
 
         <!-- Cookie Auto-Auth Form -->
-        <div v-if="inputMethod === 'cookie'" class="space-y-4">
+        <div v-if="inputMethod === 'cookie' || inputMethod === 'cookie_chrome'" class="space-y-4">
           <div
             class="rounded-lg border border-blue-300 bg-white/80 p-4 dark:border-blue-600 dark:bg-gray-800/80"
           >
@@ -834,6 +845,7 @@ interface Props {
   allowMultiple?: boolean
   methodLabel?: string
   showCookieOption?: boolean // Whether to show cookie auto-auth option
+  showChromeCookieOption?: boolean // Whether to show Claude for Chrome cookie OAuth
   showRefreshTokenOption?: boolean // Whether to show refresh token input option (OpenAI only)
   showMobileRefreshTokenOption?: boolean // Whether to show mobile refresh token option (OpenAI only)
   showSessionTokenOption?: boolean
@@ -859,6 +871,7 @@ const props = withDefaults(defineProps<Props>(), {
   allowMultiple: false,
   methodLabel: 'Authorization Method',
   showCookieOption: true,
+  showChromeCookieOption: false,
   showRefreshTokenOption: false,
   showMobileRefreshTokenOption: false,
   showSessionTokenOption: false,
@@ -878,6 +891,7 @@ const emit = defineEmits<{
   'generate-url': []
   'exchange-code': [code: string]
   'cookie-auth': [sessionKey: string]
+  'chrome-cookie-auth': [sessionKey: string]
   'validate-refresh-token': [refreshToken: string]
   'validate-mobile-refresh-token': [refreshToken: string]
   'validate-session-token': [sessionToken: string]
@@ -928,7 +942,9 @@ const cookieAuthMethodLabel = computed(() =>
     : t('admin.accounts.oauth.cookieAutoAuth')
 )
 const cookieAuthDescription = computed(() =>
-  isAnthropicSessionBulkImport.value
+  inputMethod.value === 'cookie_chrome'
+    ? t('admin.accounts.oauth.chromeCookieAuthDesc')
+    : isAnthropicSessionBulkImport.value
     ? t('admin.accounts.oauth.anthropicSessionBulkImportDesc')
     : t('admin.accounts.oauth.cookieAutoAuthDesc')
 )
@@ -966,6 +982,7 @@ const projectId = ref('')
 const methodOptionCount = computed(() => [
   props.showManualOption,
   props.showCookieOption,
+  props.showChromeCookieOption,
   props.showRefreshTokenOption,
   props.showMobileRefreshTokenOption,
   props.showSessionTokenOption,
@@ -1074,7 +1091,11 @@ const handleRegenerate = () => {
 
 const handleCookieAuth = () => {
   if (sessionKeyInput.value.trim()) {
-    emit('cookie-auth', sessionKeyInput.value)
+    if (inputMethod.value === 'cookie_chrome') {
+      emit('chrome-cookie-auth', sessionKeyInput.value)
+    } else {
+      emit('cookie-auth', sessionKeyInput.value)
+    }
   }
 }
 

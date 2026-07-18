@@ -1083,6 +1083,109 @@ func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorM
 	return s.accountRepo.SetError(ctx, id, errorMsg)
 }
 
+func (s *adminServiceImpl) SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(
+	ctx context.Context,
+	account *Account,
+	errorMsg string,
+) (bool, error) {
+	if account == nil || !account.IsClaudeChromeOAuth() {
+		return false, errors.New("Claude Chrome OAuth account is required")
+	}
+	conditionalRepo, ok := s.accountRepo.(ClaudeChromeOAuthRefreshMutationRepository)
+	if !ok {
+		return false, errors.New("Claude Chrome OAuth conditional refresh mutation repository is not configured")
+	}
+	return conditionalRepo.SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(
+		ctx,
+		account.ID,
+		account.Credentials,
+		account.ProxyID,
+		errorMsg,
+	)
+}
+
+type claudeOAuthProfileCredentialsCASRepository interface {
+	ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+		ctx context.Context,
+		id int64,
+		expectedCredentials map[string]any,
+		expectedProxyID *int64,
+		expectedType string,
+		expectedStatus string,
+		newType string,
+		credentials map[string]any,
+		extra map[string]any,
+	) (bool, error)
+}
+
+func (s *adminServiceImpl) ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+	ctx context.Context,
+	expected *Account,
+	newType string,
+	credentials map[string]any,
+	extra map[string]any,
+) (*Account, bool, error) {
+	if expected == nil || expected.Platform != PlatformAnthropic || !expected.IsOAuth() {
+		return nil, false, errors.New("Anthropic OAuth account is required")
+	}
+	conditionalRepo, ok := s.accountRepo.(claudeOAuthProfileCredentialsCASRepository)
+	if !ok {
+		return nil, false, errors.New("Claude OAuth profile credential CAS repository is not configured")
+	}
+	applied, err := conditionalRepo.ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+		ctx,
+		expected.ID,
+		expected.Credentials,
+		expected.ProxyID,
+		expected.Type,
+		expected.Status,
+		newType,
+		credentials,
+		extra,
+	)
+	if err != nil || !applied {
+		return nil, applied, err
+	}
+	if expected.Status == StatusError && s.runtimeBlocker != nil {
+		s.runtimeBlocker.ClearAccountSchedulingBlock(expected.ID)
+	}
+	updated, err := s.accountRepo.GetByID(ctx, expected.ID)
+	if err == nil && updated == nil {
+		err = errors.New("Claude OAuth account not found after credential CAS")
+	}
+	return updated, true, err
+}
+
+func (s *adminServiceImpl) UpdateClaudeOAuthCredentialsIfUnchanged(
+	ctx context.Context,
+	expected *Account,
+	credentials map[string]any,
+) (*Account, bool, error) {
+	if expected == nil || expected.Platform != PlatformAnthropic || !expected.IsOAuth() {
+		return nil, false, errors.New("Anthropic OAuth account is required")
+	}
+	conditionalRepo, ok := s.accountRepo.(ClaudeOAuthRefreshSuccessRepository)
+	if !ok {
+		return nil, false, errors.New("Claude OAuth refresh success CAS repository is not configured")
+	}
+	applied, err := conditionalRepo.UpdateClaudeOAuthCredentialsIfUnchanged(
+		ctx,
+		expected.ID,
+		expected.Credentials,
+		expected.ProxyID,
+		expected.Type,
+		credentials,
+	)
+	if err != nil || !applied {
+		return nil, applied, err
+	}
+	updated, err := s.accountRepo.GetByID(ctx, expected.ID)
+	if err == nil && updated == nil {
+		err = errors.New("Claude OAuth account not found after refresh credential CAS")
+	}
+	return updated, true, err
+}
+
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
 	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
 		return nil, err

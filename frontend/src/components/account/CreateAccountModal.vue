@@ -3209,6 +3209,11 @@
         :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
+        :show-chrome-cookie-option="
+          form.platform === 'anthropic' &&
+          addMethod === 'oauth' &&
+          !isAnthropicSessionImportMode
+        "
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
@@ -3224,6 +3229,7 @@
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
+        @chrome-cookie-auth="handleChromeCookieAuth"
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
@@ -6466,7 +6472,10 @@ const handleAnthropicSessionBulkImport = async (content: string) => {
   }
 }
 
-const handleCookieAuth = async (sessionKey: string) => {
+const handleCookieAuth = async (
+  sessionKey: string,
+  useChromeProfile = false
+) => {
   oauth.loading.value = true
   oauth.error.value = ''
 
@@ -6494,9 +6503,11 @@ const handleCookieAuth = async (sessionKey: string) => {
     }
 
     const endpoint =
-      addMethod.value === 'oauth'
-        ? '/admin/accounts/cookie-auth'
-        : '/admin/accounts/setup-token-cookie-auth'
+      useChromeProfile
+        ? '/admin/accounts/chrome-cookie-auth'
+        : addMethod.value === 'oauth'
+          ? '/admin/accounts/cookie-auth'
+          : '/admin/accounts/setup-token-cookie-auth'
 
     let successCount = 0
     let failedCount = 0
@@ -6600,7 +6611,11 @@ const handleCookieAuth = async (sessionKey: string) => {
         errors.push(
           t('admin.accounts.oauth.keyAuthFailed', {
             index: i + 1,
-            error: error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+            error:
+              error?.message ||
+              error?.reason ||
+              error?.response?.data?.detail ||
+              t('admin.accounts.oauth.authFailed')
           })
         )
       }
@@ -6620,9 +6635,16 @@ const handleCookieAuth = async (sessionKey: string) => {
       oauth.error.value = errors.join('\n')
     }
   } catch (error: any) {
-    oauth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+    oauth.error.value =
+      error?.message ||
+      error?.reason ||
+      error?.response?.data?.detail ||
+      t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     oauth.loading.value = false
   }
 }
+
+const handleChromeCookieAuth = (sessionKey: string) =>
+  handleCookieAuth(sessionKey, true)
 </script>

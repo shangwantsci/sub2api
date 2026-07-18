@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/tidwall/gjson"
 
@@ -122,11 +123,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		calProfile, tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
 	)
 
-	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值（由下方 ApplyHeaderOverrides 写入）：
-	// body 能力净化必须以覆写值为准，否则 header/body 不对称会被上游 400。
+	// 账号覆写先参与最终值；Claude Chrome OAuth 随后强制补回鉴权所需 beta。
+	// body 能力净化必须以该最终值为准，否则 header/body 不对称会被上游 400。
 	if beta, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
 		finalBetaHeader, finalBetaShouldSet = beta, true
 	}
+	finalBetaHeader, finalBetaShouldSet = ensureClaudeChromeOAuthBeta(
+		account, tokenType, finalBetaHeader, finalBetaShouldSet,
+	)
 
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
@@ -432,6 +436,15 @@ func mergeAnthropicBeta(required []string, incoming string) string {
 		add(p)
 	}
 	return strings.Join(out, ",")
+}
+
+func ensureClaudeChromeOAuthBeta(account *Account, tokenType, current string, shouldSet bool) (string, bool) {
+	if tokenType != "oauth" ||
+		account == nil ||
+		account.GetCredential("oauth_client") != oauth.OAuthClientClaudeChrome {
+		return current, shouldSet
+	}
+	return mergeAnthropicBeta([]string{claude.BetaOAuth}, current), true
 }
 
 func mergeAnthropicBetaDropping(required []string, incoming string, drop map[string]struct{}) string {

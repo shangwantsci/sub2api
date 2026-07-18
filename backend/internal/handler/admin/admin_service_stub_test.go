@@ -35,6 +35,7 @@ type stubAdminService struct {
 	bulkUpdateAccountErr                error
 	getAccountResult                    *service.Account
 	updateAccountCalls                  int
+	lastUpdateAccountInput              *service.UpdateAccountInput
 	updateAccountExtraCalls             int
 	checkMixedErr                       error
 	lastMixedCheck                      struct {
@@ -429,11 +430,61 @@ func (s *stubAdminService) RecoverDuplicateAccount(ctx context.Context, id int64
 
 func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
 	s.updateAccountCalls++
+	s.lastUpdateAccountInput = input
 	if s.updateAccountErr != nil {
 		return nil, s.updateAccountErr
 	}
 	account := service.Account{ID: id, Name: input.Name, Status: service.StatusActive}
 	return &account, nil
+}
+
+func (s *stubAdminService) ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+	_ context.Context,
+	expected *service.Account,
+	newType string,
+	credentials map[string]any,
+	extra map[string]any,
+) (*service.Account, bool, error) {
+	s.updateAccountCalls++
+	s.lastUpdateAccountInput = &service.UpdateAccountInput{
+		Type:        newType,
+		Credentials: credentials,
+		Extra:       extra,
+	}
+	if s.updateAccountErr != nil {
+		return nil, false, s.updateAccountErr
+	}
+	account := *expected
+	account.Type = newType
+	account.Credentials = credentials
+	account.Extra = make(map[string]any, len(expected.Extra)+len(extra))
+	for key, value := range expected.Extra {
+		account.Extra[key] = value
+	}
+	for key, value := range extra {
+		account.Extra[key] = value
+	}
+	if account.Status == service.StatusError {
+		account.Status = service.StatusActive
+		account.Schedulable = true
+		account.ErrorMessage = ""
+	}
+	return &account, true, nil
+}
+
+func (s *stubAdminService) UpdateClaudeOAuthCredentialsIfUnchanged(
+	_ context.Context,
+	expected *service.Account,
+	credentials map[string]any,
+) (*service.Account, bool, error) {
+	s.updateAccountCalls++
+	s.lastUpdateAccountInput = &service.UpdateAccountInput{Credentials: credentials}
+	if s.updateAccountErr != nil {
+		return nil, false, s.updateAccountErr
+	}
+	account := *expected
+	account.Credentials = credentials
+	return &account, true, nil
 }
 
 func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {

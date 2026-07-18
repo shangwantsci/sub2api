@@ -10,41 +10,42 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/stretchr/testify/require"
 )
 
 // --- mock: ClaudeOAuthClient ---
 
 type mockClaudeOAuthClient struct {
-	getOrgUUIDFunc   func(ctx context.Context, sessionKey, proxyURL string) (string, error)
-	getAuthCodeFunc  func(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error)
-	exchangeCodeFunc func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error)
-	refreshTokenFunc func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
+	getOrgUUIDFunc   func(ctx context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error)
+	getAuthCodeFunc  func(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error)
+	exchangeCodeFunc func(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error)
+	refreshTokenFunc func(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error)
 }
 
-func (m *mockClaudeOAuthClient) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error) {
+func (m *mockClaudeOAuthClient) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
 	if m.getOrgUUIDFunc != nil {
-		return m.getOrgUUIDFunc(ctx, sessionKey, proxyURL)
+		return m.getOrgUUIDFunc(ctx, sessionKey, proxyURL, profile)
 	}
 	panic("GetOrganizationUUID not implemented")
 }
 
-func (m *mockClaudeOAuthClient) GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error) {
+func (m *mockClaudeOAuthClient) GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
 	if m.getAuthCodeFunc != nil {
-		return m.getAuthCodeFunc(ctx, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL)
+		return m.getAuthCodeFunc(ctx, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL, profile)
 	}
 	panic("GetAuthorizationCode not implemented")
 }
 
-func (m *mockClaudeOAuthClient) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+func (m *mockClaudeOAuthClient) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 	if m.exchangeCodeFunc != nil {
-		return m.exchangeCodeFunc(ctx, code, codeVerifier, state, proxyURL, isSetupToken)
+		return m.exchangeCodeFunc(ctx, code, codeVerifier, state, proxyURL, profile)
 	}
 	panic("ExchangeCodeForToken not implemented")
 }
 
-func (m *mockClaudeOAuthClient) RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+func (m *mockClaudeOAuthClient) RefreshToken(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 	if m.refreshTokenFunc != nil {
-		return m.refreshTokenFunc(ctx, refreshToken, proxyURL)
+		return m.refreshTokenFunc(ctx, refreshToken, proxyURL, profile)
 	}
 	panic("RefreshToken not implemented")
 }
@@ -241,18 +242,126 @@ func TestOAuthService_ExchangeCode_SessionNotFound(t *testing.T) {
 	}
 }
 
+func TestOAuthService_CookieAuthChromeUsesProfileAndProxy(t *testing.T) {
+	t.Parallel()
+
+	proxyID := int64(42)
+	const wantProxy = "http://proxy.example.com:8080"
+	client := &mockClaudeOAuthClient{
+		getOrgUUIDFunc: func(_ context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			if sessionKey != "session-key" || proxyURL != wantProxy {
+				t.Fatalf("organization request got session=%q proxy=%q", sessionKey, proxyURL)
+			}
+			require.Equal(t, oauth.OAuthClientClaudeChrome, profile.Name)
+			return "org-1", nil
+		},
+		getAuthCodeFunc: func(_ context.Context, sessionKey, orgUUID, scope, _, _, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			if sessionKey != "session-key" || orgUUID != "org-1" || proxyURL != wantProxy {
+				t.Fatalf("authorize request got session=%q org=%q proxy=%q", sessionKey, orgUUID, proxyURL)
+			}
+			if scope != oauth.ScopeChrome || profile.Name != oauth.OAuthClientClaudeChrome {
+				t.Fatalf("authorize profile got scope=%q profile=%q", scope, profile.Name)
+			}
+			return "code#state", nil
+		},
+		exchangeCodeFunc: func(_ context.Context, _, _, _, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
+			if proxyURL != wantProxy || profile.Name != oauth.OAuthClientClaudeChrome {
+				t.Fatalf("exchange got proxy=%q profile=%q", proxyURL, profile.Name)
+			}
+			return &oauth.TokenResponse{
+				AccessToken:  "access-token",
+				RefreshToken: "refresh-token",
+				TokenType:    "Bearer",
+				ExpiresIn:    28800,
+			}, nil
+		},
+	}
+	proxyRepo := &mockProxyRepoForOAuth{
+		getByIDFunc: func(_ context.Context, id int64) (*Proxy, error) {
+			require.Equal(t, proxyID, id)
+			return &Proxy{Protocol: "http", Host: "proxy.example.com", Port: 8080}, nil
+		},
+	}
+	svc := NewOAuthService(proxyRepo, client)
+	defer svc.Stop()
+
+	tokenInfo, err := svc.CookieAuth(context.Background(), &CookieAuthInput{
+		SessionKey:  "session-key",
+		ProxyID:     &proxyID,
+		Scope:       "full",
+		OAuthClient: oauth.OAuthClientClaudeChrome,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, oauth.OAuthClientClaudeChrome, tokenInfo.OAuthClient)
+	require.Equal(t, "session-key", tokenInfo.SessionKey)
+	require.Equal(t, "org-1", tokenInfo.OrgUUID)
+}
+
+func TestOAuthService_CookieAuthChromeDoesNotBypassMissingProxy(t *testing.T) {
+	t.Parallel()
+
+	proxyID := int64(99)
+	svc := NewOAuthService(&mockProxyRepoForOAuth{}, &mockClaudeOAuthClient{})
+	defer svc.Stop()
+
+	_, err := svc.CookieAuth(context.Background(), &CookieAuthInput{
+		SessionKey:  "session-key",
+		ProxyID:     &proxyID,
+		OAuthClient: oauth.OAuthClientClaudeChrome,
+	})
+
+	require.ErrorContains(t, err, "resolve proxy 99")
+}
+
+func TestOAuthService_LegacyCookieAuthKeepsProxyFallbackBehavior(t *testing.T) {
+	t.Parallel()
+
+	proxyID := int64(99)
+	client := &mockClaudeOAuthClient{
+		getOrgUUIDFunc: func(_ context.Context, _, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeCode, profile.Name)
+			return "org-1", nil
+		},
+		getAuthCodeFunc: func(_ context.Context, _, _, _, _, _, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeCode, profile.Name)
+			return "code#state", nil
+		},
+		exchangeCodeFunc: func(_ context.Context, _, _, _, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
+			require.Empty(t, proxyURL)
+			require.Equal(t, oauth.OAuthClientClaudeCode, profile.Name)
+			return &oauth.TokenResponse{AccessToken: "legacy-token", ExpiresIn: 3600}, nil
+		},
+	}
+	svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
+	defer svc.Stop()
+
+	tokenInfo, err := svc.CookieAuth(context.Background(), &CookieAuthInput{
+		SessionKey: "session-key",
+		ProxyID:    &proxyID,
+		Scope:      "full",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "legacy-token", tokenInfo.AccessToken)
+	require.Empty(t, tokenInfo.OAuthClient)
+	require.Empty(t, tokenInfo.SessionKey)
+}
+
 func TestOAuthService_ExchangeCode_Success(t *testing.T) {
 	t.Parallel()
 
 	exchangeCalled := false
 	client := &mockClaudeOAuthClient{
-		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			exchangeCalled = true
 			if code != "auth-code-123" {
 				t.Errorf("code 不匹配: got=%q", code)
 			}
-			if isSetupToken {
-				t.Error("isSetupToken 应为 false（ScopeOAuth）")
+			if profile.Name != oauth.OAuthClientClaudeCode {
+				t.Errorf("profile 不匹配: got=%q", profile.Name)
 			}
 			return &oauth.TokenResponse{
 				AccessToken:  "access-token-abc",
@@ -323,10 +432,7 @@ func TestOAuthService_ExchangeCode_SetupToken(t *testing.T) {
 	t.Parallel()
 
 	client := &mockClaudeOAuthClient{
-		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
-			if !isSetupToken {
-				t.Error("isSetupToken 应为 true（ScopeInference）")
-			}
+		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			return &oauth.TokenResponse{
 				AccessToken: "setup-token",
 				TokenType:   "Bearer",
@@ -361,7 +467,7 @@ func TestOAuthService_ExchangeCode_ClientError(t *testing.T) {
 	t.Parallel()
 
 	client := &mockClaudeOAuthClient{
-		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			return nil, fmt.Errorf("upstream error: invalid code")
 		},
 	}
@@ -386,7 +492,7 @@ func TestOAuthService_RefreshToken(t *testing.T) {
 	t.Parallel()
 
 	client := &mockClaudeOAuthClient{
-		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			if refreshToken != "my-refresh-token" {
 				t.Errorf("refreshToken 不匹配: got=%q", refreshToken)
 			}
@@ -406,7 +512,7 @@ func TestOAuthService_RefreshToken(t *testing.T) {
 	svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
 	defer svc.Stop()
 
-	tokenInfo, err := svc.RefreshToken(context.Background(), "my-refresh-token", "")
+	tokenInfo, err := svc.RefreshToken(context.Background(), "my-refresh-token", "", oauth.ClaudeCodeProfile)
 	if err != nil {
 		t.Fatalf("RefreshToken 返回错误: %v", err)
 	}
@@ -428,7 +534,7 @@ func TestOAuthService_RefreshToken_Error(t *testing.T) {
 	t.Parallel()
 
 	client := &mockClaudeOAuthClient{
-		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			return nil, fmt.Errorf("invalid_grant: token expired")
 		},
 	}
@@ -436,7 +542,7 @@ func TestOAuthService_RefreshToken_Error(t *testing.T) {
 	svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
 	defer svc.Stop()
 
-	_, err := svc.RefreshToken(context.Background(), "expired-token", "")
+	_, err := svc.RefreshToken(context.Background(), "expired-token", "", oauth.ClaudeCodeProfile)
 	if err == nil {
 		t.Fatal("RefreshToken 应返回错误")
 	}
@@ -491,7 +597,7 @@ func TestOAuthService_RefreshAccountToken_Success(t *testing.T) {
 	t.Parallel()
 
 	client := &mockClaudeOAuthClient{
-		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			if refreshToken != "account-refresh-token" {
 				t.Errorf("refreshToken 不匹配: got=%q", refreshToken)
 			}
@@ -542,7 +648,7 @@ func TestOAuthService_RefreshAccountToken_WithProxy(t *testing.T) {
 	}
 
 	client := &mockClaudeOAuthClient{
-		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+		refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			if proxyURL != "socks5://user:pass@socks.example.com:1080" {
 				t.Errorf("proxyURL 不匹配: got=%q", proxyURL)
 			}
@@ -577,7 +683,7 @@ func TestOAuthService_ExchangeCode_NilOrg(t *testing.T) {
 	t.Parallel()
 
 	client := &mockClaudeOAuthClient{
-		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 			return &oauth.TokenResponse{
 				AccessToken:  "token-no-org",
 				TokenType:    "Bearer",

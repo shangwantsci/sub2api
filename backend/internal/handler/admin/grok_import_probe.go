@@ -183,6 +183,7 @@ func ProvideAccountHandler(
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	grokQuotaService *service.GrokQuotaService,
+	oauthRefreshAPI *service.OAuthRefreshAPI,
 ) *AccountHandler {
 	handler := NewAccountHandler(
 		adminService,
@@ -201,5 +202,7 @@ func ProvideAccountHandler(
 		tokenCacheInvalidator,
 	)
 	handler.grokImportProber = grokQuotaService
+	handler.oauthRefreshAPI = oauthRefreshAPI
+	handler.claudeSessionRefresher = service.NewClaudeSessionKeyRefresher(oauthService)
 	return handler
 }

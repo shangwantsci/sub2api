@@ -254,6 +254,17 @@ export async function refreshCredentials(id: number): Promise<Account> {
 }
 
 /**
+ * Force a Claude Chrome OAuth account to obtain a new token pair with its
+ * stored sessionKey. The backend uses the account's configured proxy.
+ */
+export async function refreshCookieAuth(id: number): Promise<Account> {
+  const { data } = await apiClient.post<Account>(
+    `/admin/accounts/${id}/refresh-cookie-auth`
+  )
+  return data
+}
+
+/**
  * Apply OAuth credentials after re-authorization.
  *
  * Unlike `update()`, this endpoint:
@@ -890,6 +901,7 @@ export const accountsAPI = {
   toggleStatus,
   testAccount,
   refreshCredentials,
+  refreshCookieAuth,
   applyOAuthCredentials,
   getStats,
   clearError,

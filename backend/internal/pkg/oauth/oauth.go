@@ -17,11 +17,14 @@ import (
 const (
 	// OAuth Client ID for Claude
 	ClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	// OAuth Client ID used by the official Claude for Chrome extension.
+	ChromeClientID = "dae2cad8-15c5-43d2-9046-fcaecc135fa4"
 
 	// OAuth endpoints
-	AuthorizeURL = "https://claude.ai/oauth/authorize"
-	TokenURL     = "https://platform.claude.com/v1/oauth/token"
-	RedirectURI  = "https://platform.claude.com/oauth/code/callback"
+	AuthorizeURL      = "https://claude.ai/oauth/authorize"
+	TokenURL          = "https://platform.claude.com/v1/oauth/token"
+	RedirectURI       = "https://platform.claude.com/oauth/code/callback"
+	ChromeRedirectURI = "chrome-extension://fcoeoabgfenejglbffodgkkbkcdhcgfn/oauth_callback.html"
 
 	// Scopes - Browser URL (includes org:create_api_key for user authorization)
 	ScopeOAuth = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
@@ -29,10 +32,49 @@ const (
 	ScopeAPI = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 	// Scopes - Setup token (inference only)
 	ScopeInference = "user:inference"
+	// Scopes - Claude for Chrome extension.
+	ScopeChrome = "user:chat user:inference user:profile"
+
+	OAuthClientClaudeCode   = "claude_code"
+	OAuthClientClaudeChrome = "claude_chrome"
+	OAuthBetaHeader         = "oauth-2025-04-20"
 
 	// Session TTL
 	SessionTTL = 30 * time.Minute
 )
+
+// ClaudeOAuthProfile contains the public-client parameters that must remain
+// consistent across authorization-code exchange and refresh-token rotation.
+type ClaudeOAuthProfile struct {
+	Name            string
+	ClientID        string
+	RedirectURI     string
+	TokenBetaHeader string
+}
+
+var (
+	ClaudeCodeProfile = ClaudeOAuthProfile{
+		Name:        OAuthClientClaudeCode,
+		ClientID:    ClientID,
+		RedirectURI: RedirectURI,
+	}
+	ClaudeChromeProfile = ClaudeOAuthProfile{
+		Name:            OAuthClientClaudeChrome,
+		ClientID:        ChromeClientID,
+		RedirectURI:     ChromeRedirectURI,
+		TokenBetaHeader: OAuthBetaHeader,
+	}
+)
+
+// ClaudeProfile returns the registered OAuth profile. Empty and unknown
+// values deliberately fall back to the long-standing Claude Code profile so
+// existing account rows remain compatible.
+func ClaudeProfile(name string) ClaudeOAuthProfile {
+	if strings.TrimSpace(name) == OAuthClientClaudeChrome {
+		return ClaudeChromeProfile
+	}
+	return ClaudeCodeProfile
+}
 
 // OAuthSession stores OAuth flow state
 

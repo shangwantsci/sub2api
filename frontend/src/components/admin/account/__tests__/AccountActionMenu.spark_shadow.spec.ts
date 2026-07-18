@@ -173,4 +173,62 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
 
     wrapper.unmount()
   })
+
+  it('Claude Chrome OAuth 账号显示并触发 SessionKey 刷新', async () => {
+    const account = makeAccount({
+      platform: 'anthropic',
+      type: 'oauth',
+      credentials: { oauth_client: 'claude_chrome' },
+      credentials_status: { has_session_key: true },
+      parent_account_id: null,
+    })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, position },
+      attachTo: document.body,
+    })
+
+    const refreshCookieBtn = getBodyButtons().find(button =>
+      button.textContent?.includes('admin.accounts.refreshWithSessionKey')
+    )
+    expect(refreshCookieBtn).toBeDefined()
+
+    refreshCookieBtn!.click()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('refresh-cookie')?.[0]?.[0]).toMatchObject({ id: account.id })
+    wrapper.unmount()
+  })
+
+  it('没有 SessionKey 的 Claude Chrome OAuth 账号不显示刷新入口', () => {
+    const account = makeAccount({
+      platform: 'anthropic',
+      type: 'oauth',
+      credentials: { oauth_client: 'claude_chrome' },
+      credentials_status: { has_session_key: false },
+      parent_account_id: null,
+    })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, position },
+      attachTo: document.body,
+    })
+
+    expect(getBodyText()).not.toContain('admin.accounts.refreshWithSessionKey')
+    wrapper.unmount()
+  })
+
+  it('普通 Claude OAuth 账号不显示 SessionKey 刷新', () => {
+    const account = makeAccount({
+      platform: 'anthropic',
+      type: 'oauth',
+      credentials: { oauth_client: 'claude_code' },
+      parent_account_id: null,
+    })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, position },
+      attachTo: document.body,
+    })
+
+    expect(getBodyText()).not.toContain('admin.accounts.refreshWithSessionKey')
+    wrapper.unmount()
+  })
 })

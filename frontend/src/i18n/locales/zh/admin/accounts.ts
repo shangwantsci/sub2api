@@ -214,6 +214,9 @@ export default {
       testConnection: '测试连接',
       reAuthorize: '重新授权',
       refreshToken: '刷新令牌',
+      refreshWithSessionKey: '使用 SessionKey 重新授权',
+      refreshWithSessionKeySuccess: '已通过 SessionKey 更新令牌',
+      refreshWithSessionKeyFailed: 'SessionKey 重新授权失败',
       noAccountsYet: '暂无账号',
       createFirstAccount: '添加 AI 平台账号以开始使用 API 网关。',
       tokenRefreshed: 'Token 刷新成功',
@@ -901,6 +904,9 @@ export default {
         manualAuth: '手动授权',
         cookieAutoAuth: 'Cookie 自动授权',
         cookieAutoAuthDesc: '使用 claude.ai sessionKey 自动完成 OAuth 授权，无需手动打开浏览器。',
+        chromeCookieAuth: 'Chrome Cookie 授权',
+        chromeCookieAuthDesc:
+          '使用 Claude for Chrome OAuth 客户端授权。令牌会自动刷新，refresh token 失效时使用保存的 sessionKey 自愈。',
         anthropicSessionBulkImport: '批量导入 sessionKey',
         anthropicSessionBulkImportDesc:
           '每行粘贴一个 claude.ai sessionKey。导入时会自动换取 setup-token、自动分配代理，并按邮箱 + 订阅类型命名。',
@@ -921,7 +927,7 @@ export default {
         step4: '找到 Cookies → https://claude.ai',
         step5: '找到 sessionKey 所在行',
         step6: '复制 Value 列的值',
-        sessionKeyFormat: 'sessionKey 通常以 sk-ant-sid01- 开头',
+        sessionKeyFormat: 'sessionKey 通常以 sk-ant-sid01- 或 sk-ant-sid02- 开头',
         startAutoAuth: '开始自动授权',
         startBatchImport: '开始批量导入',
         authorizing: '授权中...',

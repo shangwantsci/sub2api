@@ -130,12 +130,14 @@
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
         :show-cookie-option="isAnthropic"
+        :show-chrome-cookie-option="isAnthropic && addMethod === 'oauth'"
         :allow-multiple="false"
         :method-label="t('admin.accounts.inputMethod')"
         :platform="isOpenAI ? 'openai' : isGemini ? 'gemini' : isAntigravity ? 'antigravity' : isGrok ? 'grok' : 'anthropic'"
         :show-project-id="isGemini && geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
+        @chrome-cookie-auth="handleChromeCookieAuth"
       />
 
     </div>
@@ -537,7 +539,10 @@ const handleExchangeCode = async () => {
   }
 }
 
-const handleCookieAuth = async (sessionKey: string) => {
+const handleCookieAuth = async (
+  sessionKey: string,
+  useChromeProfile = false
+) => {
   if (!props.account || isOpenAILike.value) return
 
   claudeOAuth.loading.value = true
@@ -546,9 +551,11 @@ const handleCookieAuth = async (sessionKey: string) => {
   try {
     const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
     const endpoint =
-      addMethod.value === 'oauth'
-        ? '/admin/accounts/cookie-auth'
-        : '/admin/accounts/setup-token-cookie-auth'
+      useChromeProfile
+        ? '/admin/accounts/chrome-cookie-auth'
+        : addMethod.value === 'oauth'
+          ? '/admin/accounts/cookie-auth'
+          : '/admin/accounts/setup-token-cookie-auth'
 
     const tokenInfo = await adminAPI.accounts.exchangeCode(endpoint, {
       session_id: '',
@@ -569,9 +576,15 @@ const handleCookieAuth = async (sessionKey: string) => {
     handleClose()
   } catch (error: any) {
     claudeOAuth.error.value =
-      error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
+      error?.message ||
+      error?.reason ||
+      error?.response?.data?.detail ||
+      t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     claudeOAuth.loading.value = false
   }
 }
+
+const handleChromeCookieAuth = (sessionKey: string) =>
+  handleCookieAuth(sessionKey, true)
 </script>

@@ -54,4 +54,36 @@ describe('OAuthAuthorizationFlow', () => {
     expect(wrapper.text()).toContain('admin.accounts.oauth.startBatchImport')
     expect(wrapper.find('textarea').attributes('rows')).toBe('8')
   })
+
+  it('emits the Claude Chrome profile for Chrome cookie authorization', async () => {
+    const wrapper = mount(OAuthAuthorizationFlow, {
+      props: {
+        addMethod: 'oauth',
+        platform: 'anthropic',
+        showCookieOption: true,
+        showChromeCookieOption: true,
+        initialInputMethod: 'cookie_chrome'
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.oauth.chromeCookieAuth')
+    expect(wrapper.text()).toContain('admin.accounts.oauth.chromeCookieAuthDesc')
+
+    await wrapper.find('textarea').setValue('sk-ant-sid02-test')
+    const submit = wrapper.findAll('button').find((button) =>
+      button.text().includes('admin.accounts.oauth.startAutoAuth')
+    )
+    expect(submit).toBeDefined()
+    await submit!.trigger('click')
+
+    expect(wrapper.emitted('chrome-cookie-auth')).toEqual([
+      ['sk-ant-sid02-test']
+    ])
+    expect(wrapper.emitted('cookie-auth')).toBeUndefined()
+  })
 })

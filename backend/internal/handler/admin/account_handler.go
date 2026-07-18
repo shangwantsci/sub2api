@@ -23,6 +23,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -62,10 +63,50 @@ type AccountHandler struct {
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 	grokImportProber        grokUsageProber
+	oauthRefreshAPI         *service.OAuthRefreshAPI
+	claudeSessionRefresher  *service.ClaudeSessionKeyRefresher
 
 	anthropicSessionImportMu     sync.Mutex
 	anthropicSessionImportJobs   map[string]*anthropicSessionImportJob
 	anthropicSessionImportActive string
+}
+
+type claudeChromeOAuthConditionalErrorSetter interface {
+	SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(
+		ctx context.Context,
+		account *service.Account,
+		errorMsg string,
+	) (bool, error)
+}
+
+type claudeOAuthProfileCredentialsCASApplier interface {
+	ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+		ctx context.Context,
+		expected *service.Account,
+		newType string,
+		credentials map[string]any,
+		extra map[string]any,
+	) (*service.Account, bool, error)
+}
+
+type claudeOAuthCredentialsCASUpdater interface {
+	UpdateClaudeOAuthCredentialsIfUnchanged(
+		ctx context.Context,
+		expected *service.Account,
+		credentials map[string]any,
+	) (*service.Account, bool, error)
+}
+
+func (h *AccountHandler) setClaudeChromeRefreshErrorIfUnchanged(
+	ctx context.Context,
+	account *service.Account,
+	errorMsg string,
+) (bool, error) {
+	setter, ok := h.adminService.(claudeChromeOAuthConditionalErrorSetter)
+	if !ok {
+		return false, errors.New("Claude Chrome OAuth conditional error setter is not configured")
+	}
+	return setter.SetClaudeChromeOAuthRefreshErrorIfCredentialsUnchanged(ctx, account, errorMsg)
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -1252,7 +1293,59 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			newCredentials["base_url"] = baseURL
 		}
 	} else {
-		// Use Anthropic/Claude OAuth service to refresh token
+		// Production path: serialize manual rotation with background and
+		// request-path refreshes. Claude Chrome accounts also receive the same
+		// refresh-token -> stored-sessionKey fallback under this lock.
+		if h.oauthRefreshAPI != nil &&
+			account.GetCredential("oauth_client") == oauth.OAuthClientClaudeChrome {
+			executor := service.NewClaudeTokenRefresher(h.oauthService)
+			result, refreshErr := h.oauthRefreshAPI.RefreshIfNeeded(ctx, account, executor, 0, true)
+			if refreshErr != nil {
+				if service.IsClaudeSessionKeyInvalidError(refreshErr) {
+					attemptedAccount := account
+					if result != nil && result.Account != nil {
+						attemptedAccount = result.Account
+					}
+					errorMessage := "CLAUDE_SESSION_KEY_INVALID: stored sessionKey was rejected; paste a new sessionKey to re-authorize"
+					applied, setErr := h.setClaudeChromeRefreshErrorIfUnchanged(ctx, attemptedAccount, errorMessage)
+					if setErr != nil {
+						return nil, "", fmt.Errorf("token refresh failed and account quarantine failed: %w", setErr)
+					}
+					if !applied {
+						currentAccount, getErr := h.adminService.GetAccount(ctx, account.ID)
+						if getErr != nil {
+							return nil, "", getErr
+						}
+						return currentAccount, "", nil
+					}
+					if h.tokenCacheInvalidator != nil {
+						_ = h.tokenCacheInvalidator.InvalidateToken(ctx, attemptedAccount)
+					}
+				}
+				return nil, "", refreshErr
+			}
+			if result == nil || result.LockHeld {
+				return nil, "", infraerrors.Conflict("TOKEN_REFRESH_IN_PROGRESS", "another token refresh is already in progress")
+			}
+			if !result.Refreshed {
+				return nil, "", infraerrors.BadRequest("ACCOUNT_NOT_REFRESHABLE", "account is not active or no longer refreshable")
+			}
+			updatedAccount := result.Account
+			if updatedAccount == nil {
+				updatedAccount, refreshErr = h.adminService.GetAccount(ctx, account.ID)
+				if refreshErr != nil {
+					return nil, "", refreshErr
+				}
+			}
+			if h.tokenCacheInvalidator != nil {
+				if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
+					log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
+				}
+			}
+			return updatedAccount, "", nil
+		}
+
+		// Keep the existing Claude Code Cookie/manual OAuth refresh path unchanged.
 		tokenInfo, err := h.oauthService.RefreshAccountToken(ctx, account)
 		if err != nil {
 			return nil, "", err
@@ -1277,9 +1370,23 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 		}
 	}
 
-	updatedAccount, err := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
-	})
+	var updatedAccount *service.Account
+	var err error
+	if account.Platform == service.PlatformAnthropic && account.IsOAuth() {
+		updater, ok := h.adminService.(claudeOAuthCredentialsCASUpdater)
+		if !ok {
+			return nil, "", errors.New("Claude OAuth credential CAS updater is not configured")
+		}
+		var applied bool
+		updatedAccount, applied, err = updater.UpdateClaudeOAuthCredentialsIfUnchanged(ctx, account, newCredentials)
+		if err == nil && !applied {
+			updatedAccount, err = h.adminService.GetAccount(ctx, account.ID)
+		}
+	} else {
+		updatedAccount, err = h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
+			Credentials: newCredentials,
+		})
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -1332,6 +1439,104 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount))
 }
 
+// RefreshCookieAuth forces a Claude Chrome account to obtain a fresh rotating
+// token pair with its stored sessionKey. OAuthRefreshAPI keeps this operation
+// serialized with background and request-path refreshes.
+// POST /api/v1/admin/accounts/:id/refresh-cookie-auth
+func (h *AccountHandler) RefreshCookieAuth(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	ctx := c.Request.Context()
+	account, err := h.adminService.GetAccount(ctx, accountID)
+	if err != nil {
+		response.NotFound(c, "Account not found")
+		return
+	}
+	if account.Platform != service.PlatformAnthropic || !account.IsOAuth() {
+		response.ErrorFrom(c, infraerrors.BadRequest("NOT_CLAUDE_OAUTH", "sessionKey refresh requires an Anthropic OAuth account"))
+		return
+	}
+	if !account.IsActive() {
+		response.ErrorFrom(c, infraerrors.BadRequest("ACCOUNT_NOT_ACTIVE", "reactivate or re-authorize the account before refreshing its stored sessionKey"))
+		return
+	}
+	if account.GetCredential("oauth_client") != oauth.OAuthClientClaudeChrome {
+		response.ErrorFrom(c, infraerrors.BadRequest("NOT_CLAUDE_CHROME", "sessionKey refresh requires a Claude Chrome OAuth account"))
+		return
+	}
+	if strings.TrimSpace(account.GetCredential("session_key")) == "" {
+		response.ErrorFrom(c, infraerrors.BadRequest("MISSING_SESSION_KEY", "account has no stored sessionKey"))
+		return
+	}
+	if h.oauthRefreshAPI == nil || h.claudeSessionRefresher == nil {
+		response.ErrorFrom(c, errors.New("Claude sessionKey refresher is not configured"))
+		return
+	}
+
+	result, refreshErr := h.oauthRefreshAPI.RefreshIfNeeded(ctx, account, h.claudeSessionRefresher, 0, true)
+	if refreshErr != nil {
+		if service.IsClaudeSessionKeyInvalidError(refreshErr) {
+			attemptedAccount := account
+			if result != nil && result.Account != nil {
+				attemptedAccount = result.Account
+			}
+			errorMessage := "CLAUDE_SESSION_KEY_INVALID: stored sessionKey was rejected; paste a new sessionKey to re-authorize"
+			applied, setErr := h.setClaudeChromeRefreshErrorIfUnchanged(ctx, attemptedAccount, errorMessage)
+			if setErr != nil {
+				response.ErrorFrom(c, fmt.Errorf("sessionKey refresh failed and account quarantine failed: %w", setErr))
+				return
+			}
+			if !applied {
+				currentAccount, getErr := h.adminService.GetAccount(ctx, account.ID)
+				if getErr != nil {
+					response.ErrorFrom(c, getErr)
+					return
+				}
+				response.Success(c, h.buildAccountResponseWithRuntime(ctx, currentAccount))
+				return
+			}
+			if h.tokenCacheInvalidator != nil {
+				_ = h.tokenCacheInvalidator.InvalidateToken(ctx, attemptedAccount)
+			}
+			response.ErrorFrom(c, infraerrors.BadRequest("CLAUDE_SESSION_KEY_INVALID", errorMessage))
+			return
+		}
+		response.ErrorFrom(c, refreshErr)
+		return
+	}
+	if result == nil || result.LockHeld {
+		response.ErrorFrom(c, infraerrors.Conflict("TOKEN_REFRESH_IN_PROGRESS", "another token refresh is already in progress"))
+		return
+	}
+	if !result.Refreshed {
+		response.ErrorFrom(c, infraerrors.BadRequest("ACCOUNT_NOT_REFRESHABLE", "account is no longer refreshable"))
+		return
+	}
+
+	updatedAccount := result.Account
+	if updatedAccount == nil {
+		updatedAccount, err = h.adminService.GetAccount(ctx, account.ID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+	if h.tokenCacheInvalidator != nil {
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
+			slog.Warn("refresh_cookie_auth.invalidate_token_failed",
+				"account_id", updatedAccount.ID,
+				"error", invalidateErr,
+			)
+		}
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
+}
+
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
 type ApplyOAuthCredentialsRequest struct {
 	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
@@ -1381,11 +1586,75 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	incomingOAuthClient, _ := req.Credentials["oauth_client"].(string)
+	replaceChromeCredentials := existing.IsClaudeChromeOAuth() || incomingOAuthClient == oauth.OAuthClientClaudeChrome
+	atomicOAuthExtra := map[string]any{}
+	remainingExtra := req.Extra
+	if replaceChromeCredentials {
+		remainingExtra = make(map[string]any, len(req.Extra))
+		for key, value := range req.Extra {
+			switch key {
+			case "org_uuid", "account_uuid", "email_address":
+				atomicOAuthExtra[key] = value
+			default:
+				remainingExtra[key] = value
+			}
+		}
+		mergedCredentials := make(map[string]any, len(existing.Credentials)+len(req.Credentials))
+		for key, value := range existing.Credentials {
+			mergedCredentials[key] = value
+		}
+		for _, key := range []string{
+			"access_token",
+			"refresh_token",
+			"token_type",
+			"expires_in",
+			"expires_at",
+			"scope",
+			"org_uuid",
+			"account_uuid",
+			"email_address",
+			"oauth_client",
+			"session_key",
+			"_token_version",
+		} {
+			delete(mergedCredentials, key)
+		}
+		for key, value := range req.Credentials {
+			mergedCredentials[key] = value
+		}
+		mergedCredentials["_token_version"] = time.Now().UnixMilli()
+		req.Credentials = mergedCredentials
+	}
 
-	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
-		Type:        req.Type,
-		Credentials: req.Credentials,
-	})
+	var updatedAccount *service.Account
+	if replaceChromeCredentials {
+		applier, ok := h.adminService.(claudeOAuthProfileCredentialsCASApplier)
+		if !ok {
+			response.ErrorFrom(c, errors.New("Claude OAuth profile credential CAS applier is not configured"))
+			return
+		}
+		var applied bool
+		updatedAccount, applied, err = applier.ApplyClaudeOAuthProfileCredentialsIfUnchanged(
+			ctx,
+			existing,
+			req.Type,
+			req.Credentials,
+			atomicOAuthExtra,
+		)
+		if err == nil && !applied {
+			response.ErrorFrom(c, infraerrors.Conflict(
+				"ACCOUNT_STATE_CHANGED",
+				"account credentials, proxy, or status changed during re-authorization; retry with the latest account state",
+			))
+			return
+		}
+	} else {
+		updatedAccount, err = h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
+			Type:        req.Type,
+			Credentials: req.Credentials,
+		})
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1393,12 +1662,11 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 
 	// 增量合并 Extra（JSONB key 级 merge，绝不覆盖 base_rpm / window_cost_limit /
 	// max_sessions / quota_* / privacy_mode 等持久化键）。
-	// best-effort：失败仅记日志；下方 ClearAccountError 会从 DB 重新读取最新 account，
-	// 因此响应里的 extra 始终以 DB 为准——这里不需要手动维护内存快照。
-	if len(req.Extra) > 0 {
-		if extraErr := h.adminService.UpdateAccountExtra(ctx, accountID, req.Extra); extraErr != nil {
-			extraKeys := make([]string, 0, len(req.Extra))
-			for k := range req.Extra {
+	// best-effort：失败仅记日志。
+	if len(remainingExtra) > 0 {
+		if extraErr := h.adminService.UpdateAccountExtra(ctx, accountID, remainingExtra); extraErr != nil {
+			extraKeys := make([]string, 0, len(remainingExtra))
+			for k := range remainingExtra {
 				extraKeys = append(extraKeys, k)
 			}
 			slog.Error("apply_oauth_credentials.update_extra_failed",
@@ -1409,13 +1677,15 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		}
 	}
 
-	if cleared, clearErr := h.adminService.ClearAccountError(ctx, accountID); clearErr != nil {
-		slog.Warn("apply_oauth_credentials.clear_error_failed",
-			"account_id", accountID,
-			"err", clearErr,
-		)
-	} else if cleared != nil {
-		updatedAccount = cleared
+	if !replaceChromeCredentials {
+		if cleared, clearErr := h.adminService.ClearAccountError(ctx, accountID); clearErr != nil {
+			slog.Warn("apply_oauth_credentials.clear_error_failed",
+				"account_id", accountID,
+				"err", clearErr,
+			)
+		} else if cleared != nil {
+			updatedAccount = cleared
+		}
 	}
 
 	if h.tokenCacheInvalidator != nil && updatedAccount.IsOAuth() {
@@ -2106,6 +2376,36 @@ func (h *OAuthHandler) SetupTokenCookieAuth(c *gin.Context) {
 		Scope:      "inference",
 	})
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, tokenInfo)
+}
+
+// ChromeCookieAuth performs Cookie OAuth with the Claude for Chrome public
+// client. The returned credential payload deliberately includes the
+// sessionKey so the account can recover if its rotating refresh token is later
+// rejected.
+// POST /api/v1/admin/accounts/chrome-cookie-auth
+func (h *OAuthHandler) ChromeCookieAuth(c *gin.Context) {
+	var req CookieAuthRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	tokenInfo, err := h.oauthService.CookieAuth(c.Request.Context(), &service.CookieAuthInput{
+		SessionKey:  req.SessionKey,
+		ProxyID:     req.ProxyID,
+		Scope:       "full",
+		OAuthClient: oauth.OAuthClientClaudeChrome,
+	})
+	if err != nil {
+		if service.IsClaudeSessionKeyInvalidError(err) {
+			response.ErrorFrom(c, infraerrors.BadRequest("CLAUDE_SESSION_KEY_INVALID", "claude.ai sessionKey is invalid or expired"))
+			return
+		}
 		response.ErrorFrom(c, err)
 		return
 	}

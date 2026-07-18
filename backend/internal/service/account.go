@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -217,6 +218,13 @@ func (a *Account) IsOverloaded() bool {
 
 func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
+}
+
+func (a *Account) IsClaudeChromeOAuth() bool {
+	return a != nil &&
+		a.Platform == PlatformAnthropic &&
+		a.Type == AccountTypeOAuth &&
+		a.GetCredential("oauth_client") == oauth.OAuthClientClaudeChrome
 }
 
 // IsPrivacySet 检查账号的 privacy 是否已成功设置。

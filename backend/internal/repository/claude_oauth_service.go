@@ -32,11 +32,12 @@ type claudeOAuthService struct {
 	clientFactory func(proxyURL string) (*req.Client, error)
 }
 
-func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error) {
+func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
 	}
+	profile = normalizeClaudeOAuthProfile(profile)
 
 	var orgs []struct {
 		UUID      string  `json:"uuid"`
@@ -64,6 +65,9 @@ func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 1 Response - Status: %d", resp.StatusCode)
 
 	if !resp.IsSuccessState() {
+		if profile.Name == oauth.OAuthClientClaudeChrome {
+			return "", service.NewClaudeOAuthUpstreamError("get organizations", resp.StatusCode, resp.String())
+		}
 		return "", fmt.Errorf("failed to get organizations: status %d, body: %s", resp.StatusCode, resp.String())
 	}
 
@@ -91,19 +95,24 @@ func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey
 	return orgs[0].UUID, nil
 }
 
-func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string) (string, error) {
+func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKey, orgUUID, scope, codeChallenge, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (string, error) {
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return "", fmt.Errorf("create HTTP client: %w", err)
+	}
+	profile = normalizeClaudeOAuthProfile(profile)
+	referer := "https://claude.ai/new"
+	if profile.Name == oauth.OAuthClientClaudeChrome {
+		referer = "https://claude.ai/"
 	}
 
 	authURL := fmt.Sprintf("%s/v1/oauth/%s/authorize", s.baseURL, orgUUID)
 
 	reqBody := map[string]any{
 		"response_type":         "code",
-		"client_id":             oauth.ClientID,
+		"client_id":             profile.ClientID,
 		"organization_uuid":     orgUUID,
-		"redirect_uri":          oauth.RedirectURI,
+		"redirect_uri":          profile.RedirectURI,
 		"scope":                 scope,
 		"state":                 state,
 		"code_challenge":        codeChallenge,
@@ -128,7 +137,7 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 		SetHeader("Accept-Language", "en-US,en;q=0.9").
 		SetHeader("Cache-Control", "no-cache").
 		SetHeader("Origin", "https://claude.ai").
-		SetHeader("Referer", "https://claude.ai/new").
+		SetHeader("Referer", referer).
 		SetHeader("Content-Type", "application/json").
 		SetBody(reqBody).
 		SetSuccessResult(&result).
@@ -142,6 +151,9 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 2 Response - Status: %d, Body: %s", resp.StatusCode, logredact.RedactJSON(resp.Bytes()))
 
 	if !resp.IsSuccessState() {
+		if profile.Name == oauth.OAuthClientClaudeChrome {
+			return "", service.NewClaudeOAuthUpstreamError("get authorization code", resp.StatusCode, resp.String())
+		}
 		return "", fmt.Errorf("failed to get authorization code: status %d, body: %s", resp.StatusCode, resp.String())
 	}
 
@@ -161,21 +173,24 @@ func (s *claudeOAuthService) GetAuthorizationCode(ctx context.Context, sessionKe
 	if authCode == "" {
 		return "", fmt.Errorf("no authorization code in redirect_uri")
 	}
-
-	fullCode := authCode
-	if responseState != "" {
-		fullCode = authCode + "#" + responseState
+	if profile.Name == oauth.OAuthClientClaudeChrome && (responseState == "" || responseState != state) {
+		return "", fmt.Errorf("oauth state mismatch")
 	}
 
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 2 SUCCESS - Got authorization code")
+	fullCode := authCode
+	if responseState != "" {
+		fullCode += "#" + responseState
+	}
 	return fullCode, nil
 }
 
-func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
+	profile = normalizeClaudeOAuthProfile(profile)
 
 	// Parse code which may contain state in format "authCode#state"
 	authCode := code
@@ -188,8 +203,8 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 	reqBody := map[string]any{
 		"code":          authCode,
 		"grant_type":    "authorization_code",
-		"client_id":     oauth.ClientID,
-		"redirect_uri":  oauth.RedirectURI,
+		"client_id":     profile.ClientID,
+		"redirect_uri":  profile.RedirectURI,
 		"code_verifier": codeVerifier,
 	}
 
@@ -203,14 +218,17 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 
 	var tokenResp oauth.TokenResponse
 
-	resp, err := client.R().
+	request := client.R().
 		SetContext(ctx).
 		SetHeader("Accept", "application/json, text/plain, */*").
 		SetHeader("Content-Type", "application/json").
 		SetHeader("User-Agent", "axios/1.13.6").
 		SetBody(reqBody).
-		SetSuccessResult(&tokenResp).
-		Post(s.tokenURL)
+		SetSuccessResult(&tokenResp)
+	if profile.TokenBetaHeader != "" {
+		request.SetHeader("anthropic-beta", profile.TokenBetaHeader)
+	}
+	resp, err := request.Post(s.tokenURL)
 
 	if err != nil {
 		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 FAILED - Request error: %v", err)
@@ -227,28 +245,32 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 	return &tokenResp, nil
 }
 
-func (s *claudeOAuthService) RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+func (s *claudeOAuthService) RefreshToken(ctx context.Context, refreshToken, proxyURL string, profile oauth.ClaudeOAuthProfile) (*oauth.TokenResponse, error) {
 	client, err := s.clientFactory(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
 	}
+	profile = normalizeClaudeOAuthProfile(profile)
 
 	reqBody := map[string]any{
 		"grant_type":    "refresh_token",
 		"refresh_token": refreshToken,
-		"client_id":     oauth.ClientID,
+		"client_id":     profile.ClientID,
 	}
 
 	var tokenResp oauth.TokenResponse
 
-	resp, err := client.R().
+	request := client.R().
 		SetContext(ctx).
 		SetHeader("Accept", "application/json, text/plain, */*").
 		SetHeader("Content-Type", "application/json").
 		SetHeader("User-Agent", "axios/1.13.6").
 		SetBody(reqBody).
-		SetSuccessResult(&tokenResp).
-		Post(s.tokenURL)
+		SetSuccessResult(&tokenResp)
+	if profile.TokenBetaHeader != "" {
+		request.SetHeader("anthropic-beta", profile.TokenBetaHeader)
+	}
+	resp, err := request.Post(s.tokenURL)
 
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -259,6 +281,13 @@ func (s *claudeOAuthService) RefreshToken(ctx context.Context, refreshToken, pro
 	}
 
 	return &tokenResp, nil
+}
+
+func normalizeClaudeOAuthProfile(profile oauth.ClaudeOAuthProfile) oauth.ClaudeOAuthProfile {
+	if strings.TrimSpace(profile.ClientID) == "" || strings.TrimSpace(profile.RedirectURI) == "" {
+		return oauth.ClaudeCodeProfile
+	}
+	return profile
 }
 
 func createReqClient(proxyURL string) (*req.Client, error) {

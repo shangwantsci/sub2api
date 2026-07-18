@@ -15,3 +15,11 @@ type GeminiTokenCache interface {
 	AcquireRefreshLock(ctx context.Context, cacheKey string, ttl time.Duration) (bool, error)
 	ReleaseRefreshLock(ctx context.Context, cacheKey string) error
 }
+
+// OwnedOAuthRefreshLockCache prevents a timed-out lock holder from deleting a
+// newer holder's lock after the original TTL expires.
+type OwnedOAuthRefreshLockCache interface {
+	AcquireOwnedRefreshLock(ctx context.Context, cacheKey, owner string, ttl time.Duration) (bool, error)
+	RenewOwnedRefreshLock(ctx context.Context, cacheKey, owner string, ttl time.Duration) (bool, error)
+	ReleaseOwnedRefreshLock(ctx context.Context, cacheKey, owner string) error
+}
