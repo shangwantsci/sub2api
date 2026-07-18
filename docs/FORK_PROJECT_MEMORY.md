@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-17  
+> 最后更新：2026-07-18
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -36,11 +36,13 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-17 首次正式上线：
+截至 2026-07-18 Claude Chrome Cookie OAuth 版本上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 应用 commit：`c8637aab`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-657fb52d`
+- 应用 commit：`657fb52d`
 - 应用版本：`0.1.156`
+- GitHub Actions run：`29630310899`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -50,14 +52,17 @@
 - 公网入口：Caddy 反代
 - PostgreSQL、Redis、Caddy 与其它项目独立运行；部署只重建 `sub2api`
 - 健康状态：healthy
-- 设置接口与标定状态接口：HTTP 200
+- 本机与公网 `/health`：HTTP 200
+- 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
+- 本次无数据库 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
+- 部署时 `.env` 备份：`backups/.env.20260718-042429.before-657fb52d`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-c8637aab
+sub2api-rollback:pre-657fb52d
 ```
 
 ## 4. 已实现功能
@@ -203,6 +208,48 @@ SyntaxError: Invalid token in placeholder: '"schema_version":'
 - `claudeCodeMimicryProfileLocales.spec.ts` 必须断言该 placeholder 不含 `{}`；
 - 设置页相关改动除组件测试外，发布前必须跑生产 frontend build。
 
+### 4.7 Claude for Chrome Cookie OAuth
+
+新增独立于 Claude Code Cookie OAuth 的 `claude_chrome` profile：
+
+- 使用 Claude for Chrome Extension 的 OAuth client、redirect URI 与 scopes；
+- token exchange、refresh 和网关请求带 `anthropic-beta: oauth-2025-04-20`；
+- 授权、换 token、refresh token、SessionKey 回退全部使用账号配置代理；
+- Chrome 链路代理解析失败时 fail-closed，不允许静默直连；
+- `credentials.oauth_client=claude_chrome` 用于隔离两种 OAuth profile；
+- `session_key` 按当前产品决定明文保存在 credentials JSONB，不做应用层加密；
+- access token 按上游 `expires_in/expires_at` 管理，当前通常约 8 小时；
+- 优先使用轮换后的 `refresh_token`；永久 `invalid_grant` 时，在同一刷新锁内用
+  已保存的 `session_key` 重新授权；
+- SessionKey 明确失效时账号进入 error、停止调度；临时上游/网络错误保持可重试；
+- 管理后台支持创建/重授权时选择 Chrome Cookie Authorization，并提供
+  “使用 SessionKey 重新授权”的手工入口。
+
+Admin API：
+
+```text
+POST /api/v1/admin/accounts/chrome-cookie-auth
+POST /api/v1/admin/accounts/:id/refresh-cookie-auth
+```
+
+并发与状态安全：
+
+- Chrome 自动刷新使用 Redis owner-aware lock；
+- lock 支持租约续期，旧 owner 不能释放新 owner 的锁；
+- Chrome 链路在 Redis/owned-lock 不可用时 fail-closed；
+- token 成功写入、永久错误、临时不可调度、手工重授权均使用 credentials CAS；
+- 并发手工重授权或 Code/Chrome profile 切换获胜后，迟到的刷新结果和错误不会覆盖；
+- OAuth 身份字段与 `extra` 中的 `org_uuid/account_uuid/email_address` 原子更新，
+  其它账号配置继续保留。
+
+旧 `claude_code` 链路兼容性：
+
+- 空或未知 `oauth_client` 继续回落 `claude_code`；
+- 原 Client ID、redirect URI、scope、Referer 和错误语义不变；
+- 旧链路不添加 Chrome beta、不保存 SessionKey、不启用 SessionKey 回退；
+- 旧代理解析及普通 Redis refresh lock 继续沿用 fail-open 行为；
+- 共享行为的实际变化只有 credentials/error CAS 和 profile 切换防陈旧写入。
+
 ## 5. 当前自动标定状态
 
 首次真实标定：
@@ -262,7 +309,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 hotfix 镜像构建：
+当前生产 Chrome Cookie OAuth 镜像构建：
+
+- run：`29630310899`
+- source commit：`657fb52d`
+- job：`custom-image`
+- 结论：success
+- 其它 release/tag jobs：skipped
+
+上一生产 hotfix 镜像构建：
 
 - run：`29583104613`
 - job：`custom-image`
@@ -415,6 +470,8 @@ curl -fsS http://127.0.0.1:18080/health
 - locale 不进入 wire；
 - 自动标定使用 dummy token，不消耗账号；
 - GitHub Secret 和生产密码不得写入仓库、日志或本文。
+- Chrome `session_key` 当前按产品决定明文存储，数据库备份与管理接口必须按敏感凭证保护。
+- Chrome OAuth 分布式刷新锁不可用时 fail-closed，避免并发消费旋转 token。
 
 ## 11. 后续优化优先级
 
@@ -424,6 +481,8 @@ curl -fsS http://127.0.0.1:18080/health
 - 对比 proxy 23 与其它美国代理；
 - 观察新 profile 下 400/401/429/529、cache read/create、账号寿命；
 - 确认 `count_tokens max_tokens` 400 已消失。
+- 观察 Chrome OAuth 约 8 小时轮换、`invalid_grant` 回退成功率及 SessionKey 最终失效率；
+- 观察 `oauth_refresh` 的 lock lease lost、CAS skipped 与临时不可调度日志。
 
 ### P1：Persona 小批灰度
 
@@ -489,6 +548,21 @@ backend/internal/service/setting_claude_profile.go
 backend/internal/service/gateway_upstream_request.go
 backend/internal/service/gateway_billing_block.go
 backend/internal/service/claude_mimicry_guard.go
+```
+
+Claude Chrome Cookie OAuth：
+
+```text
+backend/internal/pkg/oauth/oauth.go
+backend/internal/repository/claude_oauth_service.go
+backend/internal/service/oauth_service.go
+backend/internal/service/oauth_refresh_api.go
+backend/internal/service/token_refresher.go
+backend/internal/service/token_refresh_service.go
+backend/internal/repository/account_repo.go
+backend/internal/handler/admin/account_handler.go
+frontend/src/components/account/OAuthAuthorizationFlow.vue
+frontend/src/components/admin/account/AccountActionMenu.vue
 ```
 
 部署：
