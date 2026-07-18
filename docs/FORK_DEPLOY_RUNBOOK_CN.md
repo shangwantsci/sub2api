@@ -2,6 +2,9 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
+> 最近验证：2026-07-18 已按本流程部署 `0.1.156-f7fd00dc`，GitHub Actions
+> run `29635986408`，本机与公网健康检查均通过。
+
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
 ```text
@@ -15,6 +18,8 @@ docs/FORK_PROJECT_MEMORY.md
 - **应用版本号用官方版本号**：即 `backend/cmd/server/VERSION`，例如 `0.1.139`。不要把 commit hash 当作 `VERSION`，否则后台会把当前版本识别成非官方语义版本，并持续提示有新版本。
 - **只切换应用容器镜像**：生产数据目录、Postgres、Redis、Caddy 配置不随应用发布改动。
 - **先完成 Actions 构建，再在生产 pull/recreate**：构建失败时旧容器继续运行，不进入半部署状态。
+- **切换前保留旧 image ID**：必须创建 `sub2api-rollback:pre-<commit>` 本地 tag，并按 commit 命名备份 `.env`。
+- **可变与不可变 tag 必须同镜像**：部署前校验 `<VERSION>` 与 `<VERSION>-<commit>` 的 image ID 一致。
 - **生产构建使用仓库根 `Dockerfile` 或已对齐的 `deploy/Dockerfile`**：两者都应固定 `pnpm@9` 并支持 `VERSION` 注入。
 
 ## 本地提交流程
@@ -114,10 +119,22 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-cp .env "backups/.env.$(date +%Y%m%d-%H%M%S)"
-sed -i "s#^SUB2API_IMAGE=.*#SUB2API_IMAGE=ghcr.io/shangwantsci/sub2api:${APP_VERSION}#" .env
+COMMIT=f7fd00dc  # 替换为本次 8 位 commit
+MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
+IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
+
+OLD_IMAGE_ID="$(docker inspect -f '{{.Image}}' sub2api)"
+docker image tag "${OLD_IMAGE_ID}" "sub2api-rollback:pre-${COMMIT}"
+cp .env "backups/.env.$(date +%Y%m%d-%H%M%S).before-${COMMIT}"
+
+docker pull "${IMMUTABLE}"
+sed -i "s#^SUB2API_IMAGE=.*#SUB2API_IMAGE=${MUTABLE}#" .env
 docker compose -f docker-compose.local.yml -f docker-compose.override.yml pull sub2api
-docker compose -f docker-compose.local.yml -f docker-compose.override.yml up -d --no-deps sub2api
+test "$(docker image inspect -f '{{.Id}}' "${IMMUTABLE}")" = \
+  "$(docker image inspect -f '{{.Id}}' "${MUTABLE}")"
+
+docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
+  up -d --no-deps --force-recreate sub2api
 curl -fsS http://127.0.0.1:18080/health
 docker exec sub2api /app/sub2api --version
 ```
@@ -140,8 +157,8 @@ CPU/内存，可能同时造成管理页加载超时和网关 TTFT 升高。
 BRANCH="$(git branch --show-current)"
 COMMIT="$(git rev-parse --short=8 HEAD)"
 APP_VERSION="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
-SSH_TARGET="root@154.29.158.193"
-SSH_PORT="56260"
+SSH_TARGET="root@38.244.21.202"
+SSH_PORT="9646"
 ```
 
 在服务器创建/更新 release，并后台构建镜像：
@@ -265,7 +282,31 @@ docker exec sub2api /app/sub2api --version
 输出应类似：
 
 ```text
-Sub2API 0.1.139 (commit: 8885fdf5, built: ...)
+Sub2API 0.1.156 (commit: f7fd00dc, built: ...)
+```
+
+### Claude Chrome OAuth 401 自动恢复发布检查
+
+这类修复不能只看容器 healthy。还应确认：
+
+- `token_refresh.service_started` 正常出现；
+- 下一轮 `token_refresh.cycle_completed` 没有异常失败增长；
+- 提前 401 的 `claude_chrome` 账号能进入刷新，不再仅等待 `expires_at`；
+- `refresh_token` 为 `invalid_grant` 或缺失时能回退已保存的 `session_key`；
+- 成功后数据库、Redis 和进程内临时不可调度状态均被清除；
+- 普通 `claude_code` OAuth 行为不变。
+
+查看启动和首轮刷新日志：
+
+```bash
+docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
+  logs --since=10m sub2api
+```
+
+2026-07-18 的 `f7fd00dc` 部署首轮记录为：
+
+```text
+token_refresh.cycle_completed total=96 oauth=96 needs_refresh=4 refreshed=4 skipped=0 failed=0
 ```
 
 ## 回滚

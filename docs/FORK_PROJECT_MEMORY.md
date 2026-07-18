@@ -36,13 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-18 Claude Chrome Cookie OAuth 版本上线：
+截至 2026-07-18 Claude Chrome OAuth 提前 401 自动恢复热修复上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-657fb52d`
-- 应用 commit：`657fb52d`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-f7fd00dc`
+- 镜像 digest：`sha256:e70a68937edc4a94fac5977bad79786f579ca1189e10a824104af81d052f6b10`
+- 应用 commit：`f7fd00dc`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29630310899`（`custom-image` success）
+- GitHub Actions run：`29635986408`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -57,12 +58,13 @@
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
 - 本次无数据库 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
-- 部署时 `.env` 备份：`backups/.env.20260718-042429.before-657fb52d`
+- 部署后 token refresh 首轮扫描：`total=96, needs_refresh=4, refreshed=4, failed=0`
+- 部署时 `.env` 备份：`backups/.env.20260718-074226.before-f7fd00dc`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-657fb52d
+sub2api-rollback:pre-f7fd00dc
 ```
 
 ## 4. 已实现功能
@@ -219,8 +221,14 @@ SyntaxError: Invalid token in placeholder: '"schema_version":'
 - `credentials.oauth_client=claude_chrome` 用于隔离两种 OAuth profile；
 - `session_key` 按当前产品决定明文保存在 credentials JSONB，不做应用层加密；
 - access token 按上游 `expires_in/expires_at` 管理，当前通常约 8 小时；
+- Anthropic 可能在 `expires_at` 前吊销 access token；Chrome 账号收到 OAuth 401
+  临时不可调度信号后会忽略远期过期时间，进入后台自动刷新；
 - 优先使用轮换后的 `refresh_token`；永久 `invalid_grant` 时，在同一刷新锁内用
   已保存的 `session_key` 重新授权；
+- 即使 `refresh_token` 已缺失，只要 Chrome 账号仍保存有效 `session_key`，候选查询
+  仍会拾取该账号并直接进入 SessionKey 回退，不会提前永久禁用；
+- 自动或手工恢复成功后同时清除数据库、Redis 与进程内的临时调度阻断；专用清理
+  不会误删模型级 rate limit；
 - SessionKey 明确失效时账号进入 error、停止调度；临时上游/网络错误保持可重试；
 - 管理后台支持创建/重授权时选择 Chrome Cookie Authorization，并提供
   “使用 SessionKey 重新授权”的手工入口。
@@ -309,17 +317,18 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 Chrome Cookie OAuth 镜像构建：
+当前生产 Chrome OAuth 提前 401 自动恢复镜像构建：
 
-- run：`29630310899`
-- source commit：`657fb52d`
+- run：`29635986408`
+- source commit：`f7fd00dc`
 - job：`custom-image`
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 hotfix 镜像构建：
+上一生产 Chrome Cookie OAuth 镜像构建：
 
-- run：`29583104613`
+- run：`29630310899`
+- source commit：`657fb52d`
 - job：`custom-image`
 - 结论：success
 - 其它 release/tag jobs：skipped
@@ -481,7 +490,8 @@ curl -fsS http://127.0.0.1:18080/health
 - 对比 proxy 23 与其它美国代理；
 - 观察新 profile 下 400/401/429/529、cache read/create、账号寿命；
 - 确认 `count_tokens max_tokens` 400 已消失。
-- 观察 Chrome OAuth 约 8 小时轮换、`invalid_grant` 回退成功率及 SessionKey 最终失效率；
+- 观察 Chrome OAuth 约 8 小时轮换、提前 401 自动恢复、`invalid_grant`/缺失
+  `refresh_token` 回退成功率及 SessionKey 最终失效率；
 - 观察 `oauth_refresh` 的 lock lease lost、CAS skipped 与临时不可调度日志。
 
 ### P1：Persona 小批灰度
