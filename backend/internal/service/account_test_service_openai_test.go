@@ -101,6 +101,36 @@ func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg s
 	return nil
 }
 
+func TestAccountTestService_AnthropicEncoded429PersistsResetTime(t *testing.T) {
+	ctx, _ := newTestContext()
+	now := time.Now()
+	reset5h := now.Add(2 * time.Hour).UTC().Truncate(time.Second)
+	reset7d := now.Add(72 * time.Hour).UTC().Truncate(time.Second)
+	body := anthropicEncodedExceededLimitBody(t, reset5h, reset7d, false)
+
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{newJSONResponse(http.StatusTooManyRequests, string(body))},
+	}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          88,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testClaudeAccountConnection(ctx, account, "claude-sonnet-4-5")
+
+	require.Error(t, err)
+	require.Equal(t, int64(88), repo.rateLimitedID)
+	require.NotNil(t, repo.rateLimitedAt)
+	require.True(t, repo.rateLimitedAt.Equal(reset5h))
+	require.NotNil(t, account.RateLimitResetAt)
+	require.True(t, account.RateLimitResetAt.Equal(reset5h))
+}
+
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
@@ -87,6 +88,106 @@ func TestHandleUpstreamError_AnthropicWindowLimitPreemptsTempUnschedRule(t *test
 	require.Zero(t, repo.tempUnschedCalls, "official Anthropic window limits should not be shortened by local temp-unsched rules")
 	require.Equal(t, 1, repo.rateLimitCalls)
 	require.Equal(t, resetAt, repo.lastRateLimitReset)
+}
+
+func anthropicEncodedExceededLimitBody(t *testing.T, reset5h, reset7d time.Time, perModelLimit bool) []byte {
+	t.Helper()
+
+	message, err := json.Marshal(map[string]any{
+		"type":                "exceeded_limit",
+		"resetsAt":            reset5h.Unix(),
+		"remaining":           nil,
+		"perModelLimit":       perModelLimit,
+		"representativeClaim": "five_hour",
+		"windows": map[string]any{
+			"5h": map[string]any{
+				"status":              "exceeded_limit",
+				"resets_at":           reset5h.Unix(),
+				"utilization":         1.07,
+				"surpassed_threshold": 1.0,
+			},
+			"7d": map[string]any{
+				"status":      "within_limit",
+				"resets_at":   reset7d.Unix(),
+				"utilization": 0.46,
+			},
+		},
+		"resolved": map[string]any{
+			"status": "exceeded",
+			"limit": map[string]any{
+				"kind":      "session",
+				"group":     "session",
+				"percent":   100,
+				"severity":  "critical",
+				"resets_at": reset5h.UTC().Format(time.RFC3339),
+				"scope":     nil,
+				"is_active": true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	body, err := json.Marshal(map[string]any{
+		"type": "error",
+		"error": map[string]any{
+			"type":    "rate_limit_error",
+			"message": string(message),
+		},
+		"request_id": "req_body_encoded_429",
+	})
+	require.NoError(t, err)
+	return body
+}
+
+func TestHandleUpstreamError_AnthropicEncodedBodyLimitPreemptsTempUnschedRule(t *testing.T) {
+	now := time.Now()
+	reset5h := now.Add(2 * time.Hour).UTC().Truncate(time.Second)
+	reset7d := now.Add(72 * time.Hour).UTC().Truncate(time.Second)
+	body := anthropicEncodedExceededLimitBody(t, reset5h, reset7d, false)
+
+	repo := &anthropicWindowLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       43,
+		Type:     AccountTypeOAuth,
+		Platform: PlatformAnthropic,
+		Credentials: map[string]any{
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       float64(http.StatusTooManyRequests),
+					"keywords":         []any{"exceeded_limit"},
+					"duration_minutes": float64(10),
+				},
+			},
+		},
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		http.Header{},
+		body,
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.tempUnschedCalls, "body-encoded hard limit must not be shortened by a custom temp rule")
+	require.Equal(t, 1, repo.rateLimitCalls)
+	require.True(t, repo.lastRateLimitReset.Equal(reset5h))
+	require.True(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
+}
+
+func TestSelectAnthropicExhaustedWindowFromBody_PerModelLimitDoesNotReturnAccountLimit(t *testing.T) {
+	now := time.Now()
+	body := anthropicEncodedExceededLimitBody(
+		t,
+		now.Add(2*time.Hour).UTC().Truncate(time.Second),
+		now.Add(72*time.Hour).UTC().Truncate(time.Second),
+		true,
+	)
+
+	require.Nil(t, selectAnthropicExhaustedWindowFromBody(body, now))
 }
 
 // fable429Headers 构造 7d_oi（Fable 专属 7d 窗口）触发 429 的完整响应头，

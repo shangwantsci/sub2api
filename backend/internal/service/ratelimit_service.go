@@ -372,6 +372,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		if fableLimited {
 			return false
 		}
+		// 部分 Claude OAuth 入口不返回 unified 限流头，而是把真实窗口信息
+		// 作为 JSON 字符串放在 error.message 中。该信号同样是硬账号限额，
+		// 必须在用户自定义的临时不可调度规则之前处理。
+		if s.persistAnthropicExhaustedBodyLimit(ctx, account, responseBody) {
+			return false
+		}
 	}
 
 	// 先尝试临时不可调度规则（401除外）
@@ -1113,7 +1119,13 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		}
 	}
 
-	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
+	// 2. Anthropic 平台：部分入口把限流详情二次编码在 error.message，
+	// 先解析响应体中的真实窗口，避免退化成一分钟运行时冷却。
+	if account.Platform == PlatformAnthropic && s.persistAnthropicExhaustedBodyLimit(ctx, account, responseBody) {
+		return
+	}
+
+	// 3. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
 		s.setRuntime429TempCache(ctx, account, result.resetAt, "anthropic_429_window", responseBody)
@@ -1136,10 +1148,10 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		return
 	}
 
-	// 3. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
+	// 4. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
 	resetTimestamp := headers.Get("anthropic-ratelimit-unified-reset")
 
-	// 4. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
+	// 5. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
@@ -1360,6 +1372,297 @@ type anthropicWindowLimit struct {
 	reason  string
 }
 
+type anthropic429BodyWindow struct {
+	Status             string          `json:"status"`
+	ResetsAt           json.RawMessage `json:"resets_at"`
+	Utilization        *float64        `json:"utilization"`
+	SurpassedThreshold json.RawMessage `json:"surpassed_threshold"`
+}
+
+type anthropic429BodyResolvedLimit struct {
+	Kind     string          `json:"kind"`
+	Group    string          `json:"group"`
+	ResetsAt json.RawMessage `json:"resets_at"`
+	Scope    any             `json:"scope"`
+	IsActive *bool           `json:"is_active"`
+}
+
+type anthropic429BodyResolved struct {
+	Status string                         `json:"status"`
+	Limit  *anthropic429BodyResolvedLimit `json:"limit"`
+}
+
+type anthropic429BodyPayload struct {
+	Type                string                            `json:"type"`
+	ResetsAt            json.RawMessage                   `json:"resetsAt"`
+	PerModelLimit       *bool                             `json:"perModelLimit"`
+	RepresentativeClaim string                            `json:"representativeClaim"`
+	Windows             map[string]anthropic429BodyWindow `json:"windows"`
+	Resolved            *anthropic429BodyResolved         `json:"resolved"`
+}
+
+// selectAnthropicExhaustedWindowFromBody parses the newer Claude OAuth 429
+// shape where error.message is itself a JSON document. Only account-wide
+// limits are returned; perModelLimit=true and 7d_oi-only signals remain
+// model-scoped and must not be persisted as an account-wide rate limit.
+func selectAnthropicExhaustedWindowFromBody(body []byte, now time.Time) *anthropicWindowLimit {
+	payload, ok := parseAnthropic429BodyPayload(body)
+	if !ok || payload == nil {
+		return nil
+	}
+	if payload.PerModelLimit != nil && *payload.PerModelLimit {
+		return nil
+	}
+
+	// When both account windows are exhausted, keep the longer 7d boundary.
+	for _, window := range []string{"7d", "5h"} {
+		windowInfo, exists := anthropicBodyWindowFor(payload.Windows, window)
+		if !exists || !isAnthropicBodyWindowExceeded(windowInfo) {
+			continue
+		}
+		maxAge := 8 * 24 * time.Hour
+		if window == "5h" {
+			maxAge = 6 * time.Hour
+		}
+		resetAt, valid := parseAnthropicBodyReset(windowInfo.ResetsAt, now, maxAge)
+		if !valid && normalizeAnthropicBodyClaim(payload.RepresentativeClaim) == window {
+			resetAt, valid = parseAnthropicBodyReset(payload.ResetsAt, now, maxAge)
+		}
+		if valid {
+			return &anthropicWindowLimit{
+				window:  window,
+				resetAt: resetAt,
+				reason:  "anthropic_" + window + "_window_exhausted",
+			}
+		}
+	}
+
+	claim := normalizeAnthropicBodyClaim(payload.RepresentativeClaim)
+	if claim == "7d_oi" {
+		return nil
+	}
+
+	// resolved.limit is an independent, human-facing projection of the same
+	// limit and is useful when the windows map is absent.
+	if payload.Resolved != nil &&
+		isAnthropicBodyExceededStatus(payload.Resolved.Status) &&
+		payload.Resolved.Limit != nil &&
+		(payload.Resolved.Limit.IsActive == nil || *payload.Resolved.Limit.IsActive) &&
+		!isAnthropicResolvedModelLimit(payload.Resolved.Limit) {
+		maxAge := 8 * 24 * time.Hour
+		if claim == "5h" || strings.EqualFold(strings.TrimSpace(payload.Resolved.Limit.Group), "session") {
+			maxAge = 6 * time.Hour
+		}
+		if resetAt, valid := parseAnthropicBodyReset(payload.Resolved.Limit.ResetsAt, now, maxAge); valid {
+			window := claim
+			if window != "7d" {
+				window = "5h"
+			}
+			return &anthropicWindowLimit{
+				window:  window,
+				resetAt: resetAt,
+				reason:  "anthropic_" + window + "_window_exhausted",
+			}
+		}
+	}
+
+	// Top-level resetsAt is the canonical reset for representativeClaim.
+	if !isAnthropicBodyExceededStatus(payload.Type) {
+		return nil
+	}
+	maxAge := 8 * 24 * time.Hour
+	window := claim
+	if window == "" {
+		window = "5h"
+	}
+	if window == "5h" {
+		maxAge = 6 * time.Hour
+	}
+	resetAt, valid := parseAnthropicBodyReset(payload.ResetsAt, now, maxAge)
+	if !valid {
+		return nil
+	}
+	return &anthropicWindowLimit{
+		window:  window,
+		resetAt: resetAt,
+		reason:  "anthropic_" + window + "_window_exhausted",
+	}
+}
+
+func parseAnthropic429BodyPayload(body []byte) (*anthropic429BodyPayload, bool) {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 || !json.Valid(body) {
+		return nil, false
+	}
+
+	var envelope struct {
+		Error struct {
+			Type    string          `json:"type"`
+			Message json.RawMessage `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false
+	}
+
+	payloadJSON := body
+	if len(envelope.Error.Message) > 0 {
+		if errorType := strings.TrimSpace(envelope.Error.Type); errorType != "" && !strings.EqualFold(errorType, "rate_limit_error") {
+			return nil, false
+		}
+		var encoded string
+		if err := json.Unmarshal(envelope.Error.Message, &encoded); err == nil {
+			payloadJSON = bytes.TrimSpace([]byte(encoded))
+			if len(payloadJSON) == 0 || !json.Valid(payloadJSON) {
+				return nil, false
+			}
+		} else {
+			payloadJSON = bytes.TrimSpace(envelope.Error.Message)
+			if len(payloadJSON) == 0 || !json.Valid(payloadJSON) {
+				return nil, false
+			}
+		}
+	}
+
+	var payload anthropic429BodyPayload
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return nil, false
+	}
+	return &payload, true
+}
+
+func anthropicBodyWindowFor(windows map[string]anthropic429BodyWindow, window string) (anthropic429BodyWindow, bool) {
+	if len(windows) == 0 {
+		return anthropic429BodyWindow{}, false
+	}
+	aliases := []string{window}
+	switch window {
+	case "5h":
+		aliases = append(aliases, "five_hour")
+	case "7d":
+		aliases = append(aliases, "seven_day")
+	}
+	for _, alias := range aliases {
+		if value, ok := windows[alias]; ok {
+			return value, true
+		}
+	}
+	return anthropic429BodyWindow{}, false
+}
+
+func isAnthropicBodyWindowExceeded(window anthropic429BodyWindow) bool {
+	if isAnthropicBodyExceededStatus(window.Status) {
+		return true
+	}
+	if window.Utilization != nil && *window.Utilization >= 1.0-1e-9 {
+		return true
+	}
+	if len(window.SurpassedThreshold) == 0 {
+		return false
+	}
+	var flag bool
+	if err := json.Unmarshal(window.SurpassedThreshold, &flag); err == nil {
+		return flag
+	}
+	var value float64
+	return json.Unmarshal(window.SurpassedThreshold, &value) == nil && value >= 1.0-1e-9
+}
+
+func isAnthropicBodyExceededStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "exceeded", "exceeded_limit", "rejected":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAnthropicBodyClaim(claim string) string {
+	claim = strings.ToLower(strings.TrimSpace(claim))
+	claim = strings.NewReplacer("-", "_", " ", "_").Replace(claim)
+	switch claim {
+	case "5h", "five_hour":
+		return "5h"
+	case "7d", "seven_day":
+		return "7d"
+	case "7d_oi", "seven_day_overage_included":
+		return "7d_oi"
+	default:
+		return ""
+	}
+}
+
+func isAnthropicResolvedModelLimit(limit *anthropic429BodyResolvedLimit) bool {
+	if limit == nil {
+		return false
+	}
+	for _, value := range []string{limit.Kind, limit.Group} {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if strings.Contains(normalized, "model") || normalizeAnthropicBodyClaim(normalized) == "7d_oi" {
+			return true
+		}
+	}
+	switch scope := limit.Scope.(type) {
+	case string:
+		return strings.TrimSpace(scope) != ""
+	case nil:
+		return false
+	default:
+		return true
+	}
+}
+
+func parseAnthropicBodyReset(raw json.RawMessage, now time.Time, maxAge time.Duration) (time.Time, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return time.Time{}, false
+	}
+
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return time.Time{}, false
+		}
+		if ts, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return validateAnthropicBodyReset(time.Unix(normalizeUnixTimestamp(ts), 0), now, maxAge)
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+			return validateAnthropicBodyReset(parsed, now, maxAge)
+		}
+		return time.Time{}, false
+	}
+
+	var number json.Number
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err != nil {
+		return time.Time{}, false
+	}
+	ts, err := strconv.ParseInt(number.String(), 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return validateAnthropicBodyReset(time.Unix(normalizeUnixTimestamp(ts), 0), now, maxAge)
+}
+
+func normalizeUnixTimestamp(ts int64) int64 {
+	if ts > 1e11 {
+		return ts / 1000
+	}
+	return ts
+}
+
+func validateAnthropicBodyReset(resetAt, now time.Time, maxAge time.Duration) (time.Time, bool) {
+	if maxAge <= 0 {
+		maxAge = 8 * 24 * time.Hour
+	}
+	if !resetAt.After(now) || resetAt.After(now.Add(maxAge)) {
+		return time.Time{}, false
+	}
+	return resetAt, true
+}
+
 func selectAnthropicExhaustedWindow(headers http.Header, now time.Time) *anthropicWindowLimit {
 	reset5h, ok5hReset := parseAnthropicWindowReset(headers, "5h", now)
 	reset7d, ok7dReset := parseAnthropicWindowReset(headers, "7d", now)
@@ -1443,6 +1746,25 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 	if limit == nil {
 		return false
 	}
+	return s.persistAnthropicWindowLimit(ctx, account, limit, nil)
+}
+
+func (s *RateLimitService) persistAnthropicExhaustedBodyLimit(ctx context.Context, account *Account, responseBody []byte) bool {
+	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformAnthropic {
+		return false
+	}
+	limit := selectAnthropicExhaustedWindowFromBody(responseBody, time.Now())
+	if limit == nil {
+		return false
+	}
+	return s.persistAnthropicWindowLimit(ctx, account, limit, responseBody)
+}
+
+func (s *RateLimitService) persistAnthropicWindowLimit(ctx context.Context, account *Account, limit *anthropicWindowLimit, responseBody []byte) bool {
+	if s == nil || s.accountRepo == nil || account == nil || limit == nil {
+		return false
+	}
+	now := time.Now()
 	if !shouldPersistAnthropicWindowLimit(account, limit, now) {
 		slog.Info("anthropic_window_rate_limit_kept",
 			"account_id", account.ID,
@@ -1453,7 +1775,7 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 	}
 
 	s.notifyAccountSchedulingBlocked(account, limit.resetAt, limit.reason)
-	s.setRuntime429TempCache(ctx, account, limit.resetAt, limit.reason, nil)
+	s.setRuntime429TempCache(ctx, account, limit.resetAt, limit.reason, responseBody)
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, limit.resetAt); err != nil {
 		slog.Warn("anthropic_window_rate_limit_set_failed",
 			"account_id", account.ID,

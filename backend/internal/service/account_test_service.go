@@ -317,6 +317,10 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
+		if resp.StatusCode == http.StatusTooManyRequests {
+			s.reconcileAnthropic429State(ctx, account, resp.Header, body)
+		}
+
 		// 403 表示账号被上游封禁，标记为 error 状态
 		if resp.StatusCode == http.StatusForbidden {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
@@ -1008,6 +1012,51 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded"})
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 	return nil
+}
+
+func (s *AccountTestService) reconcileAnthropic429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
+	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformAnthropic {
+		return
+	}
+
+	now := time.Now()
+	var limit *anthropicWindowLimit
+	if parsed := selectAnthropicExhaustedWindow(headers, now); parsed != nil {
+		limit = parsed
+	} else if parsed := selectAnthropicExhaustedWindowFromBody(body, now); parsed != nil {
+		limit = parsed
+	} else if parsed := calculateAnthropic429ResetTime(headers); parsed != nil {
+		if resetAt, ok := validateAnthropicBodyReset(parsed.resetAt, now, 8*24*time.Hour); ok {
+			limit = &anthropicWindowLimit{
+				window:  "unknown",
+				resetAt: resetAt,
+				reason:  "anthropic_429_window",
+			}
+		}
+	} else if resetAt, ok := parseAnthropicAggregateReset(headers, now); ok {
+		limit = &anthropicWindowLimit{
+			window:  "unknown",
+			resetAt: resetAt,
+			reason:  "anthropic_429_unified_reset",
+		}
+	}
+	if limit == nil || !shouldPersistAnthropicWindowLimit(account, limit, now) {
+		return
+	}
+
+	if err := s.accountRepo.SetRateLimited(ctx, account.ID, limit.resetAt); err != nil {
+		return
+	}
+	account.RateLimitedAt = &now
+	account.RateLimitResetAt = &limit.resetAt
+
+	if account.Status == StatusError {
+		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+			return
+		}
+		account.Status = StatusActive
+		account.ErrorMessage = ""
+	}
 }
 
 func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
