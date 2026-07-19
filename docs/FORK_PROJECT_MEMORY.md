@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-18
+> 最后更新：2026-07-19
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-18 Claude Chrome OAuth 提前 401 自动恢复热修复上线：
+截至 2026-07-19 Anthropic 分组级客户策略上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-f7fd00dc`
-- 镜像 digest：`sha256:e70a68937edc4a94fac5977bad79786f579ca1189e10a824104af81d052f6b10`
-- 应用 commit：`f7fd00dc`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-7a8049ae`
+- 镜像 digest：`sha256:75227df83d5e9a99551522a1a8eadb62896a2397a714c726cd9052d5f3b28047`
+- 应用 commit：`7a8049ae`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29635986408`（`custom-image` success）
+- GitHub Actions run：`29686532207`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -57,14 +57,15 @@
 - 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
-- 本次无数据库 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
-- 部署后 token refresh 首轮扫描：`total=96, needs_refresh=4, refreshed=4, failed=0`
-- 部署时 `.env` 备份：`backups/.env.20260718-074226.before-f7fd00dc`
+- 标定 profile：published + valid，CLI `2.1.215`
+- 数据库迁移：`178_add_anthropic_group_policies.sql` 已应用；只新增两个带
+  `inherit` 默认值的分组策略列，PostgreSQL、Redis、Caddy 均未重建
+- 部署时 `.env` 备份：`backups/.env.20260719-121911.before-7a8049ae`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-f7fd00dc
+sub2api-rollback:pre-7a8049ae
 ```
 
 ## 4. 已实现功能
@@ -257,6 +258,36 @@ POST /api/v1/admin/accounts/:id/refresh-cookie-auth
 - 旧链路不添加 Chrome beta、不保存 SessionKey、不启用 SessionKey 回退；
 - 旧代理解析及普通 Redis refresh lock 继续沿用 fail-open 行为；
 - 共享行为的实际变化只有 credentials/error CAS 和 profile 切换防陈旧写入。
+
+### 4.8 Anthropic 分组级客户策略
+
+Anthropic 分组新增两个三态策略：
+
+```text
+inherit
+enabled
+disabled
+```
+
+- `content_review_policy`：同时控制本地 `ContentSafetyGuard` 与风控中心
+  `ContentModeration` 的分组参与状态；
+- `claude_oauth_system_prompt_policy`：控制第三方客户端经 Anthropic
+  OAuth/SetupToken mimic 路径时是否注入 Claude Code system blocks；
+- 存量分组默认 `inherit`，继续沿用全局设置，升级不改变既有行为；
+- 非 Anthropic 分组强制归一为 `inherit`；
+- `enabled` 可覆盖全局 enable 开关或风控分组范围，但审查模式、关键词、阈值和
+  外部审计配置仍由全局风控配置提供；
+- `disabled` 会跳过两层内容审查；Anthropic 上游自身的安全策略不受影响；
+- 关闭 system 注入不会影响真实 Claude Code 客户端或 Anthropic API-key 透传，
+  只影响 OAuth/SetupToken + 非真实 Claude Code 客户端；
+- Mimicry Guard 为 `warn` 时，关闭注入只记录伪装 findings，不阻断请求；
+- API Key auth cache schema 已升级到 v17，分组修改后会主动失效对应认证缓存。
+
+数据库迁移：
+
+```text
+backend/migrations/178_add_anthropic_group_policies.sql
+```
 
 ## 5. 当前自动标定状态
 
@@ -573,6 +604,19 @@ backend/internal/repository/account_repo.go
 backend/internal/handler/admin/account_handler.go
 frontend/src/components/account/OAuthAuthorizationFlow.vue
 frontend/src/components/admin/account/AccountActionMenu.vue
+```
+
+Anthropic 分组级客户策略：
+
+```text
+backend/migrations/178_add_anthropic_group_policies.sql
+backend/internal/service/group_anthropic_policy.go
+backend/internal/service/content_safety_guard.go
+backend/internal/service/content_moderation.go
+backend/internal/service/gateway_claude_oauth_body.go
+backend/internal/handler/content_safety_helper.go
+backend/internal/handler/content_moderation_helper.go
+frontend/src/views/admin/GroupsView.vue
 ```
 
 部署：
