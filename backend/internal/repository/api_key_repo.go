@@ -206,6 +206,8 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldAnthropicMixedTypeWeightEnabled,
 				group.FieldAnthropicSetupTokenPoolWeight,
 				group.FieldAnthropicAPIKeyPoolWeight,
+				group.FieldContentReviewPolicy,
+				group.FieldClaudeOauthSystemPromptPolicy,
 				group.FieldPeakRateEnabled,
 				group.FieldPeakStart,
 				group.FieldPeakEnd,
