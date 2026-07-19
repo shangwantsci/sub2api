@@ -39,11 +39,11 @@
 截至 2026-07-19 Anthropic 分组级客户策略上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-7a8049ae`
-- 镜像 digest：`sha256:75227df83d5e9a99551522a1a8eadb62896a2397a714c726cd9052d5f3b28047`
-- 应用 commit：`7a8049ae`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-c32d41b7`
+- 镜像 digest：`sha256:431c5e103655ee0a20fbc8233a8d939f5fb4cacf82b07c8929be085b743fdac2`
+- 应用 commit：`c32d41b7`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29686532207`（`custom-image` success）
+- GitHub Actions run：`29687558261`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -60,12 +60,12 @@
 - 标定 profile：published + valid，CLI `2.1.215`
 - 数据库迁移：`178_add_anthropic_group_policies.sql` 已应用；只新增两个带
   `inherit` 默认值的分组策略列，PostgreSQL、Redis、Caddy 均未重建
-- 部署时 `.env` 备份：`backups/.env.20260719-121911.before-7a8049ae`
+- 部署时 `.env` 备份：`backups/.env.20260719-124840.before-c32d41b7`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-7a8049ae
+sub2api-rollback:pre-c32d41b7
 ```
 
 ## 4. 已实现功能
@@ -282,6 +282,19 @@ disabled
   只影响 OAuth/SetupToken + 非真实 Claude Code 客户端；
 - Mimicry Guard 为 `warn` 时，关闭注入只记录伪装 findings，不阻断请求；
 - API Key auth cache schema 已升级到 v17，分组修改后会主动失效对应认证缓存。
+- API Key 认证使用 Ent 精简 SELECT；新增分组运行时字段时必须同步加入
+  `GetByKeyForAuth` 的 `WithGroup(...Select(...))` 列表。首次部署遗漏这两列会让
+  运行时空值回退到 `inherit`，已由 `c32d41b7` 修复并增加 SQLite 回归测试。
+
+生产实测（分组 `content_review_policy=disabled`、
+`claude_oauth_system_prompt_policy=disabled`）：
+
+```text
+客户期望 input_tokens: 5127
+网关实际 input_tokens: 5127
+差值: 0
+HTTP: 200
+```
 
 数据库迁移：
 

@@ -119,7 +119,7 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-COMMIT=7a8049ae  # 替换为本次 8 位 commit
+COMMIT=c32d41b7  # 替换为本次 8 位 commit
 MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
 IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
 
