@@ -20956,6 +20956,8 @@ type GroupMutation struct {
 	addanthropic_setup_token_pool_weight    *int
 	anthropic_api_key_pool_weight           *int
 	addanthropic_api_key_pool_weight        *int
+	content_review_policy                   *string
+	claude_oauth_system_prompt_policy       *string
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -23596,6 +23598,78 @@ func (m *GroupMutation) ResetAnthropicAPIKeyPoolWeight() {
 	m.addanthropic_api_key_pool_weight = nil
 }
 
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (m *GroupMutation) SetContentReviewPolicy(s string) {
+	m.content_review_policy = &s
+}
+
+// ContentReviewPolicy returns the value of the "content_review_policy" field in the mutation.
+func (m *GroupMutation) ContentReviewPolicy() (r string, exists bool) {
+	v := m.content_review_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldContentReviewPolicy returns the old "content_review_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldContentReviewPolicy(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldContentReviewPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldContentReviewPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldContentReviewPolicy: %w", err)
+	}
+	return oldValue.ContentReviewPolicy, nil
+}
+
+// ResetContentReviewPolicy resets all changes to the "content_review_policy" field.
+func (m *GroupMutation) ResetContentReviewPolicy() {
+	m.content_review_policy = nil
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (m *GroupMutation) SetClaudeOauthSystemPromptPolicy(s string) {
+	m.claude_oauth_system_prompt_policy = &s
+}
+
+// ClaudeOauthSystemPromptPolicy returns the value of the "claude_oauth_system_prompt_policy" field in the mutation.
+func (m *GroupMutation) ClaudeOauthSystemPromptPolicy() (r string, exists bool) {
+	v := m.claude_oauth_system_prompt_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClaudeOauthSystemPromptPolicy returns the old "claude_oauth_system_prompt_policy" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldClaudeOauthSystemPromptPolicy(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClaudeOauthSystemPromptPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClaudeOauthSystemPromptPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClaudeOauthSystemPromptPolicy: %w", err)
+	}
+	return oldValue.ClaudeOauthSystemPromptPolicy, nil
+}
+
+// ResetClaudeOauthSystemPromptPolicy resets all changes to the "claude_oauth_system_prompt_policy" field.
+func (m *GroupMutation) ResetClaudeOauthSystemPromptPolicy() {
+	m.claude_oauth_system_prompt_policy = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -23954,7 +24028,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 51)
+	fields := make([]string, 0, 53)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -24108,6 +24182,12 @@ func (m *GroupMutation) Fields() []string {
 	if m.anthropic_api_key_pool_weight != nil {
 		fields = append(fields, group.FieldAnthropicAPIKeyPoolWeight)
 	}
+	if m.content_review_policy != nil {
+		fields = append(fields, group.FieldContentReviewPolicy)
+	}
+	if m.claude_oauth_system_prompt_policy != nil {
+		fields = append(fields, group.FieldClaudeOauthSystemPromptPolicy)
+	}
 	return fields
 }
 
@@ -24218,6 +24298,10 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.AnthropicSetupTokenPoolWeight()
 	case group.FieldAnthropicAPIKeyPoolWeight:
 		return m.AnthropicAPIKeyPoolWeight()
+	case group.FieldContentReviewPolicy:
+		return m.ContentReviewPolicy()
+	case group.FieldClaudeOauthSystemPromptPolicy:
+		return m.ClaudeOauthSystemPromptPolicy()
 	}
 	return nil, false
 }
@@ -24329,6 +24413,10 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldAnthropicSetupTokenPoolWeight(ctx)
 	case group.FieldAnthropicAPIKeyPoolWeight:
 		return m.OldAnthropicAPIKeyPoolWeight(ctx)
+	case group.FieldContentReviewPolicy:
+		return m.OldContentReviewPolicy(ctx)
+	case group.FieldClaudeOauthSystemPromptPolicy:
+		return m.OldClaudeOauthSystemPromptPolicy(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -24694,6 +24782,20 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAnthropicAPIKeyPoolWeight(v)
+		return nil
+	case group.FieldContentReviewPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetContentReviewPolicy(v)
+		return nil
+	case group.FieldClaudeOauthSystemPromptPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClaudeOauthSystemPromptPolicy(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -25268,6 +25370,12 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldAnthropicAPIKeyPoolWeight:
 		m.ResetAnthropicAPIKeyPoolWeight()
+		return nil
+	case group.FieldContentReviewPolicy:
+		m.ResetContentReviewPolicy()
+		return nil
+	case group.FieldClaudeOauthSystemPromptPolicy:
+		m.ResetClaudeOauthSystemPromptPolicy()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

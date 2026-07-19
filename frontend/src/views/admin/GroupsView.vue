@@ -1321,6 +1321,66 @@
           </div>
         </div>
 
+        <!-- Anthropic 分组策略 -->
+        <div
+          v-if="createForm.platform === 'anthropic'"
+          class="border-t border-gray-200 pt-4 dark:border-dark-400"
+        >
+          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t("admin.groups.anthropicPolicies.title") }}
+          </h4>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">
+                  {{ t("admin.groups.anthropicPolicies.contentReview") }}
+                </label>
+                <p class="input-hint">
+                  {{ t("admin.groups.anthropicPolicies.contentReviewHint") }}
+                </p>
+              </div>
+              <select
+                v-model="createForm.content_review_policy"
+                class="input w-32 flex-shrink-0 text-sm"
+              >
+                <option value="inherit">
+                  {{ t("admin.groups.anthropicPolicies.inherit") }}
+                </option>
+                <option value="enabled">
+                  {{ t("admin.groups.anthropicPolicies.enabled") }}
+                </option>
+                <option value="disabled">
+                  {{ t("admin.groups.anthropicPolicies.disabled") }}
+                </option>
+              </select>
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">
+                  {{ t("admin.groups.anthropicPolicies.systemPrompt") }}
+                </label>
+                <p class="input-hint">
+                  {{ t("admin.groups.anthropicPolicies.systemPromptHint") }}
+                </p>
+              </div>
+              <select
+                v-model="createForm.claude_oauth_system_prompt_policy"
+                class="input w-32 flex-shrink-0 text-sm"
+              >
+                <option value="inherit">
+                  {{ t("admin.groups.anthropicPolicies.inherit") }}
+                </option>
+                <option value="enabled">
+                  {{ t("admin.groups.anthropicPolicies.enabled") }}
+                </option>
+                <option value="disabled">
+                  {{ t("admin.groups.anthropicPolicies.disabled") }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
           v-if="createForm.platform === 'openai'"
@@ -2903,6 +2963,66 @@
           </div>
         </div>
 
+        <!-- Anthropic 分组策略 -->
+        <div
+          v-if="editForm.platform === 'anthropic'"
+          class="border-t border-gray-200 pt-4 dark:border-dark-400"
+        >
+          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t("admin.groups.anthropicPolicies.title") }}
+          </h4>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">
+                  {{ t("admin.groups.anthropicPolicies.contentReview") }}
+                </label>
+                <p class="input-hint">
+                  {{ t("admin.groups.anthropicPolicies.contentReviewHint") }}
+                </p>
+              </div>
+              <select
+                v-model="editForm.content_review_policy"
+                class="input w-32 flex-shrink-0 text-sm"
+              >
+                <option value="inherit">
+                  {{ t("admin.groups.anthropicPolicies.inherit") }}
+                </option>
+                <option value="enabled">
+                  {{ t("admin.groups.anthropicPolicies.enabled") }}
+                </option>
+                <option value="disabled">
+                  {{ t("admin.groups.anthropicPolicies.disabled") }}
+                </option>
+              </select>
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">
+                  {{ t("admin.groups.anthropicPolicies.systemPrompt") }}
+                </label>
+                <p class="input-hint">
+                  {{ t("admin.groups.anthropicPolicies.systemPromptHint") }}
+                </p>
+              </div>
+              <select
+                v-model="editForm.claude_oauth_system_prompt_policy"
+                class="input w-32 flex-shrink-0 text-sm"
+              >
+                <option value="inherit">
+                  {{ t("admin.groups.anthropicPolicies.inherit") }}
+                </option>
+                <option value="enabled">
+                  {{ t("admin.groups.anthropicPolicies.enabled") }}
+                </option>
+                <option value="disabled">
+                  {{ t("admin.groups.anthropicPolicies.disabled") }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
           v-if="editForm.platform === 'openai'"
@@ -3711,7 +3831,12 @@ import { useAppStore } from "@/stores/app";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import { extractApiErrorMessage } from "@/utils/apiError";
-import type { AdminGroup, GroupPlatform, SubscriptionType } from "@/types";
+import type {
+  AdminGroup,
+  GroupPlatform,
+  GroupPolicy,
+  SubscriptionType,
+} from "@/types";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
@@ -4183,6 +4308,8 @@ const createForm = reactive({
   anthropic_mixed_type_weight_enabled: false,
   anthropic_setup_token_pool_weight: 100,
   anthropic_api_key_pool_weight: 0,
+  content_review_policy: "inherit" as GroupPolicy,
+  claude_oauth_system_prompt_policy: "inherit" as GroupPolicy,
   // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   // MCP XML 协议注入开关（仅 antigravity 平台）
@@ -4535,6 +4662,8 @@ const editForm = reactive({
   anthropic_mixed_type_weight_enabled: false,
   anthropic_setup_token_pool_weight: 100,
   anthropic_api_key_pool_weight: 0,
+  content_review_policy: "inherit" as GroupPolicy,
+  claude_oauth_system_prompt_policy: "inherit" as GroupPolicy,
   // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   // MCP XML 协议注入开关（仅 antigravity 平台）
@@ -4931,6 +5060,8 @@ const closeCreateModal = () => {
   createForm.anthropic_mixed_type_weight_enabled = false;
   createForm.anthropic_setup_token_pool_weight = 100;
   createForm.anthropic_api_key_pool_weight = 0;
+  createForm.content_review_policy = "inherit";
+  createForm.claude_oauth_system_prompt_policy = "inherit";
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
@@ -5117,6 +5248,9 @@ const handleEdit = async (group: AdminGroup) => {
     group.anthropic_setup_token_pool_weight ?? 100;
   editForm.anthropic_api_key_pool_weight =
     group.anthropic_api_key_pool_weight ?? 0;
+  editForm.content_review_policy = group.content_review_policy ?? "inherit";
+  editForm.claude_oauth_system_prompt_policy =
+    group.claude_oauth_system_prompt_policy ?? "inherit";
   editForm.supported_model_scopes = group.supported_model_scopes || [
     "claude",
     "gemini_text",
@@ -5153,6 +5287,8 @@ const closeEditModal = () => {
   editForm.video_price_720p = null;
   editForm.video_price_1080p = null;
   editForm.web_search_price_per_call = null;
+  editForm.content_review_policy = "inherit";
+  editForm.claude_oauth_system_prompt_policy = "inherit";
   resetMessagesDispatchFormState(editForm);
   resetModelsListState(editModelsListState);
 };
@@ -5356,6 +5492,8 @@ watch(
       createForm.anthropic_mixed_type_weight_enabled = false;
       createForm.anthropic_setup_token_pool_weight = 100;
       createForm.anthropic_api_key_pool_weight = 0;
+      createForm.content_review_policy = "inherit";
+      createForm.claude_oauth_system_prompt_policy = "inherit";
     }
     resetDisabledBatchImagePricing(createForm);
     resetModelsListState(createModelsListState);
@@ -5394,6 +5532,8 @@ watch(
       editForm.anthropic_mixed_type_weight_enabled = false;
       editForm.anthropic_setup_token_pool_weight = 100;
       editForm.anthropic_api_key_pool_weight = 0;
+      editForm.content_review_policy = "inherit";
+      editForm.claude_oauth_system_prompt_policy = "inherit";
     }
     resetDisabledBatchImagePricing(editForm);
     if (editingGroup.value) {

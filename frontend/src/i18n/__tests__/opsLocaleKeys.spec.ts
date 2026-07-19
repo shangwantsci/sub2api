@@ -50,4 +50,22 @@ describe('groups locale key completeness', () => {
       expect(flattenKeys(zh)).toContain(key)
     })
   }
+
+  const anthropicPolicyKeys = [
+    'admin.groups.anthropicPolicies.title',
+    'admin.groups.anthropicPolicies.contentReview',
+    'admin.groups.anthropicPolicies.contentReviewHint',
+    'admin.groups.anthropicPolicies.systemPrompt',
+    'admin.groups.anthropicPolicies.systemPromptHint',
+    'admin.groups.anthropicPolicies.inherit',
+    'admin.groups.anthropicPolicies.enabled',
+    'admin.groups.anthropicPolicies.disabled',
+  ]
+
+  for (const key of anthropicPolicyKeys) {
+    it(`en and zh locales both have ${key}`, () => {
+      expect(flattenKeys(en)).toContain(key)
+      expect(flattenKeys(zh)).toContain(key)
+    })
+  }
 })

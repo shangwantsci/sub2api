@@ -129,6 +129,25 @@ func defaultAllowImageGenerationForPlatform(platform string) bool {
 	return platform == PlatformGrok
 }
 
+func normalizeAnthropicGroupPolicies(platform, contentReviewPolicy, systemPromptPolicy string) (string, string, error) {
+	if platform != PlatformAnthropic {
+		return GroupPolicyInherit, GroupPolicyInherit, nil
+	}
+	if strings.TrimSpace(contentReviewPolicy) == "" {
+		contentReviewPolicy = GroupPolicyInherit
+	}
+	if strings.TrimSpace(systemPromptPolicy) == "" {
+		systemPromptPolicy = GroupPolicyInherit
+	}
+	if !IsValidGroupPolicy(contentReviewPolicy) {
+		return "", "", errors.New("content_review_policy must be inherit, enabled, or disabled")
+	}
+	if !IsValidGroupPolicy(systemPromptPolicy) {
+		return "", "", errors.New("claude_oauth_system_prompt_policy must be inherit, enabled, or disabled")
+	}
+	return NormalizeGroupPolicy(contentReviewPolicy), NormalizeGroupPolicy(systemPromptPolicy), nil
+}
+
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
 	if input.RateMultiplier <= 0 {
 		return nil, errors.New("rate_multiplier must be > 0")
@@ -149,6 +168,14 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		input.AnthropicMixedTypeWeightEnabled,
 		input.AnthropicSetupTokenPoolWeight,
 		input.AnthropicAPIKeyPoolWeight,
+	)
+	if err != nil {
+		return nil, err
+	}
+	contentReviewPolicy, systemPromptPolicy, err := normalizeAnthropicGroupPolicies(
+		platform,
+		input.ContentReviewPolicy,
+		input.ClaudeOAuthSystemPromptPolicy,
 	)
 	if err != nil {
 		return nil, err
@@ -315,6 +342,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		AnthropicMixedTypeWeightEnabled: mixedTypeEnabled,
 		AnthropicSetupTokenPoolWeight:   setupPoolWeight,
 		AnthropicAPIKeyPoolWeight:       apiKeyPoolWeight,
+		ContentReviewPolicy:             contentReviewPolicy,
+		ClaudeOAuthSystemPromptPolicy:   systemPromptPolicy,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -526,6 +555,24 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	group.AnthropicMixedTypeWeightEnabled = mixedTypeEnabled
 	group.AnthropicSetupTokenPoolWeight = setupPoolWeight
 	group.AnthropicAPIKeyPoolWeight = apiKeyPoolWeight
+	contentReviewPolicy := group.ContentReviewPolicy
+	if input.ContentReviewPolicy != nil {
+		contentReviewPolicy = *input.ContentReviewPolicy
+	}
+	systemPromptPolicy := group.ClaudeOAuthSystemPromptPolicy
+	if input.ClaudeOAuthSystemPromptPolicy != nil {
+		systemPromptPolicy = *input.ClaudeOAuthSystemPromptPolicy
+	}
+	contentReviewPolicy, systemPromptPolicy, policyErr := normalizeAnthropicGroupPolicies(
+		group.Platform,
+		contentReviewPolicy,
+		systemPromptPolicy,
+	)
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	group.ContentReviewPolicy = contentReviewPolicy
+	group.ClaudeOAuthSystemPromptPolicy = systemPromptPolicy
 
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
 	// 前端始终发送这三个字段，无需 nil 守卫

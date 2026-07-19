@@ -969,6 +969,8 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		AnthropicMixedTypeWeightEnabled: g.AnthropicMixedTypeWeightEnabled,
 		AnthropicSetupTokenPoolWeight:   g.AnthropicSetupTokenPoolWeight,
 		AnthropicAPIKeyPoolWeight:       g.AnthropicAPIKeyPoolWeight,
+		ContentReviewPolicy:             g.ContentReviewPolicy,
+		ClaudeOAuthSystemPromptPolicy:   g.ClaudeOauthSystemPromptPolicy,
 		PeakRateEnabled:                 g.PeakRateEnabled,
 		PeakStart:                       g.PeakStart,
 		PeakEnd:                         g.PeakEnd,

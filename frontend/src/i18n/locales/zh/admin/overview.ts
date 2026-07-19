@@ -970,6 +970,16 @@ export default {
         fallbackHint: '非 Claude Code 请求将使用此分组，留空则直接拒绝',
         noFallback: '不降级（直接拒绝）'
       },
+      anthropicPolicies: {
+        title: 'Anthropic 客户策略',
+        contentReview: '内容安全与敏感词审查',
+        contentReviewHint: '控制本地内容安全和风控中心审查；启用时仍沿用全局审查模式、关键词和阈值。',
+        systemPrompt: 'Claude OAuth System 注入',
+        systemPromptHint: '仅影响第三方客户端经 OAuth/SetupToken 的伪装路径；关闭可减少注入 token，但会降低 Claude Code 伪装一致性。',
+        inherit: '继承全局',
+        enabled: '开启',
+        disabled: '关闭'
+      },
       openaiMessages: {
         title: 'OpenAI Messages 调度配置',
         allowDispatch: '允许 /v1/messages 调度',

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,4 +73,40 @@ func TestSettingService_GetClaudeMimicryRuntimeSettings(t *testing.T) {
 		require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, settings.ProfileID)
 		require.Equal(t, "block", settings.GuardMode)
 	})
+}
+
+func TestGatewayService_ClaudeOAuthSystemPromptInjectionUsesAnthropicGroupPolicy(t *testing.T) {
+	tests := []struct {
+		name          string
+		globalEnabled string
+		policy        string
+		wantEnabled   bool
+	}{
+		{name: "inherits enabled global", globalEnabled: "true", policy: GroupPolicyInherit, wantEnabled: true},
+		{name: "inherits disabled global", globalEnabled: "false", policy: GroupPolicyInherit, wantEnabled: false},
+		{name: "group disables enabled global", globalEnabled: "true", policy: GroupPolicyDisabled, wantEnabled: false},
+		{name: "group enables disabled global", globalEnabled: "false", policy: GroupPolicyEnabled, wantEnabled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetGatewayForwardingSettingsCacheForTest(t)
+			settingService := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+				SettingKeyEnableClaudeOAuthSystemPromptInjection: tt.globalEnabled,
+			}}, &config.Config{})
+			svc := &GatewayService{settingService: settingService}
+			group := &Group{
+				ID:                            1,
+				Platform:                      PlatformAnthropic,
+				Status:                        StatusActive,
+				Hydrated:                      true,
+				ClaudeOAuthSystemPromptPolicy: tt.policy,
+			}
+			ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+
+			enabled, _, _ := svc.claudeOAuthSystemPromptInjectionSettings(ctx)
+
+			require.Equal(t, tt.wantEnabled, enabled)
+		})
+	}
 }

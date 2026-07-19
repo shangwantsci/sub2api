@@ -260,6 +260,40 @@ func TestAdminService_CreateGroup_NormalizesAnthropicMixedTypeWeights(t *testing
 	require.Equal(t, 25, repo.created.AnthropicAPIKeyPoolWeight)
 }
 
+func TestAdminService_CreateGroup_AppliesAnthropicPolicies(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                          "customer-policy",
+		Platform:                      PlatformAnthropic,
+		RateMultiplier:                1.0,
+		ContentReviewPolicy:           GroupPolicyDisabled,
+		ClaudeOAuthSystemPromptPolicy: GroupPolicyEnabled,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, GroupPolicyDisabled, group.ContentReviewPolicy)
+	require.Equal(t, GroupPolicyEnabled, group.ClaudeOAuthSystemPromptPolicy)
+}
+
+func TestAdminService_CreateGroup_ResetsAnthropicPoliciesForOtherPlatforms(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                          "openai-policy",
+		Platform:                      PlatformOpenAI,
+		RateMultiplier:                1.0,
+		ContentReviewPolicy:           GroupPolicyDisabled,
+		ClaudeOAuthSystemPromptPolicy: GroupPolicyDisabled,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, GroupPolicyInherit, group.ContentReviewPolicy)
+	require.Equal(t, GroupPolicyInherit, group.ClaudeOAuthSystemPromptPolicy)
+}
+
 func TestAdminService_UpdateGroup_RejectsAllZeroAnthropicMixedTypeWeights(t *testing.T) {
 	existingGroup := &Group{
 		ID:                            1,

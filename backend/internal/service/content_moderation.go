@@ -299,18 +299,19 @@ type ContentModerationModelFilter struct {
 }
 
 type ContentModerationCheckInput struct {
-	RequestID  string
-	UserID     int64
-	UserEmail  string
-	APIKeyID   int64
-	APIKeyName string
-	GroupID    *int64
-	GroupName  string
-	Endpoint   string
-	Provider   string
-	Model      string
-	Protocol   string
-	Body       []byte
+	RequestID   string
+	UserID      int64
+	UserEmail   string
+	APIKeyID    int64
+	APIKeyName  string
+	GroupID     *int64
+	GroupName   string
+	Endpoint    string
+	Provider    string
+	Model       string
+	Protocol    string
+	Body        []byte
+	GroupPolicy string
 }
 
 type ContentModerationInput struct {
@@ -783,6 +784,10 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 
 func (s *ContentModerationService) Check(ctx context.Context, input ContentModerationCheckInput) (*ContentModerationDecision, error) {
 	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
+	groupPolicy := NormalizeGroupPolicy(input.GroupPolicy)
+	if groupPolicy == GroupPolicyDisabled {
+		return allow, nil
+	}
 	if s == nil || s.settingRepo == nil || s.repo == nil {
 		slog.Info("content_moderation.skip_unavailable",
 			"user_id", input.UserID,
@@ -813,7 +818,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	cfg := runtimeSnapshot.config
-	inGroupScope := cfg.includesGroup(input.GroupID)
+	inGroupScope := groupPolicy == GroupPolicyEnabled || cfg.includesGroup(input.GroupID)
 	inModelScope := cfg.includesModel(input.Model)
 	slog.Info("content_moderation.config_loaded",
 		"user_id", input.UserID,
@@ -1230,7 +1235,8 @@ func (s *ContentModerationService) worker(id int) {
 			if !cfg.Enabled || cfg.Mode == ContentModerationModeOff || len(cfg.apiKeys()) == 0 {
 				return
 			}
-			if !cfg.includesGroup(task.input.GroupID) {
+			if NormalizeGroupPolicy(task.input.GroupPolicy) != GroupPolicyEnabled &&
+				!cfg.includesGroup(task.input.GroupID) {
 				return
 			}
 			if !cfg.includesModel(task.input.Model) {

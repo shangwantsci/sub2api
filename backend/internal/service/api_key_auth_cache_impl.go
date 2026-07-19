@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 16 // v16: union of group video pricing, Anthropic mixed type weight, and web search per-call pricing fields
+const apiKeyAuthSnapshotVersion = 17 // v17: add Anthropic group content review and system prompt policies
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -286,6 +286,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AnthropicMixedTypeWeightEnabled: apiKey.Group.AnthropicMixedTypeWeightEnabled,
 			AnthropicSetupTokenPoolWeight:   apiKey.Group.AnthropicSetupTokenPoolWeight,
 			AnthropicAPIKeyPoolWeight:       apiKey.Group.AnthropicAPIKeyPoolWeight,
+			ContentReviewPolicy:             apiKey.Group.ContentReviewPolicy,
+			ClaudeOAuthSystemPromptPolicy:   apiKey.Group.ClaudeOAuthSystemPromptPolicy,
 			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
 			PeakStart:                       apiKey.Group.PeakStart,
 			PeakEnd:                         apiKey.Group.PeakEnd,
@@ -373,6 +375,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AnthropicMixedTypeWeightEnabled: snapshot.Group.AnthropicMixedTypeWeightEnabled,
 			AnthropicSetupTokenPoolWeight:   snapshot.Group.AnthropicSetupTokenPoolWeight,
 			AnthropicAPIKeyPoolWeight:       snapshot.Group.AnthropicAPIKeyPoolWeight,
+			ContentReviewPolicy:             snapshot.Group.ContentReviewPolicy,
+			ClaudeOAuthSystemPromptPolicy:   snapshot.Group.ClaudeOAuthSystemPromptPolicy,
 			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
 			PeakStart:                       snapshot.Group.PeakStart,
 			PeakEnd:                         snapshot.Group.PeakEnd,

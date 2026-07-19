@@ -102,9 +102,11 @@ type APIKeyAuthGroupSnapshot struct {
 	RPMLimit int `json:"rpm_limit"`
 
 	// Anthropic setup-token/api-key 混合类型权重调度配置。
-	AnthropicMixedTypeWeightEnabled bool `json:"anthropic_mixed_type_weight_enabled"`
-	AnthropicSetupTokenPoolWeight   int  `json:"anthropic_setup_token_pool_weight"`
-	AnthropicAPIKeyPoolWeight       int  `json:"anthropic_api_key_pool_weight"`
+	AnthropicMixedTypeWeightEnabled bool   `json:"anthropic_mixed_type_weight_enabled"`
+	AnthropicSetupTokenPoolWeight   int    `json:"anthropic_setup_token_pool_weight"`
+	AnthropicAPIKeyPoolWeight       int    `json:"anthropic_api_key_pool_weight"`
+	ContentReviewPolicy             string `json:"content_review_policy"`
+	ClaudeOAuthSystemPromptPolicy   string `json:"claude_oauth_system_prompt_policy"`
 
 	// 高峰时段倍率：PeakRateEnabled 为 true 且请求时刻处于 [PeakStart, PeakEnd) 时，
 	// token 计费倍率额外乘以 PeakRateMultiplier（详见 Group.PeakMultiplierAt）。

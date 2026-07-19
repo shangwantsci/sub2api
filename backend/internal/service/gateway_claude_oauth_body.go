@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropicfp"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/uuid"
@@ -1537,8 +1538,12 @@ func (s *GatewayService) normalizeClientDatelineIfEnabled(ctx context.Context, a
 }
 
 func (s *GatewayService) claudeOAuthSystemPromptInjectionSettings(ctx context.Context) (bool, string, string) {
-	if s == nil || s.settingService == nil {
-		return true, "", ""
+	enabled, prompt, blocks := true, "", ""
+	if s != nil && s.settingService != nil {
+		enabled, prompt, blocks = s.settingService.GetClaudeOAuthSystemPromptInjectionSettings(ctx)
 	}
-	return s.settingService.GetClaudeOAuthSystemPromptInjectionSettings(ctx)
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) {
+		enabled = ResolveGroupPolicy(enabled, group.AnthropicClaudeOAuthSystemPromptPolicy())
+	}
+	return enabled, prompt, blocks
 }

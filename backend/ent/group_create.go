@@ -719,6 +719,34 @@ func (_c *GroupCreate) SetNillableAnthropicAPIKeyPoolWeight(v *int) *GroupCreate
 	return _c
 }
 
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (_c *GroupCreate) SetContentReviewPolicy(v string) *GroupCreate {
+	_c.mutation.SetContentReviewPolicy(v)
+	return _c
+}
+
+// SetNillableContentReviewPolicy sets the "content_review_policy" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableContentReviewPolicy(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetContentReviewPolicy(*v)
+	}
+	return _c
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (_c *GroupCreate) SetClaudeOauthSystemPromptPolicy(v string) *GroupCreate {
+	_c.mutation.SetClaudeOauthSystemPromptPolicy(v)
+	return _c
+}
+
+// SetNillableClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableClaudeOauthSystemPromptPolicy(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetClaudeOauthSystemPromptPolicy(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -992,6 +1020,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultAnthropicAPIKeyPoolWeight
 		_c.mutation.SetAnthropicAPIKeyPoolWeight(v)
 	}
+	if _, ok := _c.mutation.ContentReviewPolicy(); !ok {
+		v := group.DefaultContentReviewPolicy
+		_c.mutation.SetContentReviewPolicy(v)
+	}
+	if _, ok := _c.mutation.ClaudeOauthSystemPromptPolicy(); !ok {
+		v := group.DefaultClaudeOauthSystemPromptPolicy
+		_c.mutation.SetClaudeOauthSystemPromptPolicy(v)
+	}
 	return nil
 }
 
@@ -1139,6 +1175,22 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.AnthropicAPIKeyPoolWeight(); !ok {
 		return &ValidationError{Name: "anthropic_api_key_pool_weight", err: errors.New(`ent: missing required field "Group.anthropic_api_key_pool_weight"`)}
+	}
+	if _, ok := _c.mutation.ContentReviewPolicy(); !ok {
+		return &ValidationError{Name: "content_review_policy", err: errors.New(`ent: missing required field "Group.content_review_policy"`)}
+	}
+	if v, ok := _c.mutation.ContentReviewPolicy(); ok {
+		if err := group.ContentReviewPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "content_review_policy", err: fmt.Errorf(`ent: validator failed for field "Group.content_review_policy": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ClaudeOauthSystemPromptPolicy(); !ok {
+		return &ValidationError{Name: "claude_oauth_system_prompt_policy", err: errors.New(`ent: missing required field "Group.claude_oauth_system_prompt_policy"`)}
+	}
+	if v, ok := _c.mutation.ClaudeOauthSystemPromptPolicy(); ok {
+		if err := group.ClaudeOauthSystemPromptPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "claude_oauth_system_prompt_policy", err: fmt.Errorf(`ent: validator failed for field "Group.claude_oauth_system_prompt_policy": %w`, err)}
+		}
 	}
 	return nil
 }
@@ -1370,6 +1422,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.AnthropicAPIKeyPoolWeight(); ok {
 		_spec.SetField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
 		_node.AnthropicAPIKeyPoolWeight = value
+	}
+	if value, ok := _c.mutation.ContentReviewPolicy(); ok {
+		_spec.SetField(group.FieldContentReviewPolicy, field.TypeString, value)
+		_node.ContentReviewPolicy = value
+	}
+	if value, ok := _c.mutation.ClaudeOauthSystemPromptPolicy(); ok {
+		_spec.SetField(group.FieldClaudeOauthSystemPromptPolicy, field.TypeString, value)
+		_node.ClaudeOauthSystemPromptPolicy = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -2352,6 +2412,30 @@ func (u *GroupUpsert) UpdateAnthropicAPIKeyPoolWeight() *GroupUpsert {
 // AddAnthropicAPIKeyPoolWeight adds v to the "anthropic_api_key_pool_weight" field.
 func (u *GroupUpsert) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpsert {
 	u.Add(group.FieldAnthropicAPIKeyPoolWeight, v)
+	return u
+}
+
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (u *GroupUpsert) SetContentReviewPolicy(v string) *GroupUpsert {
+	u.Set(group.FieldContentReviewPolicy, v)
+	return u
+}
+
+// UpdateContentReviewPolicy sets the "content_review_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateContentReviewPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldContentReviewPolicy)
+	return u
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (u *GroupUpsert) SetClaudeOauthSystemPromptPolicy(v string) *GroupUpsert {
+	u.Set(group.FieldClaudeOauthSystemPromptPolicy, v)
+	return u
+}
+
+// UpdateClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateClaudeOauthSystemPromptPolicy() *GroupUpsert {
+	u.SetExcluded(group.FieldClaudeOauthSystemPromptPolicy)
 	return u
 }
 
@@ -3363,6 +3447,34 @@ func (u *GroupUpsertOne) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateAnthropicAPIKeyPoolWeight() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAnthropicAPIKeyPoolWeight()
+	})
+}
+
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (u *GroupUpsertOne) SetContentReviewPolicy(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetContentReviewPolicy(v)
+	})
+}
+
+// UpdateContentReviewPolicy sets the "content_review_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateContentReviewPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateContentReviewPolicy()
+	})
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (u *GroupUpsertOne) SetClaudeOauthSystemPromptPolicy(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeOauthSystemPromptPolicy(v)
+	})
+}
+
+// UpdateClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateClaudeOauthSystemPromptPolicy() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeOauthSystemPromptPolicy()
 	})
 }
 
@@ -4540,6 +4652,34 @@ func (u *GroupUpsertBulk) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateAnthropicAPIKeyPoolWeight() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAnthropicAPIKeyPoolWeight()
+	})
+}
+
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (u *GroupUpsertBulk) SetContentReviewPolicy(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetContentReviewPolicy(v)
+	})
+}
+
+// UpdateContentReviewPolicy sets the "content_review_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateContentReviewPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateContentReviewPolicy()
+	})
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (u *GroupUpsertBulk) SetClaudeOauthSystemPromptPolicy(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetClaudeOauthSystemPromptPolicy(v)
+	})
+}
+
+// UpdateClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateClaudeOauthSystemPromptPolicy() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateClaudeOauthSystemPromptPolicy()
 	})
 }
 

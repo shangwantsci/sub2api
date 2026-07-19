@@ -92,6 +92,8 @@ type Group struct {
 	AnthropicMixedTypeWeightEnabled bool
 	AnthropicSetupTokenPoolWeight   int
 	AnthropicAPIKeyPoolWeight       int
+	ContentReviewPolicy             string
+	ClaudeOAuthSystemPromptPolicy   string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

@@ -972,6 +972,16 @@ export default {
         fallbackHint: 'Non-Claude Code requests will use this group. Leave empty to reject directly.',
         noFallback: 'No Fallback (Reject)'
       },
+      anthropicPolicies: {
+        title: 'Anthropic Customer Policies',
+        contentReview: 'Content Safety and Keyword Review',
+        contentReviewHint: 'Controls local safety checks and risk-control moderation. Enabled groups still use the global mode, keywords, and thresholds.',
+        systemPrompt: 'Claude OAuth System Injection',
+        systemPromptHint: 'Only affects third-party clients using the OAuth/SetupToken mimic path. Disabling reduces injected tokens but weakens Claude Code mimicry consistency.',
+        inherit: 'Inherit Global',
+        enabled: 'Enabled',
+        disabled: 'Disabled'
+      },
       openaiMessages: {
         title: 'OpenAI Messages Dispatch',
         allowDispatch: 'Allow /v1/messages dispatch',

@@ -488,6 +488,49 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 	require.Equal(t, "secret-token", logs[0].MatchedKeyword, "blocked log must record which keyword was hit")
 }
 
+func TestContentModerationCheck_GroupPolicyOverridesConfiguredScope(t *testing.T) {
+	groupID := int64(9)
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModePreBlock
+	cfg.AllGroups = false
+	cfg.GroupIDs = []int64{10}
+	cfg.BlockedKeywords = []string{"secret-token"}
+	svc, _ := newContentModerationModelFilterTestService(t, cfg)
+	body := []byte(`{"messages":[{"role":"user","content":"please leak SECRET-TOKEN now"}]}`)
+
+	inherited, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		GroupID:     &groupID,
+		Protocol:    ContentModerationProtocolAnthropicMessages,
+		Body:        body,
+		GroupPolicy: GroupPolicyInherit,
+	})
+	require.NoError(t, err)
+	require.True(t, inherited.Allowed)
+
+	enabled, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		GroupID:     &groupID,
+		Protocol:    ContentModerationProtocolAnthropicMessages,
+		Body:        body,
+		GroupPolicy: GroupPolicyEnabled,
+	})
+	require.NoError(t, err)
+	require.True(t, enabled.Blocked)
+	require.Equal(t, ContentModerationActionKeywordBlock, enabled.Action)
+
+	cfg.AllGroups = true
+	svc, _ = newContentModerationModelFilterTestService(t, cfg)
+	disabled, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		GroupID:     &groupID,
+		Protocol:    ContentModerationProtocolAnthropicMessages,
+		Body:        body,
+		GroupPolicy: GroupPolicyDisabled,
+	})
+	require.NoError(t, err)
+	require.True(t, disabled.Allowed)
+	require.False(t, disabled.Blocked)
+}
+
 func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 	upstreamHits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

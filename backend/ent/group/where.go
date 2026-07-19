@@ -290,6 +290,16 @@ func AnthropicAPIKeyPoolWeight(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAnthropicAPIKeyPoolWeight, v))
 }
 
+// ContentReviewPolicy applies equality check predicate on the "content_review_policy" field. It's identical to ContentReviewPolicyEQ.
+func ContentReviewPolicy(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldContentReviewPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicy applies equality check predicate on the "claude_oauth_system_prompt_policy" field. It's identical to ClaudeOauthSystemPromptPolicyEQ.
+func ClaudeOauthSystemPromptPolicy(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2128,6 +2138,136 @@ func AnthropicAPIKeyPoolWeightLT(v int) predicate.Group {
 // AnthropicAPIKeyPoolWeightLTE applies the LTE predicate on the "anthropic_api_key_pool_weight" field.
 func AnthropicAPIKeyPoolWeightLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldAnthropicAPIKeyPoolWeight, v))
+}
+
+// ContentReviewPolicyEQ applies the EQ predicate on the "content_review_policy" field.
+func ContentReviewPolicyEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyNEQ applies the NEQ predicate on the "content_review_policy" field.
+func ContentReviewPolicyNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyIn applies the In predicate on the "content_review_policy" field.
+func ContentReviewPolicyIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldContentReviewPolicy, vs...))
+}
+
+// ContentReviewPolicyNotIn applies the NotIn predicate on the "content_review_policy" field.
+func ContentReviewPolicyNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldContentReviewPolicy, vs...))
+}
+
+// ContentReviewPolicyGT applies the GT predicate on the "content_review_policy" field.
+func ContentReviewPolicyGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyGTE applies the GTE predicate on the "content_review_policy" field.
+func ContentReviewPolicyGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyLT applies the LT predicate on the "content_review_policy" field.
+func ContentReviewPolicyLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyLTE applies the LTE predicate on the "content_review_policy" field.
+func ContentReviewPolicyLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyContains applies the Contains predicate on the "content_review_policy" field.
+func ContentReviewPolicyContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyHasPrefix applies the HasPrefix predicate on the "content_review_policy" field.
+func ContentReviewPolicyHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyHasSuffix applies the HasSuffix predicate on the "content_review_policy" field.
+func ContentReviewPolicyHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyEqualFold applies the EqualFold predicate on the "content_review_policy" field.
+func ContentReviewPolicyEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldContentReviewPolicy, v))
+}
+
+// ContentReviewPolicyContainsFold applies the ContainsFold predicate on the "content_review_policy" field.
+func ContentReviewPolicyContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldContentReviewPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyEQ applies the EQ predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyNEQ applies the NEQ predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyIn applies the In predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldClaudeOauthSystemPromptPolicy, vs...))
+}
+
+// ClaudeOauthSystemPromptPolicyNotIn applies the NotIn predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldClaudeOauthSystemPromptPolicy, vs...))
+}
+
+// ClaudeOauthSystemPromptPolicyGT applies the GT predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyGTE applies the GTE predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyLT applies the LT predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyLTE applies the LTE predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyContains applies the Contains predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyHasPrefix applies the HasPrefix predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyHasSuffix applies the HasSuffix predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyEqualFold applies the EqualFold predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldClaudeOauthSystemPromptPolicy, v))
+}
+
+// ClaudeOauthSystemPromptPolicyContainsFold applies the ContainsFold predicate on the "claude_oauth_system_prompt_policy" field.
+func ClaudeOauthSystemPromptPolicyContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldClaudeOauthSystemPromptPolicy, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

@@ -1109,6 +1109,18 @@ func init() {
 	groupDescAnthropicAPIKeyPoolWeight := groupFields[47].Descriptor()
 	// group.DefaultAnthropicAPIKeyPoolWeight holds the default value on creation for the anthropic_api_key_pool_weight field.
 	group.DefaultAnthropicAPIKeyPoolWeight = groupDescAnthropicAPIKeyPoolWeight.Default.(int)
+	// groupDescContentReviewPolicy is the schema descriptor for content_review_policy field.
+	groupDescContentReviewPolicy := groupFields[48].Descriptor()
+	// group.DefaultContentReviewPolicy holds the default value on creation for the content_review_policy field.
+	group.DefaultContentReviewPolicy = groupDescContentReviewPolicy.Default.(string)
+	// group.ContentReviewPolicyValidator is a validator for the "content_review_policy" field. It is called by the builders before save.
+	group.ContentReviewPolicyValidator = groupDescContentReviewPolicy.Validators[0].(func(string) error)
+	// groupDescClaudeOauthSystemPromptPolicy is the schema descriptor for claude_oauth_system_prompt_policy field.
+	groupDescClaudeOauthSystemPromptPolicy := groupFields[49].Descriptor()
+	// group.DefaultClaudeOauthSystemPromptPolicy holds the default value on creation for the claude_oauth_system_prompt_policy field.
+	group.DefaultClaudeOauthSystemPromptPolicy = groupDescClaudeOauthSystemPromptPolicy.Default.(string)
+	// group.ClaudeOauthSystemPromptPolicyValidator is a validator for the "claude_oauth_system_prompt_policy" field. It is called by the builders before save.
+	group.ClaudeOauthSystemPromptPolicyValidator = groupDescClaudeOauthSystemPromptPolicy.Validators[0].(func(string) error)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

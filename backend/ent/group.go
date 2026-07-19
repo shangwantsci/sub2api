@@ -121,6 +121,10 @@ type Group struct {
 	AnthropicSetupTokenPoolWeight int `json:"anthropic_setup_token_pool_weight,omitempty"`
 	// Anthropic api-key 池权重，0 表示不参与混合类型调度
 	AnthropicAPIKeyPoolWeight int `json:"anthropic_api_key_pool_weight,omitempty"`
+	// Anthropic 分组内容审查策略：inherit, enabled, disabled
+	ContentReviewPolicy string `json:"content_review_policy,omitempty"`
+	// Anthropic 分组 Claude OAuth system prompt 注入策略：inherit, enabled, disabled
+	ClaudeOauthSystemPromptPolicy string `json:"claude_oauth_system_prompt_policy,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.
 	Edges        GroupEdges `json:"edges"`
@@ -235,7 +239,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit, group.FieldAnthropicSetupTokenPoolWeight, group.FieldAnthropicAPIKeyPoolWeight:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel:
+		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldContentReviewPolicy, group.FieldClaudeOauthSystemPromptPolicy:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -588,6 +592,18 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.AnthropicAPIKeyPoolWeight = int(value.Int64)
 			}
+		case group.FieldContentReviewPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field content_review_policy", values[i])
+			} else if value.Valid {
+				_m.ContentReviewPolicy = value.String
+			}
+		case group.FieldClaudeOauthSystemPromptPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field claude_oauth_system_prompt_policy", values[i])
+			} else if value.Valid {
+				_m.ClaudeOauthSystemPromptPolicy = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -844,6 +860,12 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("anthropic_api_key_pool_weight=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AnthropicAPIKeyPoolWeight))
+	builder.WriteString(", ")
+	builder.WriteString("content_review_policy=")
+	builder.WriteString(_m.ContentReviewPolicy)
+	builder.WriteString(", ")
+	builder.WriteString("claude_oauth_system_prompt_policy=")
+	builder.WriteString(_m.ClaudeOauthSystemPromptPolicy)
 	builder.WriteByte(')')
 	return builder.String()
 }

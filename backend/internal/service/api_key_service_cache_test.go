@@ -312,6 +312,8 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *t
 			AnthropicMixedTypeWeightEnabled: true,
 			AnthropicSetupTokenPoolWeight:   70,
 			AnthropicAPIKeyPoolWeight:       30,
+			ContentReviewPolicy:             GroupPolicyDisabled,
+			ClaudeOAuthSystemPromptPolicy:   GroupPolicyEnabled,
 		},
 	}
 
@@ -328,6 +330,8 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *t
 	require.True(t, roundTrip.Group.AnthropicMixedTypeWeightEnabled)
 	require.Equal(t, 70, roundTrip.Group.AnthropicSetupTokenPoolWeight)
 	require.Equal(t, 30, roundTrip.Group.AnthropicAPIKeyPoolWeight)
+	require.Equal(t, GroupPolicyDisabled, roundTrip.Group.ContentReviewPolicy)
+	require.Equal(t, GroupPolicyEnabled, roundTrip.Group.ClaudeOAuthSystemPromptPolicy)
 }
 
 func TestAPIKeyService_GetByKey_IgnoresLegacyAuthCacheSnapshotWithoutMessagesDispatchConfig(t *testing.T) {

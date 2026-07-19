@@ -76,8 +76,9 @@ type ContentSafetyInput struct {
 }
 
 type ContentSafetyCheckInput struct {
-	Protocol string
-	Body     []byte
+	Protocol    string
+	Body        []byte
+	GroupPolicy string
 }
 
 type ContentSafetyFinding struct {
@@ -203,8 +204,15 @@ func (g *ContentSafetyGuard) Check(ctx context.Context, input ContentSafetyCheck
 	if g == nil {
 		return &ContentSafetyDecision{Allowed: true, Action: ContentSafetyActionSkip}
 	}
+	groupPolicy := NormalizeGroupPolicy(input.GroupPolicy)
+	if groupPolicy == GroupPolicyDisabled {
+		return &ContentSafetyDecision{Allowed: true, Action: ContentSafetyActionSkip}
+	}
 	settings := g.cachedContentSafetyGuardSettings(ctx)
 	settings.Mode = NormalizeContentSafetyGuardMode(settings.Mode)
+	if groupPolicy == GroupPolicyEnabled {
+		settings.Enabled = true
+	}
 	if !settings.Enabled || settings.Mode == ContentSafetyGuardModeOff {
 		return &ContentSafetyDecision{Allowed: true, Action: ContentSafetyActionSkip, Mode: settings.Mode}
 	}

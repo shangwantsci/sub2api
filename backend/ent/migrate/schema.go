@@ -885,6 +885,8 @@ var (
 		{Name: "anthropic_mixed_type_weight_enabled", Type: field.TypeBool, Default: false},
 		{Name: "anthropic_setup_token_pool_weight", Type: field.TypeInt, Default: 100},
 		{Name: "anthropic_api_key_pool_weight", Type: field.TypeInt, Default: 0},
+		{Name: "content_review_policy", Type: field.TypeString, Size: 16, Default: "inherit"},
+		{Name: "claude_oauth_system_prompt_policy", Type: field.TypeString, Size: 16, Default: "inherit"},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
 	GroupsTable = &schema.Table{

@@ -118,6 +118,10 @@ const (
 	FieldAnthropicSetupTokenPoolWeight = "anthropic_setup_token_pool_weight"
 	// FieldAnthropicAPIKeyPoolWeight holds the string denoting the anthropic_api_key_pool_weight field in the database.
 	FieldAnthropicAPIKeyPoolWeight = "anthropic_api_key_pool_weight"
+	// FieldContentReviewPolicy holds the string denoting the content_review_policy field in the database.
+	FieldContentReviewPolicy = "content_review_policy"
+	// FieldClaudeOauthSystemPromptPolicy holds the string denoting the claude_oauth_system_prompt_policy field in the database.
+	FieldClaudeOauthSystemPromptPolicy = "claude_oauth_system_prompt_policy"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -244,6 +248,8 @@ var Columns = []string{
 	FieldAnthropicMixedTypeWeightEnabled,
 	FieldAnthropicSetupTokenPoolWeight,
 	FieldAnthropicAPIKeyPoolWeight,
+	FieldContentReviewPolicy,
+	FieldClaudeOauthSystemPromptPolicy,
 }
 
 var (
@@ -359,6 +365,14 @@ var (
 	DefaultAnthropicSetupTokenPoolWeight int
 	// DefaultAnthropicAPIKeyPoolWeight holds the default value on creation for the "anthropic_api_key_pool_weight" field.
 	DefaultAnthropicAPIKeyPoolWeight int
+	// DefaultContentReviewPolicy holds the default value on creation for the "content_review_policy" field.
+	DefaultContentReviewPolicy string
+	// ContentReviewPolicyValidator is a validator for the "content_review_policy" field. It is called by the builders before save.
+	ContentReviewPolicyValidator func(string) error
+	// DefaultClaudeOauthSystemPromptPolicy holds the default value on creation for the "claude_oauth_system_prompt_policy" field.
+	DefaultClaudeOauthSystemPromptPolicy string
+	// ClaudeOauthSystemPromptPolicyValidator is a validator for the "claude_oauth_system_prompt_policy" field. It is called by the builders before save.
+	ClaudeOauthSystemPromptPolicyValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -602,6 +616,16 @@ func ByAnthropicSetupTokenPoolWeight(opts ...sql.OrderTermOption) OrderOption {
 // ByAnthropicAPIKeyPoolWeight orders the results by the anthropic_api_key_pool_weight field.
 func ByAnthropicAPIKeyPoolWeight(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAnthropicAPIKeyPoolWeight, opts...).ToFunc()
+}
+
+// ByContentReviewPolicy orders the results by the content_review_policy field.
+func ByContentReviewPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldContentReviewPolicy, opts...).ToFunc()
+}
+
+// ByClaudeOauthSystemPromptPolicy orders the results by the claude_oauth_system_prompt_policy field.
+func ByClaudeOauthSystemPromptPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClaudeOauthSystemPromptPolicy, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

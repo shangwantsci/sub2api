@@ -23,7 +23,11 @@ func (h *GatewayHandler) contentSafetyDecision(c *gin.Context, reqLog *zap.Logge
 	if h == nil || h.contentSafetyGuard == nil || c == nil || c.Request == nil {
 		return nil
 	}
-	decision := h.contentSafetyGuard.Check(c.Request.Context(), service.ContentSafetyCheckInput{Protocol: protocol, Body: body})
+	decision := h.contentSafetyGuard.Check(c.Request.Context(), service.ContentSafetyCheckInput{
+		Protocol:    protocol,
+		Body:        body,
+		GroupPolicy: contentReviewPolicyForAPIKey(apiKey),
+	})
 	logContentSafetyDecision(c, reqLog, apiKey, subject, protocol, model, decision)
 	return decision
 }
@@ -32,9 +36,20 @@ func (h *OpenAIGatewayHandler) contentSafetyDecision(c *gin.Context, reqLog *zap
 	if h == nil || h.contentSafetyGuard == nil || c == nil || c.Request == nil {
 		return nil
 	}
-	decision := h.contentSafetyGuard.Check(c.Request.Context(), service.ContentSafetyCheckInput{Protocol: protocol, Body: body})
+	decision := h.contentSafetyGuard.Check(c.Request.Context(), service.ContentSafetyCheckInput{
+		Protocol:    protocol,
+		Body:        body,
+		GroupPolicy: contentReviewPolicyForAPIKey(apiKey),
+	})
 	logContentSafetyDecision(c, reqLog, apiKey, subject, protocol, model, decision)
 	return decision
+}
+
+func contentReviewPolicyForAPIKey(apiKey *service.APIKey) string {
+	if apiKey == nil || apiKey.Group == nil {
+		return service.GroupPolicyInherit
+	}
+	return apiKey.Group.AnthropicContentReviewPolicy()
 }
 
 func contentSafetyStatus(decision *service.ContentSafetyDecision) int {

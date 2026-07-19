@@ -226,6 +226,14 @@ func (Group) Fields() []ent.Field {
 		field.Int("anthropic_api_key_pool_weight").
 			Default(0).
 			Comment("Anthropic api-key 池权重，0 表示不参与混合类型调度"),
+		field.String("content_review_policy").
+			MaxLen(16).
+			Default("inherit").
+			Comment("Anthropic 分组内容审查策略：inherit, enabled, disabled"),
+		field.String("claude_oauth_system_prompt_policy").
+			MaxLen(16).
+			Default("inherit").
+			Comment("Anthropic 分组 Claude OAuth system prompt 注入策略：inherit, enabled, disabled"),
 	}
 }
 

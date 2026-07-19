@@ -969,6 +969,34 @@ func (_u *GroupUpdate) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpdate {
 	return _u
 }
 
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (_u *GroupUpdate) SetContentReviewPolicy(v string) *GroupUpdate {
+	_u.mutation.SetContentReviewPolicy(v)
+	return _u
+}
+
+// SetNillableContentReviewPolicy sets the "content_review_policy" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableContentReviewPolicy(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetContentReviewPolicy(*v)
+	}
+	return _u
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (_u *GroupUpdate) SetClaudeOauthSystemPromptPolicy(v string) *GroupUpdate {
+	_u.mutation.SetClaudeOauthSystemPromptPolicy(v)
+	return _u
+}
+
+// SetNillableClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableClaudeOauthSystemPromptPolicy(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetClaudeOauthSystemPromptPolicy(*v)
+	}
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1269,6 +1297,16 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ContentReviewPolicy(); ok {
+		if err := group.ContentReviewPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "content_review_policy", err: fmt.Errorf(`ent: validator failed for field "Group.content_review_policy": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ClaudeOauthSystemPromptPolicy(); ok {
+		if err := group.ClaudeOauthSystemPromptPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "claude_oauth_system_prompt_policy", err: fmt.Errorf(`ent: validator failed for field "Group.claude_oauth_system_prompt_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1552,6 +1590,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedAnthropicAPIKeyPoolWeight(); ok {
 		_spec.AddField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ContentReviewPolicy(); ok {
+		_spec.SetField(group.FieldContentReviewPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeOauthSystemPromptPolicy(); ok {
+		_spec.SetField(group.FieldClaudeOauthSystemPromptPolicy, field.TypeString, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2800,6 +2844,34 @@ func (_u *GroupUpdateOne) AddAnthropicAPIKeyPoolWeight(v int) *GroupUpdateOne {
 	return _u
 }
 
+// SetContentReviewPolicy sets the "content_review_policy" field.
+func (_u *GroupUpdateOne) SetContentReviewPolicy(v string) *GroupUpdateOne {
+	_u.mutation.SetContentReviewPolicy(v)
+	return _u
+}
+
+// SetNillableContentReviewPolicy sets the "content_review_policy" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableContentReviewPolicy(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetContentReviewPolicy(*v)
+	}
+	return _u
+}
+
+// SetClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field.
+func (_u *GroupUpdateOne) SetClaudeOauthSystemPromptPolicy(v string) *GroupUpdateOne {
+	_u.mutation.SetClaudeOauthSystemPromptPolicy(v)
+	return _u
+}
+
+// SetNillableClaudeOauthSystemPromptPolicy sets the "claude_oauth_system_prompt_policy" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableClaudeOauthSystemPromptPolicy(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetClaudeOauthSystemPromptPolicy(*v)
+	}
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -3113,6 +3185,16 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ContentReviewPolicy(); ok {
+		if err := group.ContentReviewPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "content_review_policy", err: fmt.Errorf(`ent: validator failed for field "Group.content_review_policy": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ClaudeOauthSystemPromptPolicy(); ok {
+		if err := group.ClaudeOauthSystemPromptPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "claude_oauth_system_prompt_policy", err: fmt.Errorf(`ent: validator failed for field "Group.claude_oauth_system_prompt_policy": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -3413,6 +3495,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedAnthropicAPIKeyPoolWeight(); ok {
 		_spec.AddField(group.FieldAnthropicAPIKeyPoolWeight, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ContentReviewPolicy(); ok {
+		_spec.SetField(group.FieldContentReviewPolicy, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClaudeOauthSystemPromptPolicy(); ok {
+		_spec.SetField(group.FieldClaudeOauthSystemPromptPolicy, field.TypeString, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

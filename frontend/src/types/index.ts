@@ -495,6 +495,7 @@ export interface PaginationConfig {
 export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
 
 export type SubscriptionType = 'standard' | 'subscription'
+export type GroupPolicy = 'inherit' | 'enabled' | 'disabled'
 
 export interface OpenAIMessagesDispatchModelConfig {
   opus_mapped_model?: string
@@ -559,6 +560,8 @@ export interface AdminGroup extends Group {
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
+  content_review_policy: GroupPolicy
+  claude_oauth_system_prompt_policy: GroupPolicy
 
   // MCP XML 协议注入（仅 antigravity 平台使用）
   mcp_xml_inject: boolean
@@ -691,6 +694,8 @@ export interface CreateGroupRequest {
   anthropic_mixed_type_weight_enabled?: boolean
   anthropic_setup_token_pool_weight?: number
   anthropic_api_key_pool_weight?: number
+  content_review_policy?: GroupPolicy
+  claude_oauth_system_prompt_policy?: GroupPolicy
   // 从指定分组复制账号
   copy_accounts_from_group_ids?: number[]
 }
@@ -742,6 +747,8 @@ export interface UpdateGroupRequest {
   anthropic_mixed_type_weight_enabled?: boolean
   anthropic_setup_token_pool_weight?: number
   anthropic_api_key_pool_weight?: number
+  content_review_policy?: GroupPolicy
+  claude_oauth_system_prompt_policy?: GroupPolicy
   copy_accounts_from_group_ids?: number[]
 }
 
