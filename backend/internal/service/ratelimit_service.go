@@ -366,16 +366,17 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	if statusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic {
 		// 7d_oi 是 Fable 模型专属的 7d 窗口：只标记模型级限流，账号对其他模型仍可调度。
 		fableLimited := s.persistAnthropicFableWindowLimit(ctx, account, headers)
+		fableBodyLimited := s.persistAnthropicFableBodyLimit(ctx, account, responseBody)
 		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
-			return false
-		}
-		if fableLimited {
 			return false
 		}
 		// 部分 Claude OAuth 入口不返回 unified 限流头，而是把真实窗口信息
 		// 作为 JSON 字符串放在 error.message 中。该信号同样是硬账号限额，
 		// 必须在用户自定义的临时不可调度规则之前处理。
 		if s.persistAnthropicExhaustedBodyLimit(ctx, account, responseBody) {
+			return false
+		}
+		if fableLimited || fableBodyLimited {
 			return false
 		}
 	}
@@ -1119,10 +1120,20 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		}
 	}
 
-	// 2. Anthropic 平台：部分入口把限流详情二次编码在 error.message，
-	// 先解析响应体中的真实窗口，避免退化成一分钟运行时冷却。
-	if account.Platform == PlatformAnthropic && s.persistAnthropicExhaustedBodyLimit(ctx, account, responseBody) {
-		return
+	// 2. Anthropic 平台：先处理明确的模型级/账号级窗口，避免 body-only
+	// Fable 7d_oi 限额退化成账号级一分钟运行时冷却。
+	if account.Platform == PlatformAnthropic {
+		fableLimited := s.persistAnthropicFableWindowLimit(ctx, account, headers)
+		fableBodyLimited := s.persistAnthropicFableBodyLimit(ctx, account, responseBody)
+		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
+			return
+		}
+		if s.persistAnthropicExhaustedBodyLimit(ctx, account, responseBody) {
+			return
+		}
+		if fableLimited || fableBodyLimited {
+			return
+		}
 	}
 
 	// 3. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
@@ -1401,6 +1412,49 @@ type anthropic429BodyPayload struct {
 	Resolved            *anthropic429BodyResolved         `json:"resolved"`
 }
 
+// selectAnthropicFableWindowLimitFromBody parses body-only 7d_oi exhaustion.
+// This signal is model-scoped: it must pause only the Fable family, never the
+// whole account.
+func selectAnthropicFableWindowLimitFromBody(body []byte, now time.Time) *anthropicWindowLimit {
+	payload, ok := parseAnthropic429BodyPayload(body)
+	if !ok || payload == nil {
+		return nil
+	}
+
+	claim := normalizeAnthropicBodyClaim(payload.RepresentativeClaim)
+	perModel := payload.PerModelLimit != nil && *payload.PerModelLimit
+	if claim != "7d_oi" && !perModel {
+		return nil
+	}
+
+	if windowInfo, exists := anthropicBodyWindowFor(payload.Windows, "7d_oi"); exists && isAnthropicBodyWindowExceeded(windowInfo) {
+		resetAt, valid := parseAnthropicBodyReset(windowInfo.ResetsAt, now, 8*24*time.Hour)
+		if !valid && claim == "7d_oi" {
+			resetAt, valid = parseAnthropicBodyReset(payload.ResetsAt, now, 8*24*time.Hour)
+		}
+		if valid {
+			return &anthropicWindowLimit{
+				window:  "7d_oi",
+				resetAt: resetAt,
+				reason:  anthropicFableWindowReason,
+			}
+		}
+	}
+
+	if claim != "7d_oi" || !isAnthropicBodyExceededStatus(payload.Type) {
+		return nil
+	}
+	resetAt, valid := parseAnthropicBodyReset(payload.ResetsAt, now, 8*24*time.Hour)
+	if !valid {
+		return nil
+	}
+	return &anthropicWindowLimit{
+		window:  "7d_oi",
+		resetAt: resetAt,
+		reason:  anthropicFableWindowReason,
+	}
+}
+
 // selectAnthropicExhaustedWindowFromBody parses the newer Claude OAuth 429
 // shape where error.message is itself a JSON document. Only account-wide
 // limits are returned; perModelLimit=true and 7d_oi-only signals remain
@@ -1541,6 +1595,8 @@ func anthropicBodyWindowFor(windows map[string]anthropic429BodyWindow, window st
 		aliases = append(aliases, "five_hour")
 	case "7d":
 		aliases = append(aliases, "seven_day")
+	case "7d_oi":
+		aliases = append(aliases, "seven_day_overage_included")
 	}
 	for _, alias := range aliases {
 		if value, ok := windows[alias]; ok {
@@ -1846,6 +1902,25 @@ func (s *RateLimitService) persistAnthropicFableWindowLimit(ctx context.Context,
 	// Fable 请求不再调度到该账号，若不在此处采样，7d F 进度条会冻结在
 	// 限流前的旧值直到窗口重置。
 	s.samplePassiveUsageFromHeaders(ctx, account, headers)
+	return s.persistAnthropicFableLimit(ctx, account, limit)
+}
+
+func (s *RateLimitService) persistAnthropicFableBodyLimit(ctx context.Context, account *Account, responseBody []byte) bool {
+	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformAnthropic {
+		return false
+	}
+	limit := selectAnthropicFableWindowLimitFromBody(responseBody, time.Now())
+	if limit == nil {
+		return false
+	}
+	s.samplePassiveUsageFromBody(ctx, account, responseBody)
+	return s.persistAnthropicFableLimit(ctx, account, limit)
+}
+
+func (s *RateLimitService) persistAnthropicFableLimit(ctx context.Context, account *Account, limit *anthropicWindowLimit) bool {
+	if s == nil || s.accountRepo == nil || account == nil || limit == nil {
+		return false
+	}
 	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, limit.resetAt, limit.reason); err != nil {
 		slog.Warn("anthropic_fable_window_rate_limit_set_failed",
 			"account_id", account.ID,
@@ -2254,6 +2329,47 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
+	}
+}
+
+// samplePassiveUsageFromBody mirrors header sampling for OAuth responses that
+// carry the unified window snapshot inside error.message JSON.
+func (s *RateLimitService) samplePassiveUsageFromBody(ctx context.Context, account *Account, responseBody []byte) {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return
+	}
+	payload, ok := parseAnthropic429BodyPayload(responseBody)
+	if !ok || payload == nil {
+		return
+	}
+
+	now := time.Now()
+	extraUpdates := make(map[string]any, 6)
+	if window, exists := anthropicBodyWindowFor(payload.Windows, "5h"); exists && window.Utilization != nil {
+		extraUpdates["session_window_utilization"] = *window.Utilization
+	}
+	if window, exists := anthropicBodyWindowFor(payload.Windows, "7d"); exists {
+		if window.Utilization != nil {
+			extraUpdates["passive_usage_7d_utilization"] = *window.Utilization
+		}
+		if resetAt, valid := parseAnthropicBodyReset(window.ResetsAt, now, 8*24*time.Hour); valid {
+			extraUpdates["passive_usage_7d_reset"] = resetAt.Unix()
+		}
+	}
+	if window, exists := anthropicBodyWindowFor(payload.Windows, "7d_oi"); exists {
+		if window.Utilization != nil {
+			extraUpdates["passive_usage_7d_oi_utilization"] = *window.Utilization
+		}
+		if resetAt, valid := parseAnthropicBodyReset(window.ResetsAt, now, 8*24*time.Hour); valid {
+			extraUpdates["passive_usage_7d_oi_reset"] = resetAt.Unix()
+		}
+	}
+	if len(extraUpdates) == 0 {
+		return
+	}
+	extraUpdates["passive_usage_sampled_at"] = now.UTC().Format(time.RFC3339)
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
+		slog.Warn("passive_usage_body_update_failed", "account_id", account.ID, "error", err)
 	}
 }
 

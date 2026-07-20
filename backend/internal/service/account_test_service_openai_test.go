@@ -68,6 +68,9 @@ type openAIAccountTestRepo struct {
 	bulkUpdatedPayload AccountBulkUpdate
 	rateLimitedID      int64
 	rateLimitedAt      *time.Time
+	modelRateLimitedID int64
+	modelRateLimitKey  string
+	modelRateLimitAt   *time.Time
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
@@ -87,6 +90,13 @@ func (r *openAIAccountTestRepo) BulkUpdate(_ context.Context, ids []int64, updat
 func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
 	r.rateLimitedAt = &resetAt
+	return nil
+}
+
+func (r *openAIAccountTestRepo) SetModelRateLimit(_ context.Context, id int64, scope string, resetAt time.Time, _ ...string) error {
+	r.modelRateLimitedID = id
+	r.modelRateLimitKey = scope
+	r.modelRateLimitAt = &resetAt
 	return nil
 }
 
@@ -129,6 +139,38 @@ func TestAccountTestService_AnthropicEncoded429PersistsResetTime(t *testing.T) {
 	require.True(t, repo.rateLimitedAt.Equal(reset5h))
 	require.NotNil(t, account.RateLimitResetAt)
 	require.True(t, account.RateLimitResetAt.Equal(reset5h))
+}
+
+func TestAccountTestService_AnthropicEncodedFable429PersistsModelLimitOnly(t *testing.T) {
+	ctx, _ := newTestContext()
+	now := time.Now()
+	reset5h := now.Add(2 * time.Hour).UTC().Truncate(time.Second)
+	resetOI := now.Add(36 * time.Hour).UTC().Truncate(time.Second)
+	body := anthropicEncodedFableLimitBody(t, reset5h, resetOI)
+
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{newJSONResponse(http.StatusTooManyRequests, string(body))},
+	}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          89,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testClaudeAccountConnection(ctx, account, "claude-fable-5")
+
+	require.Error(t, err)
+	require.Zero(t, repo.rateLimitedID)
+	require.Nil(t, repo.rateLimitedAt)
+	require.Equal(t, int64(89), repo.modelRateLimitedID)
+	require.Equal(t, anthropicFableRateLimitKey, repo.modelRateLimitKey)
+	require.NotNil(t, repo.modelRateLimitAt)
+	require.True(t, repo.modelRateLimitAt.Equal(resetOI))
+	require.Nil(t, account.RateLimitResetAt)
 }
 
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {

@@ -1020,24 +1020,39 @@ func (s *AccountTestService) reconcileAnthropic429State(ctx context.Context, acc
 	}
 
 	now := time.Now()
+	fableLimit := selectAnthropicFableWindowLimit(headers, now)
+	fableBodyLimit := selectAnthropicFableWindowLimitFromBody(body, now)
 	var limit *anthropicWindowLimit
 	if parsed := selectAnthropicExhaustedWindow(headers, now); parsed != nil {
 		limit = parsed
 	} else if parsed := selectAnthropicExhaustedWindowFromBody(body, now); parsed != nil {
 		limit = parsed
-	} else if parsed := calculateAnthropic429ResetTime(headers); parsed != nil {
-		if resetAt, ok := validateAnthropicBodyReset(parsed.resetAt, now, 8*24*time.Hour); ok {
+	}
+	if limit == nil && (fableLimit != nil || fableBodyLimit != nil) {
+		modelLimit := fableLimit
+		if modelLimit == nil {
+			modelLimit = fableBodyLimit
+		}
+		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, anthropicFableRateLimitKey, modelLimit.resetAt, modelLimit.reason); err != nil {
+			return
+		}
+		return
+	}
+	if limit == nil {
+		if parsed := calculateAnthropic429ResetTime(headers); parsed != nil {
+			if resetAt, ok := validateAnthropicBodyReset(parsed.resetAt, now, 8*24*time.Hour); ok {
+				limit = &anthropicWindowLimit{
+					window:  "unknown",
+					resetAt: resetAt,
+					reason:  "anthropic_429_window",
+				}
+			}
+		} else if resetAt, ok := parseAnthropicAggregateReset(headers, now); ok {
 			limit = &anthropicWindowLimit{
 				window:  "unknown",
 				resetAt: resetAt,
-				reason:  "anthropic_429_window",
+				reason:  "anthropic_429_unified_reset",
 			}
-		}
-	} else if resetAt, ok := parseAnthropicAggregateReset(headers, now); ok {
-		limit = &anthropicWindowLimit{
-			window:  "unknown",
-			resetAt: resetAt,
-			reason:  "anthropic_429_unified_reset",
 		}
 	}
 	if limit == nil || !shouldPersistAnthropicWindowLimit(account, limit, now) {

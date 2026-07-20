@@ -190,6 +190,113 @@ func TestSelectAnthropicExhaustedWindowFromBody_PerModelLimitDoesNotReturnAccoun
 	require.Nil(t, selectAnthropicExhaustedWindowFromBody(body, now))
 }
 
+func anthropicEncodedFableLimitBody(t *testing.T, reset5h, resetOI time.Time) []byte {
+	t.Helper()
+
+	message, err := json.Marshal(map[string]any{
+		"type":                "exceeded_limit",
+		"resetsAt":            resetOI.Unix(),
+		"remaining":           nil,
+		"perModelLimit":       true,
+		"representativeClaim": "seven_day_overage_included",
+		"windows": map[string]any{
+			"5h": map[string]any{
+				"status":      "within_limit",
+				"resets_at":   reset5h.Unix(),
+				"utilization": 0.08,
+			},
+			"7d": map[string]any{
+				"status":      "within_limit",
+				"resets_at":   resetOI.Unix(),
+				"utilization": 0.56,
+			},
+			"7d_oi": map[string]any{
+				"status":              "exceeded_limit",
+				"resets_at":           resetOI.Unix(),
+				"utilization":         1.01,
+				"surpassed_threshold": 1.0,
+			},
+		},
+		"resolved": map[string]any{
+			"status": "exceeded",
+			"limit": map[string]any{
+				"kind":      "weekly_scoped",
+				"group":     "weekly",
+				"percent":   100,
+				"severity":  "critical",
+				"resets_at": resetOI.UTC().Format(time.RFC3339),
+				"scope": map[string]any{
+					"model": map[string]any{
+						"id":           nil,
+						"display_name": "Fable",
+					},
+					"surface": nil,
+				},
+				"is_active": true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	body, err := json.Marshal(map[string]any{
+		"type": "error",
+		"error": map[string]any{
+			"type":    "rate_limit_error",
+			"message": string(message),
+		},
+		"request_id": "req_body_encoded_fable_429",
+	})
+	require.NoError(t, err)
+	return body
+}
+
+func TestHandleUpstreamError_AnthropicEncodedFableLimitOnlyMarksModel(t *testing.T) {
+	now := time.Now()
+	reset5h := now.Add(2 * time.Hour).UTC().Truncate(time.Second)
+	resetOI := now.Add(36 * time.Hour).UTC().Truncate(time.Second)
+	body := anthropicEncodedFableLimitBody(t, reset5h, resetOI)
+
+	repo := &anthropicWindowLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       44,
+		Type:     AccountTypeOAuth,
+		Platform: PlatformAnthropic,
+		Credentials: map[string]any{
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       float64(http.StatusTooManyRequests),
+					"keywords":         []any{"exceeded_limit"},
+					"duration_minutes": float64(10),
+				},
+			},
+		},
+	}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		http.Header{},
+		body,
+		"claude-fable-5",
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.rateLimitCalls, "Fable-only body limit must not pause the whole account")
+	require.Zero(t, repo.tempUnschedCalls, "Fable-only body limit must preempt custom temp-unsched rules")
+	require.Zero(t, repo.sessionWindowCalls)
+	require.Equal(t, 1, repo.modelRateLimitCalls)
+	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+	require.True(t, repo.lastModelRateLimitReset.Equal(resetOI))
+	require.False(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
+	require.Equal(t, 0.08, repo.lastExtraUpdates["session_window_utilization"])
+	require.Equal(t, 0.56, repo.lastExtraUpdates["passive_usage_7d_utilization"])
+	require.Equal(t, 1.01, repo.lastExtraUpdates["passive_usage_7d_oi_utilization"])
+	require.Equal(t, resetOI.Unix(), repo.lastExtraUpdates["passive_usage_7d_oi_reset"])
+}
+
 // fable429Headers 构造 7d_oi（Fable 专属 7d 窗口）触发 429 的完整响应头，
 // 数值取自真实抓包（5h/7d 均 allowed，仅 7d_oi rejected）。
 func fable429Headers(reset5h, resetOI time.Time) http.Header {
