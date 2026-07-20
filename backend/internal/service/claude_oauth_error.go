@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -105,8 +106,23 @@ func NewClaudeOAuthUpstreamError(operation string, status int, body string) erro
 }
 
 func isDefinitiveClaudeSessionRejection(body string) bool {
+	var response struct {
+		Error struct {
+			Details struct {
+				ErrorCode string `json:"error_code"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &response); err == nil {
+		switch strings.ToLower(strings.TrimSpace(response.Error.Details.ErrorCode)) {
+		case "account_session_invalid", "session_stale_relogin", "invalid_session", "session_expired":
+			return true
+		}
+	}
+
 	message := strings.ToLower(body)
 	for _, marker := range []string{
+		"account_session_invalid",
 		"session_stale_relogin",
 		"invalid_session",
 		"session_expired",
