@@ -437,6 +437,18 @@ gateway:
   # Allow failover on selected 400 errors (default: off)
   # 允许在特定 400 错误时进行故障转移（默认：关闭）
   failover_on_400: false
+  # Normal account-switch cap for retryable upstream errors.
+  # 普通可重试上游错误的账号切换上限。
+  max_account_switches: 10
+  # Expanded cap used only for Anthropic 429 discovery.
+  # 仅 Anthropic 429 使用的扩大候选搜索上限。
+  max_account_switches_anthropic_429: 20
+  # Wall-clock budget for expanded Anthropic 429 failover.
+  # Anthropic 429 扩大搜索的总时间预算（秒）。
+  anthropic_429_failover_timeout_seconds: 20
+  # Gemini-specific account-switch cap.
+  # Gemini 专用账号切换上限。
+  max_account_switches_gemini: 3
   # Scheduling configuration
   # 调度配置
   scheduling:

@@ -463,10 +463,18 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 			if len(routingAvailable) > 0 {
 				// 排序：优先级 > 负载率 > 最后使用时间
+				fableNow := time.Now()
 				sort.SliceStable(routingAvailable, func(i, j int) bool {
 					a, b := routingAvailable[i], routingAvailable[j]
 					if a.account.Priority != b.account.Priority {
 						return a.account.Priority < b.account.Priority
+					}
+					if isAnthropicFableModel(requestedModel) {
+						aKnown := a.account.hasFreshFableAvailabilityEvidence(fableNow)
+						bKnown := b.account.hasFreshFableAvailabilityEvidence(fableNow)
+						if aKnown != bKnown {
+							return aKnown
+						}
 					}
 					if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 						return a.loadInfo.LoadRate < b.loadInfo.LoadRate
@@ -744,7 +752,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		if mixedTypePolicyEnabled {
-			if result, ok, err := s.tryAcquireMixedTypeWeighted(ctx, available, groupID, sessionHash, group, preferOAuth, cfg.PreferSoonestReset); err != nil {
+			if result, ok, err := s.tryAcquireMixedTypeWeighted(ctx, available, groupID, sessionHash, requestedModel, group, preferOAuth, cfg.PreferSoonestReset); err != nil {
 				return nil, err
 			} else if ok {
 				return result, nil
@@ -752,7 +760,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		} else {
 			// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
 			for len(available) > 0 {
-				selected := selectDefaultLoadAwareCandidate(available, preferOAuth, cfg.PreferSoonestReset)
+				selected := selectDefaultLoadAwareCandidate(available, requestedModel, preferOAuth, cfg.PreferSoonestReset)
 				if selected == nil {
 					break
 				}
@@ -793,7 +801,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *GatewayService) tryAcquireMixedTypeWeighted(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, group *Group, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
+func (s *GatewayService) tryAcquireMixedTypeWeighted(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, requestedModel string, group *Group, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
 	available = filterAvailableForMixedTypePolicy(available, group)
 	if len(available) == 0 {
 		return nil, false, nil
@@ -801,7 +809,7 @@ func (s *GatewayService) tryAcquireMixedTypeWeighted(ctx context.Context, availa
 
 	poolOrder := mixedTypePoolAttemptOrder(available, group)
 	for _, pool := range poolOrder {
-		result, ok, err := s.tryAcquireMixedTypePool(ctx, available, groupID, sessionHash, pool, preferOAuth, preferSoonestReset)
+		result, ok, err := s.tryAcquireMixedTypePool(ctx, available, groupID, sessionHash, requestedModel, pool, preferOAuth, preferSoonestReset)
 		if err != nil || ok {
 			return result, ok, err
 		}
@@ -846,14 +854,14 @@ func mixedTypePoolHasCandidate(available []accountWithLoad, pool string) bool {
 	return false
 }
 
-func (s *GatewayService) tryAcquireMixedTypePool(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, pool string, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
+func (s *GatewayService) tryAcquireMixedTypePool(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, requestedModel string, pool string, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
 	candidates := filterAvailableByMixedTypePool(available, pool)
 	for len(candidates) > 0 {
 		var selected *accountWithLoad
 		if pool == mixedTypePoolAPIKey {
 			selected = selectWeightedAPIKeyCandidate(candidates)
 		} else {
-			selected = selectDefaultLoadAwareCandidate(candidates, preferOAuth, preferSoonestReset)
+			selected = selectDefaultLoadAwareCandidate(candidates, requestedModel, preferOAuth, preferSoonestReset)
 		}
 		if selected == nil || selected.account == nil {
 			break
@@ -1813,8 +1821,25 @@ func filterBySoonestReset(accounts []accountWithLoad) []accountWithLoad {
 	return result
 }
 
-func selectDefaultLoadAwareCandidate(accounts []accountWithLoad, preferOAuth bool, preferSoonestReset bool) *accountWithLoad {
+func filterByFreshFableAvailability(accounts []accountWithLoad, requestedModel string, now time.Time) []accountWithLoad {
+	if len(accounts) <= 1 || !isAnthropicFableModel(requestedModel) {
+		return accounts
+	}
+	preferred := make([]accountWithLoad, 0, len(accounts))
+	for _, account := range accounts {
+		if account.account != nil && account.account.hasFreshFableAvailabilityEvidence(now) {
+			preferred = append(preferred, account)
+		}
+	}
+	if len(preferred) == 0 {
+		return accounts
+	}
+	return preferred
+}
+
+func selectDefaultLoadAwareCandidate(accounts []accountWithLoad, requestedModel string, preferOAuth bool, preferSoonestReset bool) *accountWithLoad {
 	candidates := filterByMinPriority(accounts)
+	candidates = filterByFreshFableAvailability(candidates, requestedModel, time.Now())
 	if preferSoonestReset {
 		candidates = filterBySoonestReset(candidates)
 	}

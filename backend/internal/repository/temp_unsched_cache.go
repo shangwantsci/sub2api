@@ -10,7 +10,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const tempUnschedPrefix = "temp_unsched:account:"
+const (
+	tempUnschedPrefix                  = "temp_unsched:account:"
+	anthropicOpaque429BackoffKeyPrefix = "anthropic_429:backoff:account:"
+	anthropicOpaque429BackoffTTL       = 30 * time.Minute
+	anthropicOpaque429DedupeWindow     = 30 * time.Second
+)
 
 var tempUnschedSetScript = redis.NewScript(`
 	local key = KEYS[1]
@@ -31,6 +36,23 @@ var tempUnschedSetScript = redis.NewScript(`
 
 	redis.call('SET', key, new_value, 'EX', new_ttl)
 	return 1
+`)
+
+var anthropicOpaque429BackoffScript = redis.NewScript(`
+	redis.replicate_commands()
+	local key = KEYS[1]
+	local dedupe_window = tonumber(ARGV[1])
+	local ttl = tonumber(ARGV[2])
+	local time_result = redis.call('TIME')
+	local now = tonumber(time_result[1])
+	local streak = tonumber(redis.call('HGET', key, 'streak')) or 0
+	local last = tonumber(redis.call('HGET', key, 'last_increment_at')) or 0
+	if last == 0 or now - last >= dedupe_window then
+		streak = streak + 1
+		redis.call('HSET', key, 'streak', streak, 'last_increment_at', now)
+	end
+	redis.call('EXPIRE', key, ttl)
+	return streak
 `)
 
 type tempUnschedCache struct {
@@ -132,5 +154,34 @@ func (c *tempUnschedCache) GetTempUnschedBatch(ctx context.Context, accountIDs [
 // DeleteTempUnsched 删除临时不可调度状态
 func (c *tempUnschedCache) DeleteTempUnsched(ctx context.Context, accountID int64) error {
 	key := fmt.Sprintf("%s%d", tempUnschedPrefix, accountID)
+	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *tempUnschedCache) NextAnthropicOpaque429Backoff(ctx context.Context, accountID int64) (int, error) {
+	if accountID <= 0 {
+		return 1, nil
+	}
+	key := fmt.Sprintf("%s%d", anthropicOpaque429BackoffKeyPrefix, accountID)
+	streak, err := anthropicOpaque429BackoffScript.Run(
+		ctx,
+		c.rdb,
+		[]string{key},
+		int(anthropicOpaque429DedupeWindow.Seconds()),
+		int(anthropicOpaque429BackoffTTL.Seconds()),
+	).Int()
+	if err != nil {
+		return 0, fmt.Errorf("increment Anthropic opaque 429 backoff: %w", err)
+	}
+	if streak < 1 {
+		streak = 1
+	}
+	return streak, nil
+}
+
+func (c *tempUnschedCache) ResetAnthropicOpaque429Backoff(ctx context.Context, accountID int64) error {
+	if accountID <= 0 {
+		return nil
+	}
+	key := fmt.Sprintf("%s%d", anthropicOpaque429BackoffKeyPrefix, accountID)
 	return c.rdb.Del(ctx, key).Err()
 }

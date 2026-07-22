@@ -20,6 +20,38 @@ type rateLimit429AccountRepoStub struct {
 	lastRateLimitReset time.Time
 }
 
+type adaptiveAnthropic429CacheStub struct {
+	TempUnschedCache
+	streak     int
+	resetCalls int
+	state      *TempUnschedState
+}
+
+func (c *adaptiveAnthropic429CacheStub) SetTempUnsched(_ context.Context, _ int64, state *TempUnschedState) error {
+	c.state = state
+	return nil
+}
+
+func (c *adaptiveAnthropic429CacheStub) GetTempUnsched(context.Context, int64) (*TempUnschedState, error) {
+	return c.state, nil
+}
+
+func (c *adaptiveAnthropic429CacheStub) DeleteTempUnsched(context.Context, int64) error {
+	c.state = nil
+	return nil
+}
+
+func (c *adaptiveAnthropic429CacheStub) NextAnthropicOpaque429Backoff(context.Context, int64) (int, error) {
+	c.streak++
+	return c.streak, nil
+}
+
+func (c *adaptiveAnthropic429CacheStub) ResetAnthropicOpaque429Backoff(context.Context, int64) error {
+	c.resetCalls++
+	c.streak = 0
+	return nil
+}
+
 func (r *rateLimit429AccountRepoStub) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitCalls++
 	r.lastRateLimitID = id
@@ -138,4 +170,33 @@ func TestHandle429_AnthropicNoResetUsesRuntimeCooldownOnly(t *testing.T) {
 
 	require.Zero(t, accountRepo.rateLimitCalls, "无 reset 的 Anthropic 429 不应写入数据库长期限流")
 	require.True(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account), "无 reset 的 Anthropic 429 应进入短运行时冷却")
+}
+
+func TestHandle429_AnthropicOpaque429UsesAdaptiveCooldownAndResetsOnSuccess(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	cache := &adaptiveAnthropic429CacheStub{}
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, cache)
+	account := &Account{ID: 45, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
+	steps := []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
+
+	for i, minimum := range steps {
+		before := time.Now()
+		svc.handle429(context.Background(), account, http.Header{}, []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Error"}}`))
+
+		raw, ok := svc.accountRuntimeBlocks.Load(account.ID)
+		require.True(t, ok)
+		block, ok := raw.(accountRuntimeBlock)
+		require.True(t, ok)
+		cooldown := block.Until.Sub(before)
+		require.GreaterOrEqual(t, cooldown, minimum, "streak %d", i+1)
+		require.LessOrEqual(t, cooldown, minimum+minimum/10+time.Second, "streak %d", i+1)
+	}
+
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	svc.UpdateSessionWindow(context.Background(), account, headers)
+	require.Equal(t, 1, cache.resetCalls)
+	require.Zero(t, cache.streak)
+	require.Nil(t, cache.state)
+	require.False(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
 }

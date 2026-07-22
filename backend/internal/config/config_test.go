@@ -98,6 +98,16 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultAnthropic429FailoverConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 10, cfg.Gateway.MaxAccountSwitches)
+	require.Equal(t, 20, cfg.Gateway.MaxAccountSwitchesAnthropic429)
+	require.Equal(t, 20, cfg.Gateway.Anthropic429FailoverTimeoutSeconds)
+}
+
 func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

@@ -44,13 +44,16 @@ const (
 
 // FailoverState 跨循环迭代共享的 failover 状态
 type FailoverState struct {
-	SwitchCount           int
-	MaxSwitches           int
-	FailedAccountIDs      map[int64]struct{}
-	SameAccountRetryCount map[int64]int
-	LastFailoverErr       *service.UpstreamFailoverError
-	ForceCacheBilling     bool
-	hasBoundSession       bool
+	SwitchCount             int
+	MaxSwitches             int
+	FailedAccountIDs        map[int64]struct{}
+	SameAccountRetryCount   map[int64]int
+	LastFailoverErr         *service.UpstreamFailoverError
+	ForceCacheBilling       bool
+	hasBoundSession         bool
+	anthropic429MaxSwitches int
+	anthropic429MaxDuration time.Duration
+	anthropic429StartedAt   time.Time
 }
 
 // NewFailoverState 创建 failover 状态
@@ -61,6 +64,45 @@ func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
 		SameAccountRetryCount: make(map[int64]int),
 		hasBoundSession:       hasBoundSession,
 	}
+}
+
+// ConfigureAnthropic429 expands only Anthropic 429 candidate search while
+// retaining a wall-clock budget. Other platforms and status codes continue to
+// use MaxSwitches.
+func (s *FailoverState) ConfigureAnthropic429(maxSwitches int, maxDuration time.Duration) {
+	if s == nil {
+		return
+	}
+	if maxSwitches > s.MaxSwitches {
+		s.anthropic429MaxSwitches = maxSwitches
+	}
+	if maxDuration > 0 {
+		s.anthropic429MaxDuration = maxDuration
+	}
+}
+
+func (s *FailoverState) switchPolicy(platform string, failoverErr *service.UpstreamFailoverError) (maxSwitches int, timedOut bool) {
+	if s == nil {
+		return 0, false
+	}
+	maxSwitches = s.MaxSwitches
+	if failoverErr == nil ||
+		platform != service.PlatformAnthropic ||
+		failoverErr.StatusCode != http.StatusTooManyRequests {
+		return maxSwitches, false
+	}
+	if s.anthropic429MaxSwitches > maxSwitches {
+		maxSwitches = s.anthropic429MaxSwitches
+	}
+	if s.anthropic429MaxDuration <= 0 {
+		return maxSwitches, false
+	}
+	now := time.Now()
+	if s.anthropic429StartedAt.IsZero() {
+		s.anthropic429StartedAt = now
+		return maxSwitches, false
+	}
+	return maxSwitches, now.Sub(s.anthropic429StartedAt) >= s.anthropic429MaxDuration
 }
 
 // HandleFailoverError 处理 UpstreamFailoverError，返回下一步动作。
@@ -112,8 +154,19 @@ func (s *FailoverState) HandleFailoverError(
 	// 加入失败列表
 	s.FailedAccountIDs[accountID] = struct{}{}
 
+	maxSwitches, timedOut := s.switchPolicy(platform, failoverErr)
+	if timedOut {
+		logger.FromContext(ctx).Warn("gateway.failover_anthropic_429_time_budget_exhausted",
+			zap.Int64("account_id", accountID),
+			zap.Int("switch_count", s.SwitchCount),
+			zap.Int("max_switches", maxSwitches),
+			zap.Duration("max_duration", s.anthropic429MaxDuration),
+		)
+		return FailoverExhausted
+	}
+
 	// 检查是否耗尽
-	if s.SwitchCount >= s.MaxSwitches {
+	if s.SwitchCount >= maxSwitches {
 		return FailoverExhausted
 	}
 
@@ -123,7 +176,7 @@ func (s *FailoverState) HandleFailoverError(
 		zap.Int64("account_id", accountID),
 		zap.Int("upstream_status", failoverErr.StatusCode),
 		zap.Int("switch_count", s.SwitchCount),
-		zap.Int("max_switches", s.MaxSwitches),
+		zap.Int("max_switches", maxSwitches),
 	)
 
 	// Antigravity 平台换号线性递增延时

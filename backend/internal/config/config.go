@@ -858,6 +858,10 @@ type GatewayConfig struct {
 
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
+	// Anthropic 429 专用切换上限；仅扩大明确 429 的候选搜索，不影响其它错误。
+	MaxAccountSwitchesAnthropic429 int `mapstructure:"max_account_switches_anthropic_429"`
+	// Anthropic 429 failover 总时间预算（秒），避免扩大候选搜索后延迟无界增长。
+	Anthropic429FailoverTimeoutSeconds int `mapstructure:"anthropic_429_failover_timeout_seconds"`
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
 	MaxAccountSwitchesGemini int `mapstructure:"max_account_switches_gemini"`
 
@@ -1978,6 +1982,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
 	viper.SetDefault("gateway.failover_on_400", false)
 	viper.SetDefault("gateway.max_account_switches", 10)
+	viper.SetDefault("gateway.max_account_switches_anthropic_429", 20)
+	viper.SetDefault("gateway.anthropic_429_failover_timeout_seconds", 20)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)

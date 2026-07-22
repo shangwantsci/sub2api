@@ -22,6 +22,14 @@ type TempUnschedCache interface {
 	DeleteTempUnsched(ctx context.Context, accountID int64) error
 }
 
+// Anthropic429BackoffCache is an optional extension implemented by the Redis
+// temp-unsched cache. It remembers repeated opaque Anthropic 429 cycles after
+// the short scheduling block itself expires.
+type Anthropic429BackoffCache interface {
+	NextAnthropicOpaque429Backoff(ctx context.Context, accountID int64) (streak int, err error)
+	ResetAnthropicOpaque429Backoff(ctx context.Context, accountID int64) error
+}
+
 // TimeoutCounterCache 超时计数器缓存接口
 type TimeoutCounterCache interface {
 	// IncrementTimeoutCount 增加账户的超时计数，返回当前计数值

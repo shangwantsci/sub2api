@@ -38,23 +38,25 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
-	gatewayService            *service.GatewayService
-	geminiCompatService       *service.GeminiMessagesCompatService
-	antigravityGatewayService *service.AntigravityGatewayService
-	userService               *service.UserService
-	billingCacheService       *service.BillingCacheService
-	usageService              *service.UsageService
-	apiKeyService             *service.APIKeyService
-	usageRecordWorkerPool     *service.UsageRecordWorkerPool
-	errorPassthroughService   *service.ErrorPassthroughService
-	contentModerationService  *service.ContentModerationService
-	contentSafetyGuard        *service.ContentSafetyGuard
-	concurrencyHelper         *ConcurrencyHelper
-	userMsgQueueHelper        *UserMsgQueueHelper
-	maxAccountSwitches        int
-	maxAccountSwitchesGemini  int
-	cfg                       *config.Config
-	settingService            *service.SettingService
+	gatewayService                 *service.GatewayService
+	geminiCompatService            *service.GeminiMessagesCompatService
+	antigravityGatewayService      *service.AntigravityGatewayService
+	userService                    *service.UserService
+	billingCacheService            *service.BillingCacheService
+	usageService                   *service.UsageService
+	apiKeyService                  *service.APIKeyService
+	usageRecordWorkerPool          *service.UsageRecordWorkerPool
+	errorPassthroughService        *service.ErrorPassthroughService
+	contentModerationService       *service.ContentModerationService
+	contentSafetyGuard             *service.ContentSafetyGuard
+	concurrencyHelper              *ConcurrencyHelper
+	userMsgQueueHelper             *UserMsgQueueHelper
+	maxAccountSwitches             int
+	maxAccountSwitchesGemini       int
+	maxAccountSwitchesAnthropic429 int
+	anthropic429FailoverTimeout    time.Duration
+	cfg                            *config.Config
+	settingService                 *service.SettingService
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -77,10 +79,18 @@ func NewGatewayHandler(
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 10
 	maxAccountSwitchesGemini := 3
+	maxAccountSwitchesAnthropic429 := 20
+	anthropic429FailoverTimeout := 20 * time.Second
 	if cfg != nil {
 		pingInterval = time.Duration(cfg.Concurrency.PingInterval) * time.Second
 		if cfg.Gateway.MaxAccountSwitches > 0 {
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
+		}
+		if cfg.Gateway.MaxAccountSwitchesAnthropic429 > 0 {
+			maxAccountSwitchesAnthropic429 = cfg.Gateway.MaxAccountSwitchesAnthropic429
+		}
+		if cfg.Gateway.Anthropic429FailoverTimeoutSeconds > 0 {
+			anthropic429FailoverTimeout = time.Duration(cfg.Gateway.Anthropic429FailoverTimeoutSeconds) * time.Second
 		}
 		if cfg.Gateway.MaxAccountSwitchesGemini > 0 {
 			maxAccountSwitchesGemini = cfg.Gateway.MaxAccountSwitchesGemini
@@ -94,24 +104,42 @@ func NewGatewayHandler(
 	}
 
 	return &GatewayHandler{
-		gatewayService:            gatewayService,
-		geminiCompatService:       geminiCompatService,
-		antigravityGatewayService: antigravityGatewayService,
-		userService:               userService,
-		billingCacheService:       billingCacheService,
-		usageService:              usageService,
-		apiKeyService:             apiKeyService,
-		usageRecordWorkerPool:     usageRecordWorkerPool,
-		errorPassthroughService:   errorPassthroughService,
-		contentModerationService:  contentModerationService,
-		contentSafetyGuard:        service.NewContentSafetyGuard(settingService),
-		concurrencyHelper:         NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
-		userMsgQueueHelper:        umqHelper,
-		maxAccountSwitches:        maxAccountSwitches,
-		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
-		cfg:                       cfg,
-		settingService:            settingService,
+		gatewayService:                 gatewayService,
+		geminiCompatService:            geminiCompatService,
+		antigravityGatewayService:      antigravityGatewayService,
+		userService:                    userService,
+		billingCacheService:            billingCacheService,
+		usageService:                   usageService,
+		apiKeyService:                  apiKeyService,
+		usageRecordWorkerPool:          usageRecordWorkerPool,
+		errorPassthroughService:        errorPassthroughService,
+		contentModerationService:       contentModerationService,
+		contentSafetyGuard:             service.NewContentSafetyGuard(settingService),
+		concurrencyHelper:              NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
+		userMsgQueueHelper:             umqHelper,
+		maxAccountSwitches:             maxAccountSwitches,
+		maxAccountSwitchesGemini:       maxAccountSwitchesGemini,
+		maxAccountSwitchesAnthropic429: maxAccountSwitchesAnthropic429,
+		anthropic429FailoverTimeout:    anthropic429FailoverTimeout,
+		cfg:                            cfg,
+		settingService:                 settingService,
 	}
+}
+
+func (h *GatewayHandler) newFailoverState(maxSwitches int, hasBoundSession bool, platform string) *FailoverState {
+	state := NewFailoverState(maxSwitches, hasBoundSession)
+	if h != nil && platform == service.PlatformAnthropic {
+		max429 := h.maxAccountSwitchesAnthropic429
+		if max429 <= 0 {
+			max429 = 20
+		}
+		timeout := h.anthropic429FailoverTimeout
+		if timeout <= 0 {
+			timeout = 20 * time.Second
+		}
+		state.ConfigureAnthropic429(max429, timeout)
+	}
+	return state
 }
 
 // Messages handles Claude API compatible messages endpoint
@@ -578,7 +606,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 
 	for {
-		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
+		fs := h.newFailoverState(h.maxAccountSwitches, hasBoundSession, platform)
 		retryWithFallback := false
 
 		for {

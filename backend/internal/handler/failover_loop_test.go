@@ -266,6 +266,67 @@ func TestHandleFailoverError_BasicSwitch(t *testing.T) {
 	})
 }
 
+func TestHandleFailoverError_Anthropic429UsesExpandedBoundedBudget(t *testing.T) {
+	t.Run("429 can search beyond normal switch cap", func(t *testing.T) {
+		mock := &mockTempUnscheduler{}
+		fs := NewFailoverState(2, false)
+		fs.ConfigureAnthropic429(4, time.Minute)
+		err429 := newTestFailoverErr(http.StatusTooManyRequests, false, false)
+
+		for i := 0; i < 4; i++ {
+			action := fs.HandleFailoverError(
+				context.Background(),
+				mock,
+				int64(100+i),
+				service.PlatformAnthropic,
+				maxSameAccountRetries,
+				err429,
+			)
+			require.Equal(t, FailoverContinue, action)
+		}
+		require.Equal(t, 4, fs.SwitchCount)
+
+		action := fs.HandleFailoverError(
+			context.Background(),
+			mock,
+			200,
+			service.PlatformAnthropic,
+			maxSameAccountRetries,
+			err429,
+		)
+		require.Equal(t, FailoverExhausted, action)
+		require.Equal(t, 4, fs.SwitchCount)
+		require.Len(t, fs.FailedAccountIDs, 5)
+	})
+
+	t.Run("non-429 keeps normal switch cap", func(t *testing.T) {
+		mock := &mockTempUnscheduler{}
+		fs := NewFailoverState(2, false)
+		fs.ConfigureAnthropic429(4, time.Minute)
+		err500 := newTestFailoverErr(http.StatusInternalServerError, false, false)
+
+		require.Equal(t, FailoverContinue, fs.HandleFailoverError(context.Background(), mock, 1, service.PlatformAnthropic, 0, err500))
+		require.Equal(t, FailoverContinue, fs.HandleFailoverError(context.Background(), mock, 2, service.PlatformAnthropic, 0, err500))
+		require.Equal(t, FailoverExhausted, fs.HandleFailoverError(context.Background(), mock, 3, service.PlatformAnthropic, 0, err500))
+		require.Equal(t, 2, fs.SwitchCount)
+	})
+
+	t.Run("429 wall-clock budget stops extended search", func(t *testing.T) {
+		mock := &mockTempUnscheduler{}
+		fs := NewFailoverState(2, false)
+		fs.ConfigureAnthropic429(20, 10*time.Second)
+		err429 := newTestFailoverErr(http.StatusTooManyRequests, false, false)
+
+		require.Equal(t, FailoverContinue, fs.HandleFailoverError(context.Background(), mock, 1, service.PlatformAnthropic, 0, err429))
+		fs.anthropic429StartedAt = time.Now().Add(-11 * time.Second)
+
+		action := fs.HandleFailoverError(context.Background(), mock, 2, service.PlatformAnthropic, 0, err429)
+		require.Equal(t, FailoverExhausted, action)
+		require.Equal(t, 1, fs.SwitchCount)
+		require.Contains(t, fs.FailedAccountIDs, int64(2))
+	})
+}
+
 // ---------------------------------------------------------------------------
 // HandleFailoverError — 缓存计费 (ForceCacheBilling)
 // ---------------------------------------------------------------------------

@@ -109,6 +109,26 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 	require.Nil(t, got.Extra["unused_large_field"])
 }
 
+func TestBuildSchedulerMetadataAccount_KeepsFableAvailabilityEvidence(t *testing.T) {
+	account := service.Account{
+		ID:       43,
+		Platform: service.PlatformAnthropic,
+		Extra: map[string]any{
+			"passive_usage_7d_oi_utilization": 0.42,
+			"passive_usage_7d_oi_reset":       int64(1785229200),
+			"passive_usage_sampled_at":        "2026-07-22T05:24:57Z",
+			"unused_large_field":              "drop-me",
+		},
+	}
+
+	got := buildSchedulerMetadataAccount(account)
+
+	require.Equal(t, 0.42, got.Extra["passive_usage_7d_oi_utilization"])
+	require.Equal(t, int64(1785229200), got.Extra["passive_usage_7d_oi_reset"])
+	require.Equal(t, "2026-07-22T05:24:57Z", got.Extra["passive_usage_sampled_at"])
+	require.Nil(t, got.Extra["unused_large_field"])
+}
+
 func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 	account := service.Account{
 		ID:       42,

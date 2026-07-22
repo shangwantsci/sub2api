@@ -31,6 +31,7 @@ type RateLimitService struct {
 	tokenCacheInvalidator TokenCacheInvalidator
 	runtimeBlocker        AccountRuntimeBlocker
 	accountRuntimeBlocks  sync.Map
+	anthropic429Backoffs  sync.Map
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
 }
@@ -71,7 +72,15 @@ const (
 const (
 	accountRuntimeBlockBridgeCooldown      = 2 * time.Minute
 	anthropic429RuntimeFallbackMinCooldown = time.Minute
+	anthropic429RuntimeFallbackMaxCooldown = 10 * time.Minute
 )
+
+var anthropicOpaque429CooldownSteps = [...]time.Duration{
+	time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+	10 * time.Minute,
+}
 
 const (
 	openAIImageRateLimitDefaultCooldown = time.Minute
@@ -1247,6 +1256,27 @@ func (s *RateLimitService) applyAnthropic429RuntimeCooldown(ctx context.Context,
 	if cooldown < anthropic429RuntimeFallbackMinCooldown {
 		cooldown = anthropic429RuntimeFallbackMinCooldown
 	}
+	streak := 1
+	if cache, ok := s.tempUnschedCache.(Anthropic429BackoffCache); ok {
+		next, err := cache.NextAnthropicOpaque429Backoff(ctx, account.ID)
+		if err != nil {
+			slog.Warn("anthropic_429_backoff_increment_failed", "account_id", account.ID, "error", err)
+		} else {
+			streak = next
+			s.anthropic429Backoffs.Store(account.ID, struct{}{})
+			stepIndex := min(streak-1, len(anthropicOpaque429CooldownSteps)-1)
+			if adaptive := anthropicOpaque429CooldownSteps[stepIndex]; adaptive > cooldown {
+				cooldown = adaptive
+			}
+		}
+	}
+	if cooldown > anthropic429RuntimeFallbackMaxCooldown {
+		cooldown = anthropic429RuntimeFallbackMaxCooldown
+	}
+	// Positive deterministic jitter staggers account re-entry and reduces a
+	// synchronized retry storm when many one-minute blocks were set together.
+	jitterPercent := (account.ID + int64(streak*7)) % 11
+	cooldown += time.Duration(int64(cooldown) * jitterPercent / 100)
 
 	until := time.Now().Add(cooldown)
 	s.blockLocalAccountScheduling(account.ID, until, "anthropic_429_runtime_"+reason, http.StatusTooManyRequests)
@@ -1255,7 +1285,35 @@ func (s *RateLimitService) applyAnthropic429RuntimeCooldown(ctx context.Context,
 		"account_id", account.ID,
 		"until", until,
 		"cooldown", cooldown.String(),
+		"streak", streak,
 		"reason", reason)
+}
+
+func (s *RateLimitService) resetAnthropicOpaque429Backoff(ctx context.Context, account *Account) {
+	if s == nil || account == nil || account.Platform != PlatformAnthropic {
+		return
+	}
+	if _, tracked := s.anthropic429Backoffs.LoadAndDelete(account.ID); !tracked {
+		return
+	}
+	cache, ok := s.tempUnschedCache.(Anthropic429BackoffCache)
+	if !ok {
+		return
+	}
+	if err := cache.ResetAnthropicOpaque429Backoff(ctx, account.ID); err != nil {
+		s.anthropic429Backoffs.Store(account.ID, struct{}{})
+		slog.Warn("anthropic_429_backoff_reset_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	if state, err := s.tempUnschedCache.GetTempUnsched(ctx, account.ID); err == nil &&
+		state != nil &&
+		state.MatchedKeyword == "anthropic_429_runtime_no_reset_time" {
+		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); err != nil {
+			slog.Warn("anthropic_429_runtime_block_reset_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		s.notifyAccountSchedulingBlockCleared(account.ID)
+	}
 }
 
 func (s *RateLimitService) setRuntime429TempCache(ctx context.Context, account *Account, until time.Time, reason string, responseBody []byte) {
@@ -2211,6 +2269,7 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 
 // UpdateSessionWindow 从成功响应更新5h窗口状态
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
+	s.resetAnthropicOpaque429Backoff(ctx, account)
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
 	if status == "" {
 		return
@@ -2395,6 +2454,12 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 	}
 	s.ResetOpenAI403Counter(ctx, accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
+	if cache, ok := s.tempUnschedCache.(Anthropic429BackoffCache); ok {
+		if err := cache.ResetAnthropicOpaque429Backoff(ctx, accountID); err != nil {
+			slog.Warn("clear_anthropic_429_backoff_failed", "account_id", accountID, "error", err)
+		}
+	}
+	s.anthropic429Backoffs.Delete(accountID)
 	return nil
 }
 
