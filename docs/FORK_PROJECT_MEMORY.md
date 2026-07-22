@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-22 Anthropic 429 自适应冷却与 Fable 可用性感知调度上线：
+截至 2026-07-22 Anthropic opaque 429 固定短冷却热修上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-a7ceb185`
-- 镜像 digest：`sha256:1cc50f659b8a5502234f0e775c8ac434cc59afe0f8e627bbf3fdfff1082d746a`
-- 应用 commit：`a7ceb185`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-0cc87cdd`
+- 镜像 digest：`sha256:475a3f31f4eb75c5f24bd9135d7486c62e950add756f648101aed63d5cf86381`
+- 应用 commit：`0cc87cdd`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29896614913`（`custom-image` success）
+- GitHub Actions run：`29912599037`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -60,15 +60,14 @@
 - 标定 profile：published + valid，CLI `2.1.215`
 - 既有数据库迁移 `178_add_anthropic_group_policies.sql` 保持已应用；近期
   429/SessionKey/调度修复无 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
-- 最新部署观察窗口：Fable HTTP 200 为 11、最终 Fable 429/503 均为 0；
-  Anthropic 429 failover 实际扩展到第 13 次，20 秒预算触发 1 次；opaque 429
-  自适应冷却 19 次，其中 streak=2 为 4 次
-- 部署时 `.env` 备份：`backups/.env.20260722-062724.before-a7ceb185`
+- 最新热修观察窗口：最终 429/503 均为 0；8 次 opaque 429 全部为固定 1 分钟，
+  `non_1m=0`、无 streak 字段
+- 部署时 `.env` 备份：`backups/.env.20260722-104114.before-0cc87cdd`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-a7ceb185
+sub2api-rollback:pre-0cc87cdd
 ```
 
 ## 4. 已实现功能
@@ -323,8 +322,10 @@ backend/migrations/178_add_anthropic_group_policies.sql
   `model_rate_limits["claude-fable-5"]`，Opus、Haiku、Sonnet 继续可用；
 - Anthropic 429 可在普通 10 次切换上限之外最多切换 20 次，但受 20 秒总预算约束；
 - 明确模型级响应不得落入 `anthropic_429_runtime_no_reset_time` 的账号级一分钟冷却；
-- 无法证明窗口和 reset 的普通 429 使用 Redis 连续失败状态，按
-  1/2/5/10 分钟递增冷却并增加确定性 jitter；成功响应会清除计数和对应运行时阻断；
+- 无法证明窗口和 reset 的普通 429 固定使用账号级 1 分钟运行时冷却；
+- `a7ceb185` 曾尝试 1/2/5/10 分钟递增冷却，但持续流量下多个账号同时进入
+  10 分钟阻断，分组 14 在两小时内产生 283 个本地 503，已由 `0cc87cdd`
+  回退；旧长冷却在读取时按 `triggered_at + 1 分钟` 截断，无需等待 Redis TTL；
 - Fable 调度优先选择 15 分钟内具有 `7d_oi utilization < 1`、未来 reset
   的账号；无证据账号仍保留为兜底，不影响其它模型。
 
@@ -332,10 +333,11 @@ backend/migrations/178_add_anthropic_group_policies.sql
 
 - body-only Fable 429 已产生 `anthropic_fable_window_model_rate_limited`；
 - Redis 中 Fable body 被误写为账号运行时阻断的数量为 0；
-- `a7ceb185` 部署后观察窗口内 Fable HTTP 200 为 11、usage 成功记录 5 条
-  （3 个账号），最终 Fable 429/503 均为 0；
+- `a7ceb185` 初始低流量观察窗口内 Fable HTTP 200 为 11、usage 成功记录 5 条
+  （3 个账号），但后续持续流量暴露递增冷却池耗尽问题；
 - failover 已观察到 switch 11/12/13，证明不会再固定停在原 `max_switches=10`；
-- opaque 429 已观察到 streak=2，递增冷却生效。
+- `0cc87cdd` 热修后观察窗口内最终 429/503 均为 0，8 次 opaque 429
+  冷却均严格为 1 分钟。
 
 会话数量限制仍是账号级：Redis key 为
 `session_limit:account:<accountID>`，某账号满额后调度器继续尝试同组其它账号。
@@ -418,7 +420,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 Anthropic 429 调度可靠性修复镜像构建：
+当前生产 opaque 429 固定短冷却热修镜像构建：
+
+- run：`29912599037`
+- source commit：`0cc87cdd`
+- job：`custom-image`
+- 结论：success
+- 其它 release/tag jobs：skipped
+
+上一生产 Anthropic 429 调度可靠性修复镜像构建：
 
 - run：`29896614913`
 - source commit：`a7ceb185`
@@ -434,15 +444,8 @@ gh workflow run release.yml \
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 body-only Fable 模型级 429 修复镜像构建：
-
-- run：`29713133369`
-- source commit：`50b68603`
-- job：`custom-image`
-- 结论：success
-- 其它 release/tag jobs：skipped
-
-Anthropic 内嵌 429 reset 解析构建 run 为 `29694578585`
+body-only Fable 模型级 429 修复构建 run 为 `29713133369`
+（source `50b68603`）。Anthropic 内嵌 429 reset 解析构建 run 为 `29694578585`
 （source `ab82a31e`）。Anthropic 分组级客户策略 auth hotfix 构建 run 为 `29687558261`
 （source `c32d41b7`）。首次 Persona 版本镜像构建 run 为 `29578816168`；
 随后因 Vue I18n JSON placeholder 修复重新构建并部署 `c8637aab`。
@@ -603,8 +606,8 @@ curl -fsS http://127.0.0.1:18080/health
 - `count_tokens max_tokens` 400 已修复；继续调查生产出现过的
   `metadata: Extra inputs are not permitted`；
 - 观察账号级 5h/7d 与 Fable `7d_oi` 分层命中、真实 reset 和跨模型可用性；
-- 观察 Anthropic 429 switch 深度、20 秒预算触发率、opaque streak 分布与最终
-  429/503；按流量评估 20 次上限和 15 分钟 Fable 证据窗口；
+- 观察 Anthropic 429 switch 深度、20 秒预算触发率、固定 1 分钟 opaque
+  冷却与最终 429/503；按流量评估 20 次上限和 15 分钟 Fable 证据窗口；
 - 观察 Chrome OAuth 约 8 小时轮换、提前 401 自动恢复、`invalid_grant`/缺失
   `refresh_token` 回退成功率、`account_session_invalid` 永久隔离以及 Cloudflare
   challenge 临时重试；

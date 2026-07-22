@@ -2,8 +2,8 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-22 已按本流程部署 `0.1.156-a7ceb185`，GitHub Actions
-> run `29896614913`，本机与公网健康检查均通过。
+> 最近验证：2026-07-22 已按本流程部署 `0.1.156-0cc87cdd`，GitHub Actions
+> run `29912599037`，本机与公网健康检查均通过。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -120,7 +120,7 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-COMMIT=a7ceb185  # 替换为本次 8 位 commit
+COMMIT=0cc87cdd  # 替换为本次 8 位 commit
 MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
 IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
 
@@ -145,10 +145,10 @@ docker exec sub2api /app/sub2api --version
 2026-07-22 最近一次验证：
 
 ```text
-immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-a7ceb185
-digest:          sha256:1cc50f659b8a5502234f0e775c8ac434cc59afe0f8e627bbf3fdfff1082d746a
-env backup:      backups/.env.20260722-062724.before-a7ceb185
-rollback tag:    sub2api-rollback:pre-a7ceb185
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-0cc87cdd
+digest:          sha256:475a3f31f4eb75c5f24bd9135d7486c62e950add756f648101aed63d5cf86381
+env backup:      backups/.env.20260722-104114.before-0cc87cdd
+rollback tag:    sub2api-rollback:pre-0cc87cdd
 ```
 
 ## 生产部署流程（仅应急：服务器本地构建）
@@ -292,7 +292,7 @@ docker exec sub2api /app/sub2api --version
 输出应类似：
 
 ```text
-Sub2API 0.1.156 (commit: a7ceb185, built: ...)
+Sub2API 0.1.156 (commit: 0cc87cdd, built: ...)
 ```
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
@@ -350,16 +350,16 @@ Fable body 被误写为账号运行时阻断：0
 no available accounts（观察窗口）：Fable > 0，Opus = 0，Haiku = 0
 ```
 
-### Anthropic 429 自适应调度发布检查
+### Anthropic 429 有界 failover 与固定短冷却发布检查
 
-`a7ceb185` 起新增三层保护：
+当前生产规则：
 
 - 普通错误仍使用 `max_account_switches=10`；
 - 仅 Anthropic 429 可使用 `max_account_switches_anthropic_429=20`；
 - 扩大搜索同时受 `anthropic_429_failover_timeout_seconds=20` 约束；
-- 无 reset 的 opaque 429 按 1/2/5/10 分钟递增冷却，同一短窗口内并发失败只增加
-  一次 streak，并通过 jitter 错开重新入池时间；
-- 成功响应会清除 opaque 429 streak 和对应运行时阻断；
+- 无 reset 的 opaque 429 固定冷却 1 分钟，不允许根据重复次数扩大到 10 分钟；
+- 读取 `a7ceb185` 已写入的旧 opaque 长冷却时，按
+  `triggered_at + 1 分钟` 截断，使热修部署后立即释放账号；
 - Fable 候选优先使用 15 分钟内具有
   `passive_usage_7d_oi_utilization < 1` 且 reset 在未来的账号，未知账号继续作为兜底。
 
@@ -371,11 +371,11 @@ gateway.failover_anthropic_429_time_budget_exhausted
 anthropic_429_runtime_cooldown_set
 ```
 
-`anthropic_429_runtime_cooldown_set` 应包含 `streak` 和实际 `cooldown`。观察窗口应同时
-按最终 HTTP 状态和上游 switch 数统计，不能把一次请求中的多个上游 429 当成多个
-用户错误。
+`anthropic_429_runtime_cooldown_set` 的 `cooldown` 必须为 `1m0s`，且不应再包含
+`streak`。观察窗口应同时按最终 HTTP 状态和上游 switch 数统计，不能把一次请求中
+的多个上游 429 当成多个用户错误。
 
-2026-07-22 `a7ceb185` 初始生产观察：
+`a7ceb185` 初始低流量观察曾为：
 
 ```text
 Fable HTTP 200: 11
@@ -384,6 +384,19 @@ Fable usage 成功记录: 5（3 个账号）
 Anthropic 429 最大 switch: 13
 20 秒预算触发: 1
 opaque 429 自适应冷却: 19（其中 streak=2 为 4）
+```
+
+但持续流量下，分组 14 出现 13 个真实账号级限流与 9 个 opaque 长冷却重叠，
+最近两小时产生 283 个本地 `no available accounts` 503（上游直接 503 为 0）。
+因此递增冷却被判定为不安全并由 `0cc87cdd` 回退。
+
+2026-07-22 `0cc87cdd` 热修初始观察：
+
+```text
+最终 HTTP 429 / 503: 0 / 0
+opaque 429: 8
+非 1 分钟 cooldown: 0
+streak 字段: 0
 ```
 
 ## 回滚
