@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-19
+> 最后更新：2026-07-20
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-19 Anthropic 分组级客户策略上线：
+截至 2026-07-20 Anthropic 429 分层判定与 Claude Chrome SessionKey 永久失效修复上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-c32d41b7`
-- 镜像 digest：`sha256:431c5e103655ee0a20fbc8233a8d939f5fb4cacf82b07c8929be085b743fdac2`
-- 应用 commit：`c32d41b7`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-6bf23b45`
+- 镜像 digest：`sha256:07cfdc230cda05422455ea47bf372c04118b340adb992ae4a5b0da65905ae40c`
+- 应用 commit：`6bf23b45`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29687558261`（`custom-image` success）
+- GitHub Actions run：`29717634840`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -58,14 +58,17 @@
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
 - 标定 profile：published + valid，CLI `2.1.215`
-- 数据库迁移：`178_add_anthropic_group_policies.sql` 已应用；只新增两个带
-  `inherit` 默认值的分组策略列，PostgreSQL、Redis、Caddy 均未重建
-- 部署时 `.env` 备份：`backups/.env.20260719-124840.before-c32d41b7`
+- 既有数据库迁移 `178_add_anthropic_group_policies.sql` 保持已应用；最近三次
+  429/SessionKey 修复无 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
+- 最新部署首轮 token refresh：`total=158, needs_refresh=3, refreshed=1, failed=2`；
+  两个失败均为明确的 `account_session_invalid`，已验证进入 `error` 且
+  `schedulable=false`
+- 部署时 `.env` 备份：`backups/.env.20260720-044944.before-6bf23b45`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-c32d41b7
+sub2api-rollback:pre-6bf23b45
 ```
 
 ## 4. 已实现功能
@@ -188,6 +191,10 @@ max_tokens: Extra inputs are not permitted
 - billing version 变化时会用相同版本重新计算 fp；
 - 不再注入真身 CLI 不发送的 `x-client-request-id`；
 - JSON schema 请求按条件追加 `structured-outputs` beta。
+- Anthropic 账号级 429 可从 `error.message` 内嵌 JSON 的 `resetsAt/windows`
+  恢复真实重置时间，不再只做短冷却；
+- `perModelLimit=true + seven_day_overage_included/7d_oi` 只写 Fable 家族级
+  model rate limit，不再把整个账号临时移出 Opus/Haiku 调度池。
 
 ### 4.6 设置页 Vue I18n 花括号事故
 
@@ -230,7 +237,9 @@ SyntaxError: Invalid token in placeholder: '"schema_version":'
   仍会拾取该账号并直接进入 SessionKey 回退，不会提前永久禁用；
 - 自动或手工恢复成功后同时清除数据库、Redis 与进程内的临时调度阻断；专用清理
   不会误删模型级 rate limit；
-- SessionKey 明确失效时账号进入 error、停止调度；临时上游/网络错误保持可重试；
+- SessionKey 明确失效（包括
+  `error.details.error_code=account_session_invalid`）时账号进入 error、停止调度；
+  Cloudflare challenge、临时上游/网络错误保持可重试；
 - 管理后台支持创建/重授权时选择 Chrome Cookie Authorization，并提供
   “使用 SessionKey 重新授权”的手工入口。
 
@@ -302,6 +311,47 @@ HTTP: 200
 backend/migrations/178_add_anthropic_group_policies.sql
 ```
 
+### 4.9 Anthropic 429 响应体分层限流
+
+部分 Anthropic OAuth 入口不返回完整 unified rate-limit headers，而把真正的窗口
+快照作为 JSON 字符串放入外层 `error.message`。当前处理规则：
+
+- `perModelLimit=false`，且 5h/7d 窗口超限：写账号级
+  `rate_limit_reset_at`，到真实 reset 前停止整个账号调度；
+- `perModelLimit=true` 且代表窗口为
+  `seven_day_overage_included`/`7d_oi`：只写
+  `model_rate_limits["claude-fable-5"]`，Opus、Haiku、Sonnet 继续可用；
+- 明确模型级响应不得落入 `anthropic_429_runtime_no_reset_time` 的账号级一分钟冷却；
+- 无法证明窗口和 reset 的普通 429 仍按短运行时冷却 fail-safe，避免立即重撞。
+
+生产验证：
+
+- body-only Fable 429 已产生 `anthropic_fable_window_model_rate_limited`；
+- Redis 中 Fable body 被误写为账号运行时阻断的数量为 0；
+- 修复后观察窗口内 `no available accounts`：Fable 有真实配额耗尽，Opus/Haiku 为 0。
+
+会话数量限制仍是账号级：Redis key 为
+`session_limit:account:<accountID>`，某账号满额后调度器继续尝试同组其它账号。
+管理后台分组容量的会话分母只汇总配置了正数 `max_sessions` 的当前 DB 可调度账号，
+不代表分组总上限，也不包含 Redis 运行时阻断，混合“有限+不限”账号时可能误导。
+
+### 4.10 Claude Chrome SessionKey 永久失效判定
+
+Chrome refresh token 为 `invalid_grant`/缺失时会在同一 owned lock 内回退已保存的
+SessionKey。回退结果按证据分层：
+
+- JSON `error.details.error_code=account_session_invalid` 是账号会话明确失效，
+  转换为 `CLAUDE_SESSION_KEY_INVALID`，通过 credentials/proxy CAS 将账号置为
+  `error`、`schedulable=false`；
+- Cloudflare `Just a moment...`、代理/网络错误、5xx 与无明确 session 证据的普通
+  403 仍可重试，重试耗尽后临时不可调度 10 分钟；
+- 二次 code exchange 的 `invalid_grant` 不能单独证明 SessionKey 死亡，继续保留
+  可重试语义；
+- 并发重授权或 profile 切换先获胜时，失败 CAS 不覆盖新凭证。
+
+生产首轮已验证两个 `account_session_invalid` 账号进入 `error`，没有继续进入
+10 分钟临时不可调度循环。
+
 ## 5. 当前自动标定状态
 
 首次真实标定：
@@ -361,24 +411,33 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 Chrome OAuth 提前 401 自动恢复镜像构建：
+当前生产 Claude Chrome SessionKey 永久失效修复镜像构建：
 
-- run：`29635986408`
-- source commit：`f7fd00dc`
+- run：`29717634840`
+- source commit：`6bf23b45`
 - job：`custom-image`
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 Chrome Cookie OAuth 镜像构建：
+上一生产 body-only Fable 模型级 429 修复镜像构建：
 
-- run：`29630310899`
-- source commit：`657fb52d`
+- run：`29713133369`
+- source commit：`50b68603`
 - job：`custom-image`
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-首次 Persona 版本镜像构建 run 为 `29578816168`；随后因 Vue I18n JSON
-placeholder 修复重新构建并部署 `c8637aab`。
+上一生产 Anthropic 内嵌 429 reset 解析镜像构建：
+
+- run：`29694578585`
+- source commit：`ab82a31e`
+- job：`custom-image`
+- 结论：success
+- 其它 release/tag jobs：skipped
+
+Anthropic 分组级客户策略 auth hotfix 构建 run 为 `29687558261`
+（source `c32d41b7`）。首次 Persona 版本镜像构建 run 为 `29578816168`；
+随后因 Vue I18n JSON placeholder 修复重新构建并部署 `c8637aab`。
 
 ### 6.2 自动真身标定
 
@@ -533,9 +592,12 @@ curl -fsS http://127.0.0.1:18080/health
 - Anthropic 事故恢复后复测 TTFT；
 - 对比 proxy 23 与其它美国代理；
 - 观察新 profile 下 400/401/429/529、cache read/create、账号寿命；
-- 确认 `count_tokens max_tokens` 400 已消失。
+- `count_tokens max_tokens` 400 已修复；继续调查生产出现过的
+  `metadata: Extra inputs are not permitted`；
+- 观察账号级 5h/7d 与 Fable `7d_oi` 分层命中、真实 reset 和跨模型可用性；
 - 观察 Chrome OAuth 约 8 小时轮换、提前 401 自动恢复、`invalid_grant`/缺失
-  `refresh_token` 回退成功率及 SessionKey 最终失效率；
+  `refresh_token` 回退成功率、`account_session_invalid` 永久隔离以及 Cloudflare
+  challenge 临时重试；
 - 观察 `oauth_refresh` 的 lock lease lost、CAS skipped 与临时不可调度日志。
 
 ### P1：Persona 小批灰度
@@ -610,6 +672,7 @@ Claude Chrome Cookie OAuth：
 backend/internal/pkg/oauth/oauth.go
 backend/internal/repository/claude_oauth_service.go
 backend/internal/service/oauth_service.go
+backend/internal/service/claude_oauth_error.go
 backend/internal/service/oauth_refresh_api.go
 backend/internal/service/token_refresher.go
 backend/internal/service/token_refresh_service.go
@@ -617,6 +680,16 @@ backend/internal/repository/account_repo.go
 backend/internal/handler/admin/account_handler.go
 frontend/src/components/account/OAuthAuthorizationFlow.vue
 frontend/src/components/admin/account/AccountActionMenu.vue
+```
+
+Anthropic 429 / 模型级限流：
+
+```text
+backend/internal/service/ratelimit_service.go
+backend/internal/service/model_rate_limit.go
+backend/internal/service/gateway_scheduling.go
+backend/internal/repository/temp_unsched_cache.go
+backend/internal/repository/rpm_cache.go
 ```
 
 Anthropic 分组级客户策略：

@@ -2,8 +2,8 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-18 已按本流程部署 `0.1.156-f7fd00dc`，GitHub Actions
-> run `29635986408`，本机与公网健康检查均通过。
+> 最近验证：2026-07-20 已按本流程部署 `0.1.156-6bf23b45`，GitHub Actions
+> run `29717634840`，本机与公网健康检查均通过。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -41,6 +41,7 @@ npm run typecheck
 # 后端伪装网关或调度改动
 cd ../backend
 go test -tags unit ./internal/service -run 'Test.*Claude.*Mimic|Test.*OAuth.*Metadata|Test.*CountTokens|Test.*Fingerprint|Test.*Beta'
+go test -tags unit ./internal/service -run 'Test(Handle429|HandleUpstreamError_Anthropic|.*Fable.*|.*SessionKey.*|.*ClaudeChrome.*)'
 go test -tags unit ./internal/handler -run 'Test.*ClaudeCode|Test.*CountTokens'
 ```
 
@@ -119,7 +120,7 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-COMMIT=c32d41b7  # 替换为本次 8 位 commit
+COMMIT=6bf23b45  # 替换为本次 8 位 commit
 MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
 IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
 
@@ -140,6 +141,15 @@ docker exec sub2api /app/sub2api --version
 ```
 
 这样镜像构建完全在 GitHub runner 上完成，不占用生产机 CPU/内存。
+
+2026-07-20 最近一次验证：
+
+```text
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-6bf23b45
+digest:          sha256:07cfdc230cda05422455ea47bf372c04118b340adb992ae4a5b0da65905ae40c
+env backup:      backups/.env.20260720-044944.before-6bf23b45
+rollback tag:    sub2api-rollback:pre-6bf23b45
+```
 
 ## 生产部署流程（仅应急：服务器本地构建）
 
@@ -282,7 +292,7 @@ docker exec sub2api /app/sub2api --version
 输出应类似：
 
 ```text
-Sub2API 0.1.156 (commit: f7fd00dc, built: ...)
+Sub2API 0.1.156 (commit: 6bf23b45, built: ...)
 ```
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
@@ -294,6 +304,11 @@ Sub2API 0.1.156 (commit: f7fd00dc, built: ...)
 - 提前 401 的 `claude_chrome` 账号能进入刷新，不再仅等待 `expires_at`；
 - `refresh_token` 为 `invalid_grant` 或缺失时能回退已保存的 `session_key`；
 - 成功后数据库、Redis 和进程内临时不可调度状态均被清除；
+- SessionKey 回退返回
+  `error.details.error_code=account_session_invalid` 时账号必须进入
+  `error` 且 `schedulable=false`，不能继续循环临时不可调度；
+- Cloudflare `Just a moment...`、代理/网络错误与普通 5xx 仍应保持可重试，
+  不能因 403 状态码本身永久禁用账号；
 - 普通 `claude_code` OAuth 行为不变。
 
 查看启动和首轮刷新日志：
@@ -303,10 +318,36 @@ docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
   logs --since=10m sub2api
 ```
 
-2026-07-18 的 `f7fd00dc` 部署首轮记录为：
+2026-07-20 的 `6bf23b45` 部署首轮记录为：
 
 ```text
-token_refresh.cycle_completed total=96 oauth=96 needs_refresh=4 refreshed=4 skipped=0 failed=0
+token_refresh.cycle_completed total=158 oauth=158 needs_refresh=3 refreshed=1 skipped=0 failed=2
+```
+
+该轮两个 failed 均为明确的 `account_session_invalid`，生产数据库已验证对应账号
+`status=error`、`schedulable=false`；这是正确的永久隔离结果，不是刷新服务异常。
+
+### Anthropic 内嵌 429 / Fable 模型级限流发布检查
+
+这类改动不能只检查 HTTP 429 数量。还应确认：
+
+- 外层 `error.message` 中的 JSON 可提取 `resetsAt`、`windows` 与
+  `perModelLimit`；
+- `perModelLimit=false` 的 5h/7d 超限写账号级 reset；
+- `perModelLimit=true` 且代表窗口为
+  `seven_day_overage_included`/`7d_oi` 时，只写
+  `model_rate_limits["claude-fable-5"]`；
+- 同一账号的 Opus/Haiku/Sonnet 不应因 Fable 额度耗尽进入运行时冷却；
+- 日志中应出现 `anthropic_fable_window_model_rate_limited`，且对应响应不应出现
+  `anthropic_429_runtime_no_reset_time`；
+- 剩余 Fable 503 可能是真实 Fable 配额全部耗尽，应按模型拆分 503，不能仅看分组
+  会话容量徽标。
+
+2026-07-20 的 `50b68603` 生产验证：
+
+```text
+Fable body 被误写为账号运行时阻断：0
+no available accounts（观察窗口）：Fable > 0，Opus = 0，Haiku = 0
 ```
 
 ## 回滚
