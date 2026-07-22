@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-20
+> 最后更新：2026-07-22
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-20 Anthropic 429 分层判定与 Claude Chrome SessionKey 永久失效修复上线：
+截至 2026-07-22 Anthropic 429 自适应冷却与 Fable 可用性感知调度上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-6bf23b45`
-- 镜像 digest：`sha256:07cfdc230cda05422455ea47bf372c04118b340adb992ae4a5b0da65905ae40c`
-- 应用 commit：`6bf23b45`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-a7ceb185`
+- 镜像 digest：`sha256:1cc50f659b8a5502234f0e775c8ac434cc59afe0f8e627bbf3fdfff1082d746a`
+- 应用 commit：`a7ceb185`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29717634840`（`custom-image` success）
+- GitHub Actions run：`29896614913`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -58,17 +58,17 @@
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
 - 标定 profile：published + valid，CLI `2.1.215`
-- 既有数据库迁移 `178_add_anthropic_group_policies.sql` 保持已应用；最近三次
-  429/SessionKey 修复无 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
-- 最新部署首轮 token refresh：`total=158, needs_refresh=3, refreshed=1, failed=2`；
-  两个失败均为明确的 `account_session_invalid`，已验证进入 `error` 且
-  `schedulable=false`
-- 部署时 `.env` 备份：`backups/.env.20260720-044944.before-6bf23b45`
+- 既有数据库迁移 `178_add_anthropic_group_policies.sql` 保持已应用；近期
+  429/SessionKey/调度修复无 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
+- 最新部署观察窗口：Fable HTTP 200 为 11、最终 Fable 429/503 均为 0；
+  Anthropic 429 failover 实际扩展到第 13 次，20 秒预算触发 1 次；opaque 429
+  自适应冷却 19 次，其中 streak=2 为 4 次
+- 部署时 `.env` 备份：`backups/.env.20260722-062724.before-a7ceb185`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-6bf23b45
+sub2api-rollback:pre-a7ceb185
 ```
 
 ## 4. 已实现功能
@@ -321,14 +321,21 @@ backend/migrations/178_add_anthropic_group_policies.sql
 - `perModelLimit=true` 且代表窗口为
   `seven_day_overage_included`/`7d_oi`：只写
   `model_rate_limits["claude-fable-5"]`，Opus、Haiku、Sonnet 继续可用；
+- Anthropic 429 可在普通 10 次切换上限之外最多切换 20 次，但受 20 秒总预算约束；
 - 明确模型级响应不得落入 `anthropic_429_runtime_no_reset_time` 的账号级一分钟冷却；
-- 无法证明窗口和 reset 的普通 429 仍按短运行时冷却 fail-safe，避免立即重撞。
+- 无法证明窗口和 reset 的普通 429 使用 Redis 连续失败状态，按
+  1/2/5/10 分钟递增冷却并增加确定性 jitter；成功响应会清除计数和对应运行时阻断；
+- Fable 调度优先选择 15 分钟内具有 `7d_oi utilization < 1`、未来 reset
+  的账号；无证据账号仍保留为兜底，不影响其它模型。
 
 生产验证：
 
 - body-only Fable 429 已产生 `anthropic_fable_window_model_rate_limited`；
 - Redis 中 Fable body 被误写为账号运行时阻断的数量为 0；
-- 修复后观察窗口内 `no available accounts`：Fable 有真实配额耗尽，Opus/Haiku 为 0。
+- `a7ceb185` 部署后观察窗口内 Fable HTTP 200 为 11、usage 成功记录 5 条
+  （3 个账号），最终 Fable 429/503 均为 0；
+- failover 已观察到 switch 11/12/13，证明不会再固定停在原 `max_switches=10`；
+- opaque 429 已观察到 streak=2，递增冷却生效。
 
 会话数量限制仍是账号级：Redis key 为
 `session_limit:account:<accountID>`，某账号满额后调度器继续尝试同组其它账号。
@@ -411,7 +418,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 Claude Chrome SessionKey 永久失效修复镜像构建：
+当前生产 Anthropic 429 调度可靠性修复镜像构建：
+
+- run：`29896614913`
+- source commit：`a7ceb185`
+- job：`custom-image`
+- 结论：success
+- 其它 release/tag jobs：skipped
+
+上一生产 Claude Chrome SessionKey 永久失效修复镜像构建：
 
 - run：`29717634840`
 - source commit：`6bf23b45`
@@ -427,15 +442,8 @@ gh workflow run release.yml \
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 Anthropic 内嵌 429 reset 解析镜像构建：
-
-- run：`29694578585`
-- source commit：`ab82a31e`
-- job：`custom-image`
-- 结论：success
-- 其它 release/tag jobs：skipped
-
-Anthropic 分组级客户策略 auth hotfix 构建 run 为 `29687558261`
+Anthropic 内嵌 429 reset 解析构建 run 为 `29694578585`
+（source `ab82a31e`）。Anthropic 分组级客户策略 auth hotfix 构建 run 为 `29687558261`
 （source `c32d41b7`）。首次 Persona 版本镜像构建 run 为 `29578816168`；
 随后因 Vue I18n JSON placeholder 修复重新构建并部署 `c8637aab`。
 
@@ -595,6 +603,8 @@ curl -fsS http://127.0.0.1:18080/health
 - `count_tokens max_tokens` 400 已修复；继续调查生产出现过的
   `metadata: Extra inputs are not permitted`；
 - 观察账号级 5h/7d 与 Fable `7d_oi` 分层命中、真实 reset 和跨模型可用性；
+- 观察 Anthropic 429 switch 深度、20 秒预算触发率、opaque streak 分布与最终
+  429/503；按流量评估 20 次上限和 15 分钟 Fable 证据窗口；
 - 观察 Chrome OAuth 约 8 小时轮换、提前 401 自动恢复、`invalid_grant`/缺失
   `refresh_token` 回退成功率、`account_session_invalid` 永久隔离以及 Cloudflare
   challenge 临时重试；
@@ -688,6 +698,7 @@ Anthropic 429 / 模型级限流：
 backend/internal/service/ratelimit_service.go
 backend/internal/service/model_rate_limit.go
 backend/internal/service/gateway_scheduling.go
+backend/internal/service/account_fable_availability.go
 backend/internal/repository/temp_unsched_cache.go
 backend/internal/repository/rpm_cache.go
 ```
