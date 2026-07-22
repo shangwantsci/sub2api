@@ -20,38 +20,6 @@ type rateLimit429AccountRepoStub struct {
 	lastRateLimitReset time.Time
 }
 
-type adaptiveAnthropic429CacheStub struct {
-	TempUnschedCache
-	streak     int
-	resetCalls int
-	state      *TempUnschedState
-}
-
-func (c *adaptiveAnthropic429CacheStub) SetTempUnsched(_ context.Context, _ int64, state *TempUnschedState) error {
-	c.state = state
-	return nil
-}
-
-func (c *adaptiveAnthropic429CacheStub) GetTempUnsched(context.Context, int64) (*TempUnschedState, error) {
-	return c.state, nil
-}
-
-func (c *adaptiveAnthropic429CacheStub) DeleteTempUnsched(context.Context, int64) error {
-	c.state = nil
-	return nil
-}
-
-func (c *adaptiveAnthropic429CacheStub) NextAnthropicOpaque429Backoff(context.Context, int64) (int, error) {
-	c.streak++
-	return c.streak, nil
-}
-
-func (c *adaptiveAnthropic429CacheStub) ResetAnthropicOpaque429Backoff(context.Context, int64) error {
-	c.resetCalls++
-	c.streak = 0
-	return nil
-}
-
 func (r *rateLimit429AccountRepoStub) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitCalls++
 	r.lastRateLimitID = id
@@ -172,14 +140,17 @@ func TestHandle429_AnthropicNoResetUsesRuntimeCooldownOnly(t *testing.T) {
 	require.True(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account), "无 reset 的 Anthropic 429 应进入短运行时冷却")
 }
 
-func TestHandle429_AnthropicOpaque429UsesAdaptiveCooldownAndResetsOnSuccess(t *testing.T) {
+func TestHandle429_AnthropicOpaque429RemainsFixedOneMinute(t *testing.T) {
 	accountRepo := &rateLimit429AccountRepoStub{}
-	cache := &adaptiveAnthropic429CacheStub{}
-	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, cache)
+	settingRepo := newMockSettingRepo()
+	data, _ := json.Marshal(RateLimit429CooldownSettings{Enabled: true, CooldownSeconds: 600})
+	settingRepo.data[SettingKeyRateLimit429CooldownSettings] = string(data)
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
 	account := &Account{ID: 45, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}
-	steps := []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
 
-	for i, minimum := range steps {
+	for i := 0; i < 4; i++ {
 		before := time.Now()
 		svc.handle429(context.Background(), account, http.Header{}, []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Error"}}`))
 
@@ -188,15 +159,40 @@ func TestHandle429_AnthropicOpaque429UsesAdaptiveCooldownAndResetsOnSuccess(t *t
 		block, ok := raw.(accountRuntimeBlock)
 		require.True(t, ok)
 		cooldown := block.Until.Sub(before)
-		require.GreaterOrEqual(t, cooldown, minimum, "streak %d", i+1)
-		require.LessOrEqual(t, cooldown, minimum+minimum/10+time.Second, "streak %d", i+1)
+		require.GreaterOrEqual(t, cooldown, time.Minute)
+		require.LessOrEqual(t, cooldown, time.Minute+time.Second)
+	}
+}
+
+func TestRuntimeBlockFromTempUnschedStateClampsLegacyAdaptiveOpaque429(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	legacy := &TempUnschedState{
+		UntilUnix:       now.Add(8 * time.Minute).Unix(),
+		TriggeredAtUnix: now.Add(-2 * time.Minute).Unix(),
+		StatusCode:      http.StatusTooManyRequests,
+		MatchedKeyword:  "anthropic_429_runtime_no_reset_time",
 	}
 
-	headers := http.Header{}
-	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
-	svc.UpdateSessionWindow(context.Background(), account, headers)
-	require.Equal(t, 1, cache.resetCalls)
-	require.Zero(t, cache.streak)
-	require.Nil(t, cache.state)
-	require.False(t, svc.IsAccountRuntimeSchedulingBlocked(context.Background(), account))
+	_, blocked := runtimeBlockFromTempUnschedState(legacy, now)
+	require.False(t, blocked, "legacy adaptive block older than one minute must be released")
+
+	recent := &TempUnschedState{
+		UntilUnix:       now.Add(10 * time.Minute).Unix(),
+		TriggeredAtUnix: now.Add(-30 * time.Second).Unix(),
+		StatusCode:      http.StatusTooManyRequests,
+		MatchedKeyword:  "anthropic_429_runtime_no_reset_time",
+	}
+	block, blocked := runtimeBlockFromTempUnschedState(recent, now)
+	require.True(t, blocked)
+	require.True(t, block.Until.Equal(now.Add(30*time.Second)))
+
+	explicitWindow := &TempUnschedState{
+		UntilUnix:       now.Add(8 * time.Minute).Unix(),
+		TriggeredAtUnix: now.Add(-2 * time.Minute).Unix(),
+		StatusCode:      http.StatusTooManyRequests,
+		MatchedKeyword:  "anthropic_5h_window_exhausted",
+	}
+	block, blocked = runtimeBlockFromTempUnschedState(explicitWindow, now)
+	require.True(t, blocked, "explicit reset-based limits must not be clamped")
+	require.True(t, block.Until.Equal(now.Add(8*time.Minute)))
 }
