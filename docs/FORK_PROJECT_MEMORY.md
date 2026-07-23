@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-23 Fable `credits_required` 模型访问拒绝上线：
+截至 2026-07-23 Anthropic 分组 `identity_only` 两块提示词模式上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-e4fad61d`
-- 镜像 digest：`sha256:c6467283ce1c770beb28af63622cf19fbc90cc6858bfdec443df1544e169b539`
-- 应用 commit：`e4fad61d`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-a16045ee`
+- 镜像 digest：`sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c`
+- 应用 commit：`a16045ee`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29978772874`（`custom-image` success）
+- GitHub Actions run：`29982187637`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -58,21 +58,29 @@
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
 - 标定 profile：published + valid，CLI `2.1.218`
-- 既有数据库迁移 `178_add_anthropic_group_policies.sql` 保持已应用；近期
-  Fable access denial/429/SessionKey/调度修复无 schema 迁移，PostgreSQL、Redis、
-  Caddy 均未重建
+- 数据库迁移 `179_expand_claude_oauth_system_prompt_policy.sql` 已应用，CHECK
+  constraint 已包含 `identity_only`；PostgreSQL、Redis、Caddy 均未重建
+- 事务验证中分组 14 可写入 `identity_only` 并成功回滚到原值 `enabled`；部署脚本
+  没有自动切换客户配置。随后该分组于 13:36:12 经管理操作启用
+  `identity_only`，当前使用该模式的分组数为 1
+- 生产二进制已确认包含 `identity_only` 与“仅必要身份”前端标签
+- 两块提示词及 system 迁移辅助文本由测试实测增量约 53 tokens；主 messages、
+  count_tokens 与 Mimicry Guard block 模式均通过端到端 wire 测试
+- 分组 14 启用后的首个观察窗口有 13 条成功 usage、7 个账号、覆盖
+  Fable/Haiku/Opus/Sonnet；Mimicry Guard 的 `missing_billing_block`、
+  `missing_agent_sdk_identity`、`system_block_count` 合计为 0
 - 首个生产 `credits_required`：SetupToken 账号 `2069` 写入
   `model_access_denials["claude-fable-5"]` 后保持 active/schedulable；同一请求清理
   粘性并切换到 Max 账号 `2624`，最终 HTTP 200（4264ms）
 - denial 生效后账号 `2069` 的 Fable 再次选中数为 0；Opus/Haiku/Sonnet 不受该
   模型拒绝影响
-- 部署后首轮 token refresh：`total=87, needs_refresh=1, refreshed=1, failed=0`
-- 部署时 `.env` 备份：`backups/.env.20260723-041406.before-e4fad61d`
+- 部署后首轮 token refresh：`total=87, needs_refresh=3, refreshed=3, failed=0`
+- 部署时 `.env` 备份：`backups/.env.20260723-053306.before-a16045ee`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-e4fad61d
+sub2api-rollback:pre-a16045ee
 ```
 
 ## 4. 已实现功能
@@ -331,6 +339,10 @@ backend/migrations/178_add_anthropic_group_policies.sql
 backend/migrations/179_expand_claude_oauth_system_prompt_policy.sql
 ```
 
+`a16045ee` 已在生产应用迁移 179；事务验证 identity-only 可写入并回滚，前端标签已
+嵌入生产二进制。部署脚本未自动切换客户配置；随后分组 14 经管理操作启用该模式，
+首个观察窗口 13 条成功 usage，且缺 billing/身份/块数的 Guard findings 为 0。
+
 ### 4.9 Anthropic 429 响应体分层限流
 
 部分 Anthropic OAuth 入口不返回完整 unified rate-limit headers，而把真正的窗口
@@ -477,7 +489,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 Fable `credits_required` 模型访问拒绝镜像构建：
+当前生产 `identity_only` 两块提示词模式镜像构建：
+
+- run：`29982187637`
+- source commit：`a16045ee`
+- job：`custom-image`
+- 结论：success
+- 其它 release/tag jobs：skipped
+
+上一生产 Fable `credits_required` 模型访问拒绝镜像构建：
 
 - run：`29978772874`
 - source commit：`e4fad61d`
@@ -485,7 +505,7 @@ gh workflow run release.yml \
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 opaque 429 固定短冷却热修镜像构建：
+更早的 opaque 429 固定短冷却热修镜像构建：
 
 - run：`29912599037`
 - source commit：`0cc87cdd`

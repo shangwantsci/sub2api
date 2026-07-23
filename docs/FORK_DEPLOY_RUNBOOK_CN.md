@@ -2,9 +2,9 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-23 已按本流程部署 `0.1.156-e4fad61d`，GitHub Actions
-> run `29978772874`，本机与公网健康检查及 Fable `credits_required` 实流量
-> failover 均通过。
+> 最近验证：2026-07-23 已按本流程部署 `0.1.156-a16045ee`，GitHub Actions
+> run `29982187637`；本机/公网健康检查、迁移 179、`identity_only` 策略约束和
+> 前端产物均通过验证。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -121,7 +121,7 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-COMMIT=e4fad61d  # 替换为本次 8 位 commit
+COMMIT=a16045ee  # 替换为本次 8 位 commit
 MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
 IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
 
@@ -146,10 +146,10 @@ docker exec sub2api /app/sub2api --version
 2026-07-23 最近一次验证：
 
 ```text
-immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-e4fad61d
-digest:          sha256:c6467283ce1c770beb28af63622cf19fbc90cc6858bfdec443df1544e169b539
-env backup:      backups/.env.20260723-041406.before-e4fad61d
-rollback tag:    sub2api-rollback:pre-e4fad61d
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-a16045ee
+digest:          sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c
+env backup:      backups/.env.20260723-053306.before-a16045ee
+rollback tag:    sub2api-rollback:pre-a16045ee
 ```
 
 ## 生产部署流程（仅应急：服务器本地构建）
@@ -293,7 +293,7 @@ docker exec sub2api /app/sub2api --version
 输出应类似：
 
 ```text
-Sub2API 0.1.156 (commit: e4fad61d, built: ...)
+Sub2API 0.1.156 (commit: a16045ee, built: ...)
 ```
 
 ### Anthropic 分组 `identity_only` 发布检查
@@ -316,6 +316,26 @@ Sub2API 0.1.156 (commit: e4fad61d, built: ...)
 constraint，不新增列。数据库约束无需随应用回滚；旧应用遇到该值会归一为
 `inherit`，因此应用回滚前应先将使用该模式的分组改回 `inherit` 或 `disabled`，
 避免回滚后语义变化。
+
+2026-07-23 `a16045ee` 生产验证：
+
+```text
+GitHub Actions run: 29982187637 (custom-image success)
+image digest: sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c
+env backup: backups/.env.20260723-053306.before-a16045ee
+rollback tag: sub2api-rollback:pre-a16045ee
+
+migration 179: schema_migrations 已记录
+constraint: inherit / enabled / identity_only / disabled
+事务验证: group 14 写入 identity_only 成功，ROLLBACK 后恢复 enabled
+部署脚本: 未自动切换客户配置
+后续管理操作: group 14 于 13:36:12 启用 identity_only
+生产二进制: 已包含 identity_only 与“仅必要身份”标签
+真实流量: 13 条成功 usage / 7 个账号 / 覆盖 Fable、Haiku、Opus、Sonnet
+缺 billing、身份或块数的 Mimicry Guard findings: 0
+本机/公网 health: HTTP 200
+首轮 token refresh: total=87, needs_refresh=3, refreshed=3, failed=0
+```
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
 
