@@ -2,8 +2,9 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-22 已按本流程部署 `0.1.156-0cc87cdd`，GitHub Actions
-> run `29912599037`，本机与公网健康检查均通过。
+> 最近验证：2026-07-23 已按本流程部署 `0.1.156-e4fad61d`，GitHub Actions
+> run `29978772874`，本机与公网健康检查及 Fable `credits_required` 实流量
+> failover 均通过。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -120,7 +121,7 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-COMMIT=0cc87cdd  # 替换为本次 8 位 commit
+COMMIT=e4fad61d  # 替换为本次 8 位 commit
 MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
 IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
 
@@ -142,13 +143,13 @@ docker exec sub2api /app/sub2api --version
 
 这样镜像构建完全在 GitHub runner 上完成，不占用生产机 CPU/内存。
 
-2026-07-22 最近一次验证：
+2026-07-23 最近一次验证：
 
 ```text
-immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-0cc87cdd
-digest:          sha256:475a3f31f4eb75c5f24bd9135d7486c62e950add756f648101aed63d5cf86381
-env backup:      backups/.env.20260722-104114.before-0cc87cdd
-rollback tag:    sub2api-rollback:pre-0cc87cdd
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-e4fad61d
+digest:          sha256:c6467283ce1c770beb28af63622cf19fbc90cc6858bfdec443df1544e169b539
+env backup:      backups/.env.20260723-041406.before-e4fad61d
+rollback tag:    sub2api-rollback:pre-e4fad61d
 ```
 
 ## 生产部署流程（仅应急：服务器本地构建）
@@ -292,7 +293,7 @@ docker exec sub2api /app/sub2api --version
 输出应类似：
 
 ```text
-Sub2API 0.1.156 (commit: 0cc87cdd, built: ...)
+Sub2API 0.1.156 (commit: e4fad61d, built: ...)
 ```
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
@@ -373,6 +374,24 @@ WHERE id = <ACCOUNT_ID>;
   `model_access_denials.claude-fable-5` 应被清除。
 
 该功能无数据库迁移。回滚到旧应用时 Extra 字段会被忽略，无需修改数据库。
+
+2026-07-23 `e4fad61d` 生产验证：
+
+```text
+GitHub Actions run: 29978772874 (custom-image success)
+image digest: sha256:c6467283ce1c770beb28af63622cf19fbc90cc6858bfdec443df1544e169b539
+env backup: backups/.env.20260723-041406.before-e4fad61d
+rollback tag: sub2api-rollback:pre-e4fad61d
+
+账号 2069 (SetupToken): credits_required / out_of_credits
+账号状态: active / schedulable
+denial: model_access_denials.claude-fable-5
+sticky: 已清除
+failover: 2069 -> 2624 (Max)
+最终响应: HTTP 200 / 4264ms
+denial 后 Fable 再选中 2069: 0
+部署后首轮 token refresh: total=87, needs_refresh=1, refreshed=1, failed=0
+```
 
 ### Anthropic 429 有界 failover 与固定短冷却发布检查
 

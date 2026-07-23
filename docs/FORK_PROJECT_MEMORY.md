@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-22 Anthropic opaque 429 固定短冷却热修上线：
+截至 2026-07-23 Fable `credits_required` 模型访问拒绝上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-0cc87cdd`
-- 镜像 digest：`sha256:475a3f31f4eb75c5f24bd9135d7486c62e950add756f648101aed63d5cf86381`
-- 应用 commit：`0cc87cdd`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-e4fad61d`
+- 镜像 digest：`sha256:c6467283ce1c770beb28af63622cf19fbc90cc6858bfdec443df1544e169b539`
+- 应用 commit：`e4fad61d`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29912599037`（`custom-image` success）
+- GitHub Actions run：`29978772874`（`custom-image` success）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -57,17 +57,22 @@
 - 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
 - Persona 全局门控：`false`（尚未灰度启用）
 - 生产机不运行 `cc-calibrate` sidecar
-- 标定 profile：published + valid，CLI `2.1.215`
+- 标定 profile：published + valid，CLI `2.1.218`
 - 既有数据库迁移 `178_add_anthropic_group_policies.sql` 保持已应用；近期
-  429/SessionKey/调度修复无 schema 迁移，PostgreSQL、Redis、Caddy 均未重建
-- 最新热修观察窗口：最终 429/503 均为 0；8 次 opaque 429 全部为固定 1 分钟，
-  `non_1m=0`、无 streak 字段
-- 部署时 `.env` 备份：`backups/.env.20260722-104114.before-0cc87cdd`
+  Fable access denial/429/SessionKey/调度修复无 schema 迁移，PostgreSQL、Redis、
+  Caddy 均未重建
+- 首个生产 `credits_required`：SetupToken 账号 `2069` 写入
+  `model_access_denials["claude-fable-5"]` 后保持 active/schedulable；同一请求清理
+  粘性并切换到 Max 账号 `2624`，最终 HTTP 200（4264ms）
+- denial 生效后账号 `2069` 的 Fable 再次选中数为 0；Opus/Haiku/Sonnet 不受该
+  模型拒绝影响
+- 部署后首轮 token refresh：`total=87, needs_refresh=1, refreshed=1, failed=0`
+- 部署时 `.env` 备份：`backups/.env.20260723-041406.before-e4fad61d`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-0cc87cdd
+sub2api-rollback:pre-e4fad61d
 ```
 
 ## 4. 已实现功能
@@ -386,6 +391,17 @@ error.details.disabled_reason=out_of_credits
 - denial 写入/清除使用原子嵌套 JSONB 更新并同步调度快照，不新增数据库列或迁移；
 - 旧版本应用会忽略该 Extra 字段，应用回滚不需要数据库回滚。
 
+2026-07-23 `e4fad61d` 生产首个真实样本：
+
+```text
+账号 2069 (SetupToken) -> credits_required / out_of_credits
+model_access_denials.claude-fable-5 -> 写入成功
+sticky -> 清除
+switch -> 账号 2624 (Max)
+最终 HTTP -> 200，4264ms
+denial 后账号 2069 的 Fable 再次选中数 -> 0
+```
+
 ## 5. 当前自动标定状态
 
 首次真实标定：
@@ -445,7 +461,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 opaque 429 固定短冷却热修镜像构建：
+当前生产 Fable `credits_required` 模型访问拒绝镜像构建：
+
+- run：`29978772874`
+- source commit：`e4fad61d`
+- job：`custom-image`
+- 结论：success
+- 其它 release/tag jobs：skipped
+
+上一生产 opaque 429 固定短冷却热修镜像构建：
 
 - run：`29912599037`
 - source commit：`0cc87cdd`
@@ -453,7 +477,7 @@ gh workflow run release.yml \
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 Anthropic 429 调度可靠性修复镜像构建：
+更早的 Anthropic 429 调度可靠性修复镜像构建：
 
 - run：`29896614913`
 - source commit：`a7ceb185`
