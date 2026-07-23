@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-22
+> 最后更新：2026-07-23
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -360,6 +360,31 @@ SessionKey。回退结果按证据分层：
 
 生产首轮已验证两个 `account_session_invalid` 账号进入 `error`，没有继续进入
 10 分钟临时不可调度循环。
+
+### 4.11 Fable `credits_required` 模型访问拒绝
+
+Anthropic 可能在 `/v1/models` 中列出 Fable 5，但账号没有可扣减的 usage credits
+时，请求返回 HTTP 429：
+
+```text
+error.details.error_code=credits_required
+error.details.model=claude-fable-5
+error.details.disabled_reason=out_of_credits
+```
+
+该信号不是带 reset 的 5h/7d/`7d_oi` 窗口限流，处理规则为：
+
+- 优先读取上述结构化字段，文本
+  `Usage credits are required for this model` 仅作为旧响应兼容兜底；
+- 在 `account.extra.model_access_denials["claude-fable-5"]` 持久化无 reset 的
+  模型访问拒绝，不写账号级 `rate_limit_reset_at`，也不写时间型
+  `model_rate_limits`；
+- 当前请求立即 failover；普通候选、粘性候选和回退候选后续均跳过该账号的
+  所有 Fable 变体，Opus、Haiku、Sonnet 不受影响；
+- 管理后台“账号管理 → 测试连接”仍可绕过调度直接测试指定账号；Fable 测试完整
+  成功后只清除该账号的 Fable access denial；
+- denial 写入/清除使用原子嵌套 JSONB 更新并同步调度快照，不新增数据库列或迁移；
+- 旧版本应用会忽略该 Extra 字段，应用回滚不需要数据库回滚。
 
 ## 5. 当前自动标定状态
 

@@ -19,6 +19,21 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestFilterSchedulerExtraKeepsModelAccessDenials(t *testing.T) {
+	denials := map[string]any{
+		"claude-fable-5": map[string]any{
+			"reason": "anthropic_fable_credits_required",
+		},
+	}
+	filtered := filterSchedulerExtra(map[string]any{
+		"model_access_denials": denials,
+		"unrelated_secret":     "do-not-copy",
+	})
+
+	require.Equal(t, denials, filtered["model_access_denials"])
+	require.NotContains(t, filtered, "unrelated_secret")
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,

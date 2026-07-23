@@ -318,7 +318,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			s.reconcileAnthropic429State(ctx, account, resp.Header, body)
+			s.reconcileAnthropic429State(ctx, account, testModelID, resp.Header, body)
 		}
 
 		// 403 表示账号被上游封禁，标记为 error 状态
@@ -330,7 +330,17 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Process SSE stream
-	return s.processClaudeStream(c, resp.Body)
+	if err := s.processClaudeStream(c, resp.Body); err != nil {
+		return err
+	}
+	if isAnthropicFableModel(testModelID) && account.hasModelAccessDenialForKey(anthropicFableRateLimitKey) {
+		if err := clearModelAccessDenial(ctx, s.accountRepo, account, anthropicFableRateLimitKey); err != nil {
+			log.Printf("[account-test] failed to clear Fable model access denial for account %d: %v", account.ID, err)
+		} else {
+			log.Printf("[account-test] cleared Fable model access denial after successful test for account %d", account.ID)
+		}
+	}
+	return nil
 }
 
 func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string) error {
@@ -1014,12 +1024,16 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	return nil
 }
 
-func (s *AccountTestService) reconcileAnthropic429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
+func (s *AccountTestService) reconcileAnthropic429State(ctx context.Context, account *Account, requestedModel string, headers http.Header, body []byte) {
 	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformAnthropic {
 		return
 	}
 
 	now := time.Now()
+	if denial := selectAnthropicFableCreditsRequired(body, requestedModel, now); denial != nil {
+		_ = persistModelAccessDenial(ctx, s.accountRepo, account, anthropicFableRateLimitKey, *denial)
+		return
+	}
 	fableLimit := selectAnthropicFableWindowLimit(headers, now)
 	fableBodyLimit := selectAnthropicFableWindowLimitFromBody(body, now)
 	var limit *anthropicWindowLimit

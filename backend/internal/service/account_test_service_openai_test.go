@@ -74,6 +74,11 @@ type openAIAccountTestRepo struct {
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
+	accessDenialID     int64
+	accessDenialScope  string
+	accessDenial       ModelAccessDenial
+	clearedDenialID    int64
+	clearedDenialScope string
 }
 
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -108,6 +113,19 @@ func (r *openAIAccountTestRepo) ClearError(_ context.Context, id int64) error {
 func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg string) error {
 	r.setErrorID = id
 	r.setErrorMsg = errorMsg
+	return nil
+}
+
+func (r *openAIAccountTestRepo) SetModelAccessDenial(_ context.Context, id int64, scope string, denial ModelAccessDenial) error {
+	r.accessDenialID = id
+	r.accessDenialScope = scope
+	r.accessDenial = denial
+	return nil
+}
+
+func (r *openAIAccountTestRepo) ClearModelAccessDenial(_ context.Context, id int64, scope string) error {
+	r.clearedDenialID = id
+	r.clearedDenialScope = scope
 	return nil
 }
 
@@ -171,6 +189,65 @@ func TestAccountTestService_AnthropicEncodedFable429PersistsModelLimitOnly(t *te
 	require.NotNil(t, repo.modelRateLimitAt)
 	require.True(t, repo.modelRateLimitAt.Equal(resetOI))
 	require.Nil(t, account.RateLimitResetAt)
+}
+
+func TestAccountTestService_AnthropicFableCreditsRequiredPersistsAccessDenial(t *testing.T) {
+	ctx, _ := newTestContext()
+	body := `{"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for this model.","details":{"error_code":"credits_required","model":"claude-fable-5","model_display_name":"Fable 5","disabled_reason":"out_of_credits"}}}`
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{newJSONResponse(http.StatusTooManyRequests, body)},
+	}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          90,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{},
+	}
+
+	err := svc.testClaudeAccountConnection(ctx, account, "claude-fable-5")
+
+	require.Error(t, err)
+	require.Equal(t, int64(90), repo.accessDenialID)
+	require.Equal(t, anthropicFableRateLimitKey, repo.accessDenialScope)
+	require.Equal(t, anthropicFableCreditsRequiredDenialReason, repo.accessDenial.Reason)
+	require.Zero(t, repo.rateLimitedID)
+	require.Zero(t, repo.modelRateLimitedID)
+	require.True(t, account.isModelAccessDeniedWithContext(context.Background(), "claude-fable-5"))
+}
+
+func TestAccountTestService_AnthropicFableSuccessClearsAccessDenial(t *testing.T) {
+	ctx, _ := newTestContext()
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{newJSONResponse(http.StatusOK, "data: {\"type\":\"message_stop\"}\n\n")},
+	}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          91,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra: map[string]any{
+			modelAccessDenialsKey: map[string]any{
+				anthropicFableRateLimitKey: map[string]any{
+					"reason":      anthropicFableCreditsRequiredDenialReason,
+					"observed_at": time.Now().UTC().Format(time.RFC3339),
+				},
+			},
+		},
+	}
+
+	err := svc.testClaudeAccountConnection(ctx, account, "claude-fable-5")
+
+	require.NoError(t, err)
+	require.Equal(t, int64(91), repo.clearedDenialID)
+	require.Equal(t, anthropicFableRateLimitKey, repo.clearedDenialScope)
+	require.False(t, account.isModelAccessDeniedWithContext(context.Background(), "claude-fable-5"))
 }
 
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {

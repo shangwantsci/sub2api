@@ -350,6 +350,30 @@ Fable body 被误写为账号运行时阻断：0
 no available accounts（观察窗口）：Fable > 0，Opus = 0，Haiku = 0
 ```
 
+### Fable `credits_required` 模型访问拒绝发布检查
+
+这类 429 没有 reset，不能按普通窗口限流处理。部署后用一个明确没有 Fable
+credits 的账号在“账号管理 → 测试连接”中测试 `claude-fable-5`，应确认：
+
+- 返回体的 `error.details.error_code=credits_required` 被优先识别；
+- 日志出现 `anthropic_fable_model_access_denied`；
+- 账号仍保持 active/schedulable，且账号级 `rate_limit_reset_at` 不应被写入；
+- Extra 只新增 Fable 模型拒绝：
+
+```sql
+SELECT id, name, status, schedulable, rate_limit_reset_at,
+       extra->'model_access_denials' AS model_access_denials
+FROM accounts
+WHERE id = <ACCOUNT_ID>;
+```
+
+- 后续 Fable 请求不再选择该账号，但 Opus/Haiku/Sonnet 仍可选择；
+- 当前命中 `credits_required` 的请求应产生账号切换，而不是直接把该 429 返回给用户；
+- 为该账号补充 credits 后，再从同一测试入口验证 Fable；测试完整成功后
+  `model_access_denials.claude-fable-5` 应被清除。
+
+该功能无数据库迁移。回滚到旧应用时 Extra 字段会被忽略，无需修改数据库。
+
 ### Anthropic 429 有界 failover 与固定短冷却发布检查
 
 当前生产规则：

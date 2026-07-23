@@ -2303,6 +2303,87 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	return nil
 }
 
+func (r *accountRepository) SetModelAccessDenial(ctx context.Context, id int64, scope string, denial service.ModelAccessDenial) error {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return nil
+	}
+	raw, err := json.Marshal(denial)
+	if err != nil {
+		return err
+	}
+
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(
+		ctx,
+		`UPDATE accounts SET
+			extra = jsonb_set(
+				jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_access_denials}'::text[], COALESCE(extra->'model_access_denials', '{}'::jsonb), true),
+				ARRAY['model_access_denials', $1]::text[],
+				$2::jsonb,
+				true
+			),
+			updated_at = NOW()
+		WHERE id = $3 AND deleted_at IS NULL`,
+		scope,
+		raw,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue model access denial failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
+func (r *accountRepository) ClearModelAccessDenial(ctx context.Context, id int64, scope string) error {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return nil
+	}
+
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(
+		ctx,
+		`UPDATE accounts SET
+			extra = jsonb_set(
+				COALESCE(extra, '{}'::jsonb),
+				'{model_access_denials}'::text[],
+				COALESCE(extra->'model_access_denials', '{}'::jsonb) - $1,
+				true
+			),
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL`,
+		scope,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model access denial failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until time.Time) error {
 	_, err := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).

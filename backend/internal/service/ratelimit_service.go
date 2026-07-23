@@ -373,6 +373,16 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	// otherwise a broad "rate limit" keyword rule can shorten a multi-hour
 	// cooldown to a local temporary pause.
 	if statusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic {
+		requestModel := ""
+		if len(requestedModel) > 0 {
+			requestModel = requestedModel[0]
+		}
+		// Fable 可见但没有可购买/可扣减 credits 的账号会返回结构化
+		// credits_required。这不是有 reset 的窗口限流，而是模型访问能力拒绝：
+		// 持久化到模型级 denial，并让当前请求立即 failover；账号其它模型继续可用。
+		if s.persistAnthropicFableCreditsRequired(ctx, account, requestModel, responseBody) {
+			return true
+		}
 		// 7d_oi 是 Fable 模型专属的 7d 窗口：只标记模型级限流，账号对其他模型仍可调度。
 		fableLimited := s.persistAnthropicFableWindowLimit(ctx, account, headers)
 		fableBodyLimited := s.persistAnthropicFableBodyLimit(ctx, account, responseBody)
@@ -1419,6 +1429,40 @@ type anthropic429BodyPayload struct {
 	Resolved            *anthropic429BodyResolved         `json:"resolved"`
 }
 
+func selectAnthropicFableCreditsRequired(body []byte, requestedModel string, now time.Time) *ModelAccessDenial {
+	errorCode := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.details.error_code").String()))
+	disabledReason := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.details.disabled_reason").String()))
+	detailModel := strings.TrimSpace(gjson.GetBytes(body, "error.details.model").String())
+	message := strings.TrimSpace(extractUpstreamErrorMessage(body))
+
+	if detailModel != "" {
+		if !isAnthropicFableModel(detailModel) {
+			return nil
+		}
+	} else if !isAnthropicFableModel(requestedModel) {
+		return nil
+	}
+
+	structuredMatch := errorCode == "credits_required"
+	legacyMessageMatch := strings.EqualFold(strings.TrimSuffix(message, "."), "Usage credits are required for this model")
+	if !structuredMatch && !legacyMessageMatch {
+		return nil
+	}
+
+	model := detailModel
+	if model == "" {
+		model = strings.TrimSpace(requestedModel)
+	}
+	return &ModelAccessDenial{
+		Reason:           anthropicFableCreditsRequiredDenialReason,
+		ErrorCode:        errorCode,
+		DisabledReason:   disabledReason,
+		Model:            model,
+		ModelDisplayName: strings.TrimSpace(gjson.GetBytes(body, "error.details.model_display_name").String()),
+		ObservedAt:       now.UTC().Format(time.RFC3339),
+	}
+}
+
 // selectAnthropicFableWindowLimitFromBody parses body-only 7d_oi exhaustion.
 // This signal is model-scoped: it must pause only the Fable family, never the
 // whole account.
@@ -1883,6 +1927,36 @@ func selectAnthropicFableWindowLimit(headers http.Header, now time.Time) *anthro
 		resetAt: resetAt,
 		reason:  anthropicFableWindowReason,
 	}
+}
+
+func (s *RateLimitService) persistAnthropicFableCreditsRequired(
+	ctx context.Context,
+	account *Account,
+	requestedModel string,
+	responseBody []byte,
+) bool {
+	if s == nil || s.accountRepo == nil || account == nil || account.Platform != PlatformAnthropic {
+		return false
+	}
+	denial := selectAnthropicFableCreditsRequired(responseBody, requestedModel, time.Now())
+	if denial == nil {
+		return false
+	}
+	if err := persistModelAccessDenial(ctx, s.accountRepo, account, anthropicFableRateLimitKey, *denial); err != nil {
+		slog.Warn("anthropic_fable_credits_required_persist_failed",
+			"account_id", account.ID,
+			"scope", anthropicFableRateLimitKey,
+			"error", err)
+	} else {
+		slog.Info("anthropic_fable_model_access_denied",
+			"account_id", account.ID,
+			"scope", anthropicFableRateLimitKey,
+			"reason", denial.Reason,
+			"disabled_reason", denial.DisabledReason)
+	}
+	// 即使持久化暂时失败，当前请求也应切换账号，不能把明确不可用的
+	// Fable 请求继续作为普通 429 返回或在同一账号上重试。
+	return true
 }
 
 // parseAnthropicAggregateReset parses the aggregated

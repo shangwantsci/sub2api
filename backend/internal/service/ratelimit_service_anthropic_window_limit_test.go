@@ -23,6 +23,9 @@ type anthropicWindowLimitRepo struct {
 	lastModelRateLimitReset time.Time
 	sessionWindowCalls      int
 	lastExtraUpdates        map[string]any
+	modelAccessDenialCalls  int
+	modelAccessDenialScope  string
+	modelAccessDenial       ModelAccessDenial
 }
 
 func (r *anthropicWindowLimitRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
@@ -51,6 +54,65 @@ func (r *anthropicWindowLimitRepo) UpdateSessionWindow(_ context.Context, _ int6
 func (r *anthropicWindowLimitRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.lastExtraUpdates = updates
 	return nil
+}
+
+func (r *anthropicWindowLimitRepo) SetModelAccessDenial(_ context.Context, _ int64, scope string, denial ModelAccessDenial) error {
+	r.modelAccessDenialCalls++
+	r.modelAccessDenialScope = scope
+	r.modelAccessDenial = denial
+	return nil
+}
+
+func (r *anthropicWindowLimitRepo) ClearModelAccessDenial(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
+func TestHandleUpstreamError_AnthropicFableCreditsRequiredPersistsModelDenialAndFailovers(t *testing.T) {
+	body := []byte(`{
+		"type":"error",
+		"error":{
+			"type":"rate_limit_error",
+			"message":"Usage credits are required for this model.",
+			"details":{
+				"error_code":"credits_required",
+				"model":"claude-fable-5",
+				"model_display_name":"Fable 5",
+				"disabled_reason":"out_of_credits",
+				"exhausted_included_allowance":false
+			}
+		}
+	}`)
+	repo := &anthropicWindowLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       42,
+		Type:     AccountTypeOAuth,
+		Platform: PlatformAnthropic,
+		Extra:    map[string]any{},
+	}
+
+	shouldFailover := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		http.Header{},
+		body,
+		"claude-fable-5",
+	)
+
+	require.True(t, shouldFailover)
+	require.Equal(t, 1, repo.modelAccessDenialCalls)
+	require.Equal(t, anthropicFableRateLimitKey, repo.modelAccessDenialScope)
+	require.Equal(t, anthropicFableCreditsRequiredDenialReason, repo.modelAccessDenial.Reason)
+	require.Equal(t, "credits_required", repo.modelAccessDenial.ErrorCode)
+	require.Equal(t, "out_of_credits", repo.modelAccessDenial.DisabledReason)
+	require.Equal(t, "claude-fable-5", repo.modelAccessDenial.Model)
+	require.True(t, account.isModelAccessDeniedWithContext(context.Background(), "claude-fable-5"))
+	require.True(t, account.isModelAccessDeniedWithContext(context.Background(), "claude-fable-5[1m]"))
+	require.False(t, account.isModelAccessDeniedWithContext(context.Background(), "claude-sonnet-4-6"))
+	require.Zero(t, repo.rateLimitCalls, "credits_required must not rate-limit the whole account")
+	require.Zero(t, repo.modelRateLimitCalls, "credits_required has no reset time and must not use model_rate_limits")
+	require.Zero(t, repo.tempUnschedCalls)
 }
 
 func TestHandleUpstreamError_AnthropicWindowLimitPreemptsTempUnschedRule(t *testing.T) {
