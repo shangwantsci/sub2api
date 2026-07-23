@@ -233,7 +233,7 @@ func (Group) Fields() []ent.Field {
 		field.String("claude_oauth_system_prompt_policy").
 			MaxLen(16).
 			Default("inherit").
-			Comment("Anthropic 分组 Claude OAuth system prompt 注入策略：inherit, enabled, disabled"),
+			Comment("Anthropic 分组 Claude OAuth system prompt 注入策略：inherit, enabled, identity_only, disabled"),
 	}
 }
 

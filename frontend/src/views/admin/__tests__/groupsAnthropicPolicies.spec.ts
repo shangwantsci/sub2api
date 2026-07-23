@@ -37,13 +37,22 @@ describe("groups Anthropic policies", () => {
       'content_review_policy: "inherit" as GroupPolicy',
     );
     expect(groupsViewSource).toContain(
-      'claude_oauth_system_prompt_policy: "inherit" as GroupPolicy',
+      'claude_oauth_system_prompt_policy: "inherit" as ClaudeOAuthSystemPromptPolicy',
     );
     expect(groupsViewSource).toContain(
       'createForm.content_review_policy = "inherit"',
     );
     expect(groupsViewSource).toContain(
       'editForm.content_review_policy = "inherit"',
+    );
+  });
+
+  it("offers identity-only mode only for Claude OAuth system injection", () => {
+    expect(
+      groupsViewSource.match(/<option value="identity_only">/g),
+    ).toHaveLength(2);
+    expect(groupsViewSource).toContain(
+      'admin.groups.anthropicPolicies.identityOnly',
     );
   });
 });

@@ -296,6 +296,27 @@ docker exec sub2api /app/sub2api --version
 Sub2API 0.1.156 (commit: e4fad61d, built: ...)
 ```
 
+### Anthropic 分组 `identity_only` 发布检查
+
+该模式只影响 OAuth/SetupToken + 非真实 Claude Code 客户端，不影响真实 Claude Code
+和 Anthropic API-key 透传。部署后应确认：
+
+- 管理后台创建/编辑 Anthropic 分组时，System 注入下拉框包含
+  “仅必要身份（<200 tokens）”，内容审查下拉框不包含该选项；
+- 保存后 API 返回
+  `claude_oauth_system_prompt_policy=identity_only`，重新打开编辑框仍保持该值；
+- `/v1/messages` 与 `/v1/messages/count_tokens` 的最终 system 数组都只有两块：
+  动态 `x-anthropic-billing-header` 和固定 Agent SDK 身份；
+- 最终 body 不包含标准/Fable 长扩展提示词；
+- Mimicry Guard 为 `block` 时，两块模式仍能通过 guard；缺 billing 或身份任一块仍应阻断；
+- 项目 tokenizer 对增量文本计数 `<200`（两块约 41，连同 system 迁移辅助文本
+  当前实测约 53），前端生产 build 和相关后端单元测试均通过。
+
+该模式通过 `179_expand_claude_oauth_system_prompt_policy.sql` 扩展既有 CHECK
+constraint，不新增列。数据库约束无需随应用回滚；旧应用遇到该值会归一为
+`inherit`，因此应用回滚前应先将使用该模式的分组改回 `inherit` 或 `disabled`，
+避免回滚后语义变化。
+
 ### Claude Chrome OAuth 401 自动恢复发布检查
 
 这类修复不能只看容器 healthy。还应确认：

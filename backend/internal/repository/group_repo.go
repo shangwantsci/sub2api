@@ -38,7 +38,7 @@ func newGroupRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *groupRep
 
 func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) error {
 	groupIn.ContentReviewPolicy = service.NormalizeGroupPolicy(groupIn.ContentReviewPolicy)
-	groupIn.ClaudeOAuthSystemPromptPolicy = service.NormalizeGroupPolicy(groupIn.ClaudeOAuthSystemPromptPolicy)
+	groupIn.ClaudeOAuthSystemPromptPolicy = service.NormalizeClaudeOAuthSystemPromptPolicy(groupIn.ClaudeOAuthSystemPromptPolicy)
 	builder := r.client.Group.Create().
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -137,7 +137,7 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
 	groupIn.ContentReviewPolicy = service.NormalizeGroupPolicy(groupIn.ContentReviewPolicy)
-	groupIn.ClaudeOAuthSystemPromptPolicy = service.NormalizeGroupPolicy(groupIn.ClaudeOAuthSystemPromptPolicy)
+	groupIn.ClaudeOAuthSystemPromptPolicy = service.NormalizeClaudeOAuthSystemPromptPolicy(groupIn.ClaudeOAuthSystemPromptPolicy)
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).

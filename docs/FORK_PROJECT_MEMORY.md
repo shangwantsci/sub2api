@@ -274,18 +274,24 @@ POST /api/v1/admin/accounts/:id/refresh-cookie-auth
 
 ### 4.8 Anthropic 分组级客户策略
 
-Anthropic 分组新增两个三态策略：
+Anthropic 分组客户策略：
 
 ```text
-inherit
-enabled
-disabled
+content_review_policy:
+  inherit | enabled | disabled
+
+claude_oauth_system_prompt_policy:
+  inherit | enabled | identity_only | disabled
 ```
 
 - `content_review_policy`：同时控制本地 `ContentSafetyGuard` 与风控中心
   `ContentModeration` 的分组参与状态；
 - `claude_oauth_system_prompt_policy`：控制第三方客户端经 Anthropic
   OAuth/SetupToken mimic 路径时是否注入 Claude Code system blocks；
+- `identity_only` 强制只注入动态 billing attribution 与固定 Claude Code Agent SDK
+  身份两块，不注入标准/Fable 长扩展提示词；项目 `cl100k` tokenizer 实测两块文本
+  合计约 41 tokens，连同 system 迁移辅助文本的增量约 53 tokens，并由单元测试
+  约束为 `<200`；
 - 存量分组默认 `inherit`，继续沿用全局设置，升级不改变既有行为；
 - 非 Anthropic 分组强制归一为 `inherit`；
 - `enabled` 可覆盖全局 enable 开关或风控分组范围，但审查模式、关键词、阈值和
@@ -293,6 +299,10 @@ disabled
 - `disabled` 会跳过两层内容审查；Anthropic 上游自身的安全策略不受影响；
 - 关闭 system 注入不会影响真实 Claude Code 客户端或 Anthropic API-key 透传，
   只影响 OAuth/SetupToken + 非真实 Claude Code 客户端；
+- `identity_only` 的 `/v1/messages` 与 `/messages/count_tokens` 使用相同两块形态；
+  Mimicry Guard 会继续严格检查 billing、身份、metadata、headers 与 betas，但该模式
+  的合法 system block 数必须恰好为 2，`count_tokens` 遇到已有第三块时也会重建为
+  两块；
 - Mimicry Guard 为 `warn` 时，关闭注入只记录伪装 findings，不阻断请求；
 - API Key auth cache schema 已升级到 v17，分组修改后会主动失效对应认证缓存。
 - API Key 认证使用 Ent 精简 SELECT；新增分组运行时字段时必须同步加入
@@ -313,6 +323,12 @@ HTTP: 200
 
 ```text
 backend/migrations/178_add_anthropic_group_policies.sql
+```
+
+`identity_only` 复用既有 `VARCHAR(16)` 策略列，但需要扩展数据库 CHECK constraint：
+
+```text
+backend/migrations/179_expand_claude_oauth_system_prompt_policy.sql
 ```
 
 ### 4.9 Anthropic 429 响应体分层限流

@@ -134,7 +134,7 @@ type CreateGroupRequest struct {
 	AnthropicSetupTokenPoolWeight   *int   `json:"anthropic_setup_token_pool_weight"`
 	AnthropicAPIKeyPoolWeight       *int   `json:"anthropic_api_key_pool_weight"`
 	ContentReviewPolicy             string `json:"content_review_policy" binding:"omitempty,oneof=inherit enabled disabled"`
-	ClaudeOAuthSystemPromptPolicy   string `json:"claude_oauth_system_prompt_policy" binding:"omitempty,oneof=inherit enabled disabled"`
+	ClaudeOAuthSystemPromptPolicy   string `json:"claude_oauth_system_prompt_policy" binding:"omitempty,oneof=inherit enabled identity_only disabled"`
 	// 从指定分组复制账号（创建后自动绑定）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -194,7 +194,7 @@ type UpdateGroupRequest struct {
 	AnthropicSetupTokenPoolWeight   *int    `json:"anthropic_setup_token_pool_weight"`
 	AnthropicAPIKeyPoolWeight       *int    `json:"anthropic_api_key_pool_weight"`
 	ContentReviewPolicy             *string `json:"content_review_policy" binding:"omitempty,oneof=inherit enabled disabled"`
-	ClaudeOAuthSystemPromptPolicy   *string `json:"claude_oauth_system_prompt_policy" binding:"omitempty,oneof=inherit enabled disabled"`
+	ClaudeOAuthSystemPromptPolicy   *string `json:"claude_oauth_system_prompt_policy" binding:"omitempty,oneof=inherit enabled identity_only disabled"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }

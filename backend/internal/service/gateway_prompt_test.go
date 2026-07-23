@@ -1,13 +1,16 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tiktoken-go/tokenizer"
 )
 
 func TestIsClaudeCodeClient(t *testing.T) {
@@ -583,4 +586,51 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_AutoCacheControlFollowsRe
 
 	migratedInstructionBlock := gjson.GetBytes(result, "messages.0.content.0")
 	require.Equal(t, "1h", migratedInstructionBlock.Get("cache_control.ttl").String())
+}
+
+func TestClaudeOAuthIdentityOnlyPromptIsAppliedAndUnderTwoHundredTokens(t *testing.T) {
+	svc := &GatewayService{}
+	group := &Group{
+		ID:                            14,
+		Platform:                      PlatformAnthropic,
+		Status:                        StatusActive,
+		Hydrated:                      true,
+		ClaudeOAuthSystemPromptPolicy: GroupPolicyIdentityOnly,
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	mode, prompt, blocks := svc.claudeOAuthSystemPromptInjectionSettings(ctx)
+	require.Equal(t, claudeOAuthSystemPromptModeIdentityOnly, mode)
+	require.True(t, mode.validSystemBlockCount(2))
+	require.False(t, mode.validSystemBlockCount(3))
+
+	body := []byte(`{"model":"claude-fable-5","system":"Customer instructions","messages":[{"role":"user","content":"hello"}]}`)
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, "Customer instructions", prompt, blocks)
+	system := gjson.GetBytes(result, "system")
+	require.True(t, system.IsArray())
+	require.Len(t, system.Array(), 2)
+	require.Contains(t, system.Array()[0].Get("text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, system.Array()[1].Get("text").String())
+	require.NotContains(t, string(result), strings.TrimSpace(claudeCodeFableSystemPromptExpansion))
+
+	codec, err := tokenizer.Get(tokenizer.Cl100kBase)
+	require.NoError(t, err)
+	incrementalText := strings.Join([]string{
+		system.Array()[0].Get("text").String(),
+		system.Array()[1].Get("text").String(),
+		"[System Instructions]",
+		"Understood. I will follow these instructions.",
+	}, "\n")
+	count, err := codec.Count(incrementalText)
+	require.NoError(t, err)
+	t.Logf("identity-only incremental tokens=%d", count)
+	require.Less(t, count, 200)
+
+	countTokensBody := svc.ensureClaudeOAuthMimicCountTokensSystemBody(ctx, result)
+	require.JSONEq(t, string(result), string(countTokensBody))
+
+	fullBody := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, "Customer instructions", "", "")
+	require.Len(t, gjson.GetBytes(fullBody, "system").Array(), 3)
+	trimmedCountTokensBody := svc.ensureClaudeOAuthMimicCountTokensSystemBody(ctx, fullBody)
+	require.Len(t, gjson.GetBytes(trimmedCountTokensBody, "system").Array(), 2)
+	require.NotContains(t, string(trimmedCountTokensBody), strings.TrimSpace(claudeCodeFableSystemPromptExpansion))
 }

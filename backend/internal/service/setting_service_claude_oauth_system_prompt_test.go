@@ -80,12 +80,14 @@ func TestGatewayService_ClaudeOAuthSystemPromptInjectionUsesAnthropicGroupPolicy
 		name          string
 		globalEnabled string
 		policy        string
-		wantEnabled   bool
+		wantMode      claudeOAuthSystemPromptMode
+		wantBlocks    string
 	}{
-		{name: "inherits enabled global", globalEnabled: "true", policy: GroupPolicyInherit, wantEnabled: true},
-		{name: "inherits disabled global", globalEnabled: "false", policy: GroupPolicyInherit, wantEnabled: false},
-		{name: "group disables enabled global", globalEnabled: "true", policy: GroupPolicyDisabled, wantEnabled: false},
-		{name: "group enables disabled global", globalEnabled: "false", policy: GroupPolicyEnabled, wantEnabled: true},
+		{name: "inherits enabled global", globalEnabled: "true", policy: GroupPolicyInherit, wantMode: claudeOAuthSystemPromptModeFull},
+		{name: "inherits disabled global", globalEnabled: "false", policy: GroupPolicyInherit, wantMode: claudeOAuthSystemPromptModeDisabled},
+		{name: "group disables enabled global", globalEnabled: "true", policy: GroupPolicyDisabled, wantMode: claudeOAuthSystemPromptModeDisabled},
+		{name: "group enables disabled global", globalEnabled: "false", policy: GroupPolicyEnabled, wantMode: claudeOAuthSystemPromptModeFull},
+		{name: "group identity only overrides global", globalEnabled: "false", policy: GroupPolicyIdentityOnly, wantMode: claudeOAuthSystemPromptModeIdentityOnly, wantBlocks: claudeOAuthIdentityOnlyBlocksConfig},
 	}
 
 	for _, tt := range tests {
@@ -104,9 +106,10 @@ func TestGatewayService_ClaudeOAuthSystemPromptInjectionUsesAnthropicGroupPolicy
 			}
 			ctx := context.WithValue(context.Background(), ctxkey.Group, group)
 
-			enabled, _, _ := svc.claudeOAuthSystemPromptInjectionSettings(ctx)
+			mode, _, blocks := svc.claudeOAuthSystemPromptInjectionSettings(ctx)
 
-			require.Equal(t, tt.wantEnabled, enabled)
+			require.Equal(t, tt.wantMode, mode)
+			require.Equal(t, tt.wantBlocks, blocks)
 		})
 	}
 }

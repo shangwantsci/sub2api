@@ -1365,13 +1365,16 @@
               </div>
               <select
                 v-model="createForm.claude_oauth_system_prompt_policy"
-                class="input w-32 flex-shrink-0 text-sm"
+                class="input w-40 flex-shrink-0 text-sm"
               >
                 <option value="inherit">
                   {{ t("admin.groups.anthropicPolicies.inherit") }}
                 </option>
                 <option value="enabled">
                   {{ t("admin.groups.anthropicPolicies.enabled") }}
+                </option>
+                <option value="identity_only">
+                  {{ t("admin.groups.anthropicPolicies.identityOnly") }}
                 </option>
                 <option value="disabled">
                   {{ t("admin.groups.anthropicPolicies.disabled") }}
@@ -3007,13 +3010,16 @@
               </div>
               <select
                 v-model="editForm.claude_oauth_system_prompt_policy"
-                class="input w-32 flex-shrink-0 text-sm"
+                class="input w-40 flex-shrink-0 text-sm"
               >
                 <option value="inherit">
                   {{ t("admin.groups.anthropicPolicies.inherit") }}
                 </option>
                 <option value="enabled">
                   {{ t("admin.groups.anthropicPolicies.enabled") }}
+                </option>
+                <option value="identity_only">
+                  {{ t("admin.groups.anthropicPolicies.identityOnly") }}
                 </option>
                 <option value="disabled">
                   {{ t("admin.groups.anthropicPolicies.disabled") }}
@@ -3833,6 +3839,7 @@ import { adminAPI } from "@/api/admin";
 import { extractApiErrorMessage } from "@/utils/apiError";
 import type {
   AdminGroup,
+  ClaudeOAuthSystemPromptPolicy,
   GroupPlatform,
   GroupPolicy,
   SubscriptionType,
@@ -4309,7 +4316,7 @@ const createForm = reactive({
   anthropic_setup_token_pool_weight: 100,
   anthropic_api_key_pool_weight: 0,
   content_review_policy: "inherit" as GroupPolicy,
-  claude_oauth_system_prompt_policy: "inherit" as GroupPolicy,
+  claude_oauth_system_prompt_policy: "inherit" as ClaudeOAuthSystemPromptPolicy,
   // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   // MCP XML 协议注入开关（仅 antigravity 平台）
@@ -4663,7 +4670,7 @@ const editForm = reactive({
   anthropic_setup_token_pool_weight: 100,
   anthropic_api_key_pool_weight: 0,
   content_review_policy: "inherit" as GroupPolicy,
-  claude_oauth_system_prompt_policy: "inherit" as GroupPolicy,
+  claude_oauth_system_prompt_policy: "inherit" as ClaudeOAuthSystemPromptPolicy,
   // 支持的模型系列（仅 antigravity 平台）
   supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
   // MCP XML 协议注入开关（仅 antigravity 平台）

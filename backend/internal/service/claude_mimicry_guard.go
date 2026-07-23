@@ -71,7 +71,15 @@ func (s *GatewayService) enforceClaudeMimicryGuard(ctx context.Context, req *htt
 			profile.MessageBetas = betas
 		}
 	}
-	audit := evaluateClaudeMimicryGuard(req, body, profile, guardMode)
+	systemPromptMode, _, _ := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+	audit := evaluateClaudeMimicryGuard(
+		req,
+		body,
+		profile,
+		guardMode,
+		systemPromptMode.minimumSystemBlocks(),
+		systemPromptMode == claudeOAuthSystemPromptModeIdentityOnly,
+	)
 	if !audit.OK {
 		accountID := int64(0)
 		if account != nil {
@@ -93,7 +101,14 @@ func (s *GatewayService) enforceClaudeMimicryGuard(ctx context.Context, req *htt
 	return nil
 }
 
-func evaluateClaudeMimicryGuard(req *http.Request, body []byte, profile claude.ClaudeCodeMimicryProfile, mode string) claudeMimicryAuditResult {
+func evaluateClaudeMimicryGuard(
+	req *http.Request,
+	body []byte,
+	profile claude.ClaudeCodeMimicryProfile,
+	mode string,
+	minimumSystemBlocks int,
+	exactSystemBlockCount bool,
+) claudeMimicryAuditResult {
 	mode = normalizeClaudeMimicryGuardMode(mode)
 	if mode == claudeMimicryGuardOff {
 		return claudeMimicryAuditResult{OK: true}
@@ -144,7 +159,11 @@ func evaluateClaudeMimicryGuard(req *http.Request, body []byte, profile claude.C
 		add("missing_system_blocks")
 	} else {
 		systemBlocks := system.Array()
-		if len(systemBlocks) < 3 {
+		if minimumSystemBlocks <= 0 {
+			minimumSystemBlocks = 3
+		}
+		if len(systemBlocks) < minimumSystemBlocks ||
+			(exactSystemBlockCount && len(systemBlocks) != minimumSystemBlocks) {
 			add("system_block_count")
 		}
 		billingFound := false

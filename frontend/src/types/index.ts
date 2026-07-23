@@ -496,6 +496,7 @@ export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 
 
 export type SubscriptionType = 'standard' | 'subscription'
 export type GroupPolicy = 'inherit' | 'enabled' | 'disabled'
+export type ClaudeOAuthSystemPromptPolicy = GroupPolicy | 'identity_only'
 
 export interface OpenAIMessagesDispatchModelConfig {
   opus_mapped_model?: string
@@ -561,7 +562,7 @@ export interface AdminGroup extends Group {
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
   content_review_policy: GroupPolicy
-  claude_oauth_system_prompt_policy: GroupPolicy
+  claude_oauth_system_prompt_policy: ClaudeOAuthSystemPromptPolicy
 
   // MCP XML 协议注入（仅 antigravity 平台使用）
   mcp_xml_inject: boolean
@@ -695,7 +696,7 @@ export interface CreateGroupRequest {
   anthropic_setup_token_pool_weight?: number
   anthropic_api_key_pool_weight?: number
   content_review_policy?: GroupPolicy
-  claude_oauth_system_prompt_policy?: GroupPolicy
+  claude_oauth_system_prompt_policy?: ClaudeOAuthSystemPromptPolicy
   // 从指定分组复制账号
   copy_accounts_from_group_ids?: number[]
 }
@@ -748,7 +749,7 @@ export interface UpdateGroupRequest {
   anthropic_setup_token_pool_weight?: number
   anthropic_api_key_pool_weight?: number
   content_review_policy?: GroupPolicy
-  claude_oauth_system_prompt_policy?: GroupPolicy
+  claude_oauth_system_prompt_policy?: ClaudeOAuthSystemPromptPolicy
   copy_accounts_from_group_ids?: number[]
 }
 

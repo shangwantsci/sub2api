@@ -269,12 +269,12 @@ func TestAdminService_CreateGroup_AppliesAnthropicPolicies(t *testing.T) {
 		Platform:                      PlatformAnthropic,
 		RateMultiplier:                1.0,
 		ContentReviewPolicy:           GroupPolicyDisabled,
-		ClaudeOAuthSystemPromptPolicy: GroupPolicyEnabled,
+		ClaudeOAuthSystemPromptPolicy: GroupPolicyIdentityOnly,
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, GroupPolicyDisabled, group.ContentReviewPolicy)
-	require.Equal(t, GroupPolicyEnabled, group.ClaudeOAuthSystemPromptPolicy)
+	require.Equal(t, GroupPolicyIdentityOnly, group.ClaudeOAuthSystemPromptPolicy)
 }
 
 func TestAdminService_CreateGroup_ResetsAnthropicPoliciesForOtherPlatforms(t *testing.T) {

@@ -31,9 +31,11 @@ func TestAnthropicGroupPoliciesNormalizeStoredValues(t *testing.T) {
 	group := &Group{
 		Platform:                      PlatformAnthropic,
 		ContentReviewPolicy:           " ENABLED ",
-		ClaudeOAuthSystemPromptPolicy: "disabled",
+		ClaudeOAuthSystemPromptPolicy: " IDENTITY_ONLY ",
 	}
 
 	require.Equal(t, GroupPolicyEnabled, group.AnthropicContentReviewPolicy())
-	require.Equal(t, GroupPolicyDisabled, group.AnthropicClaudeOAuthSystemPromptPolicy())
+	require.Equal(t, GroupPolicyIdentityOnly, group.AnthropicClaudeOAuthSystemPromptPolicy())
+	require.True(t, IsValidClaudeOAuthSystemPromptPolicy(GroupPolicyIdentityOnly))
+	require.False(t, IsValidGroupPolicy(GroupPolicyIdentityOnly), "content-review policy must remain three-state")
 }

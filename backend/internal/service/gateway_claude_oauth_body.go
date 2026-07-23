@@ -548,9 +548,9 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		return body
 	}
 
-	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+	systemPromptMode, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	systemRewritten := false
-	if systemPromptInjectionEnabled {
+	if systemPromptMode.enabled() {
 		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks)
 		systemRewritten = true
 	}
@@ -1236,9 +1236,9 @@ func systemValueFromBody(body []byte) any {
 	return value
 }
 
-func hasClaudeOAuthMimicSystemBlocks(body []byte) bool {
+func hasClaudeOAuthMimicSystemBlocks(body []byte, mode claudeOAuthSystemPromptMode) bool {
 	system := gjson.GetBytes(body, "system")
-	if !system.IsArray() || len(system.Array()) < 3 {
+	if !system.IsArray() || !mode.validSystemBlockCount(len(system.Array())) {
 		return false
 	}
 
@@ -1260,11 +1260,11 @@ func hasClaudeOAuthMimicSystemBlocks(body []byte) bool {
 }
 
 func (s *GatewayService) ensureClaudeOAuthMimicCountTokensSystemBody(ctx context.Context, body []byte) []byte {
-	if len(body) == 0 || hasClaudeOAuthMimicSystemBlocks(body) {
+	if len(body) == 0 {
 		return body
 	}
-	enabled, prompt, blocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
-	if !enabled {
+	mode, prompt, blocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+	if !mode.enabled() || hasClaudeOAuthMimicSystemBlocks(body, mode) {
 		return body
 	}
 	return rewriteSystemForNonClaudeCodeWithPromptBlocksMode(
@@ -1537,13 +1537,51 @@ func (s *GatewayService) normalizeClientDatelineIfEnabled(ctx context.Context, a
 	return next, true
 }
 
-func (s *GatewayService) claudeOAuthSystemPromptInjectionSettings(ctx context.Context) (bool, string, string) {
+type claudeOAuthSystemPromptMode string
+
+const (
+	claudeOAuthSystemPromptModeDisabled     claudeOAuthSystemPromptMode = "disabled"
+	claudeOAuthSystemPromptModeFull         claudeOAuthSystemPromptMode = "full"
+	claudeOAuthSystemPromptModeIdentityOnly claudeOAuthSystemPromptMode = "identity_only"
+	claudeOAuthIdentityOnlyBlocksConfig                                 = `[{"type":"text","text":"{billing_header}"},{"type":"text","text":"{claude_code_system_prompt}"}]`
+)
+
+func (m claudeOAuthSystemPromptMode) enabled() bool {
+	return m != claudeOAuthSystemPromptModeDisabled
+}
+
+func (m claudeOAuthSystemPromptMode) minimumSystemBlocks() int {
+	if m == claudeOAuthSystemPromptModeIdentityOnly {
+		return 2
+	}
+	return 3
+}
+
+func (m claudeOAuthSystemPromptMode) validSystemBlockCount(count int) bool {
+	if m == claudeOAuthSystemPromptModeIdentityOnly {
+		return count == 2
+	}
+	return count >= m.minimumSystemBlocks()
+}
+
+func (s *GatewayService) claudeOAuthSystemPromptInjectionSettings(ctx context.Context) (claudeOAuthSystemPromptMode, string, string) {
 	enabled, prompt, blocks := true, "", ""
 	if s != nil && s.settingService != nil {
 		enabled, prompt, blocks = s.settingService.GetClaudeOAuthSystemPromptInjectionSettings(ctx)
 	}
-	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) {
-		enabled = ResolveGroupPolicy(enabled, group.AnthropicClaudeOAuthSystemPromptPolicy())
+	mode := claudeOAuthSystemPromptModeFull
+	if !enabled {
+		mode = claudeOAuthSystemPromptModeDisabled
 	}
-	return enabled, prompt, blocks
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) {
+		switch group.AnthropicClaudeOAuthSystemPromptPolicy() {
+		case GroupPolicyEnabled:
+			mode = claudeOAuthSystemPromptModeFull
+		case GroupPolicyIdentityOnly:
+			return claudeOAuthSystemPromptModeIdentityOnly, "", claudeOAuthIdentityOnlyBlocksConfig
+		case GroupPolicyDisabled:
+			mode = claudeOAuthSystemPromptModeDisabled
+		}
+	}
+	return mode, prompt, blocks
 }

@@ -977,9 +977,10 @@ export default {
         contentReview: 'Content Safety and Keyword Review',
         contentReviewHint: 'Controls local safety checks and risk-control moderation. Enabled groups still use the global mode, keywords, and thresholds.',
         systemPrompt: 'Claude OAuth System Injection',
-        systemPromptHint: 'Only affects third-party clients using the OAuth/SetupToken mimic path. Disabling reduces injected tokens but weakens Claude Code mimicry consistency.',
+        systemPromptHint: 'Only affects third-party clients using the OAuth/SetupToken mimic path. Identity only injects the dynamic billing and Claude Code identity blocks without the long expansion prompt.',
         inherit: 'Inherit Global',
         enabled: 'Enabled',
+        identityOnly: 'Identity Only (<200 tokens)',
         disabled: 'Disabled'
       },
       openaiMessages: {

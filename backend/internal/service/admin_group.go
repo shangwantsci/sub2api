@@ -142,10 +142,10 @@ func normalizeAnthropicGroupPolicies(platform, contentReviewPolicy, systemPrompt
 	if !IsValidGroupPolicy(contentReviewPolicy) {
 		return "", "", errors.New("content_review_policy must be inherit, enabled, or disabled")
 	}
-	if !IsValidGroupPolicy(systemPromptPolicy) {
-		return "", "", errors.New("claude_oauth_system_prompt_policy must be inherit, enabled, or disabled")
+	if !IsValidClaudeOAuthSystemPromptPolicy(systemPromptPolicy) {
+		return "", "", errors.New("claude_oauth_system_prompt_policy must be inherit, enabled, identity_only, or disabled")
 	}
-	return NormalizeGroupPolicy(contentReviewPolicy), NormalizeGroupPolicy(systemPromptPolicy), nil
+	return NormalizeGroupPolicy(contentReviewPolicy), NormalizeClaudeOAuthSystemPromptPolicy(systemPromptPolicy), nil
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -117,6 +118,41 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestUsesCaptured
 			require.False(t, gjson.GetBytes(recorder.requests[0].body, "fallbacks").Exists())
 		})
 	}
+}
+
+func TestGatewayService_ClaudeOAuthIdentityOnlyMessagesWireHasTwoSmallBlocks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := &sequentialClaudeWireRecorder{
+		responses: []*http.Response{claudeWireMessageOKResponse()},
+	}
+	svc := newClaudeWireGatewayService(t, recorder)
+	svc.settingService = NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+		SettingKeyClaudeMimicryGuardMode: "block",
+	}}, &config.Config{})
+	account := claudeWireOAuthAccount()
+	c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages?beta=true")
+	body := []byte(`{"model":"claude-fable-5","system":"project rules","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	parsed := mustParseClaudeWireRequest(t, body)
+	group := &Group{
+		ID:                            14,
+		Platform:                      PlatformAnthropic,
+		Status:                        StatusActive,
+		Hydrated:                      true,
+		ClaudeOAuthSystemPromptPolicy: GroupPolicyIdentityOnly,
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+
+	result, err := svc.Forward(ctx, c, account, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, recorder.requests, 1)
+	system := gjson.GetBytes(recorder.requests[0].body, "system").Array()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].Get("text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, system[1].Get("text").String())
+	require.NotContains(t, string(recorder.requests[0].body), strings.TrimSpace(claudeCodeFableSystemPromptExpansion))
+	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "project rules", "hello")
 }
 
 func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestWithoutSystemUsesFinalUserFingerprint(t *testing.T) {
