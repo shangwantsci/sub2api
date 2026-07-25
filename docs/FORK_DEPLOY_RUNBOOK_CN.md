@@ -1,5 +1,17 @@
 # sub2api 二开提交、推送、部署流程
 
+> **适用分支：`custom/prod`（二开生产线）。这是日常主力分支。**
+>
+> 本仓库还有一条 `custom/company` 公司内部部署线，它的流程与本文**完全不同**
+> （不推 GHCR、镜像走 artifact + `docker load`、无域名），运维文档是只存在于该
+> 分支的 `FORK_COMPANY_DEPLOY_CN.md`。两条线的对照见
+> `FORK_PROJECT_MEMORY.md` 第 2.3 节。
+>
+> 动手前先确认：`git branch --show-current`
+>
+> **不要用本文的 `custom_image_only` 流程构建 `custom/company`** —— 两个分支的
+> `VERSION` 都是 `0.1.156`，那样会把生产正在拉取的 GHCR 可变 tag 覆盖成公司镜像。
+
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
 > 最近验证：2026-07-25 已按本流程部署 `0.1.156-8782b30f`，GitHub Actions

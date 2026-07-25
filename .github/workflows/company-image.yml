@@ -9,17 +9,16 @@ name: Company Image
 # Transfer path: gh run download -> scp -> docker load on the company server.
 # The company server therefore never needs registry credentials.
 
-# BOOTSTRAP ONLY -- remove the `push` trigger after the first successful run.
-# GitHub refuses to dispatch a workflow_dispatch workflow that has never run and
-# does not exist on the default branch, and this file is deliberately kept off
-# `main` so it cannot interfere with release.yml's calibration schedule. Pushing
-# once with this trigger registers the workflow (and produces the first image);
-# afterwards `gh workflow run company-image.yml --ref custom/company` works and
-# this trigger should be deleted so ordinary branch pushes stop rebuilding.
+# Manual only. This file is deliberately kept off the default branch so it can
+# never interfere with release.yml's calibration schedule; the temporary `push`
+# trigger that was needed to register it with GitHub was removed after the
+# 2026-07-25 bootstrap run. Trigger it with:
+#
+#   gh workflow run company-image.yml --ref custom/company
+#
+# If the run history for this workflow is ever deleted it becomes unregistered
+# again, and you have to re-add a temporary `push:` trigger to bootstrap it.
 on:
-  push:
-    branches:
-      - custom/company
   workflow_dispatch:
     inputs:
       source_ref:
@@ -39,11 +38,9 @@ permissions:
 jobs:
   company-image:
     runs-on: ubuntu-latest
-    # Inputs are absent on the bootstrap `push` run, so fall back to the pushed
-    # branch and the default retention.
     env:
-      SOURCE_REF: ${{ github.event.inputs.source_ref || github.ref_name }}
-      RETENTION_DAYS: ${{ github.event.inputs.retention_days || '7' }}
+      SOURCE_REF: ${{ inputs.source_ref }}
+      RETENTION_DAYS: ${{ inputs.retention_days }}
     steps:
       # Keeps the two deployment lines from crossing. Building custom/prod here
       # would produce production code under a sub2api-company:* tag, which is
@@ -62,7 +59,7 @@ jobs:
       - name: Checkout requested source ref
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.source_ref || github.ref_name }}
+          ref: ${{ inputs.source_ref }}
           fetch-depth: 1
 
       - name: Resolve official version and source commit
