@@ -180,28 +180,78 @@ scp -P <PORT> "$ART.tar.gz" <USER>@<公司主机>:/tmp/
 
 ## 7. 全新机器首次部署
 
+### 7.0 目标机器现状（2026-07-25 实测）
+
+```text
+主机          154.29.158.57:56723  Ubuntu 24.04.1 / x86_64 / 内核 6.8
+硬件          8 核 Xeon E5-2680 v4 / 7.8G 内存 / 78G 磁盘（用 8%）
+已有服务      newapi-51tokens.service  原生二进制，用户 www，监听 :3000
+              nginx 1.28.3             www.51tokens.vip → 3000，80/443 已配 HTTPS
+              MariaDB 10.11            NewAPI 的 SQL_DSN 指向它
+              宝塔面板                  :25352
+```
+
+三个必须记住的事实：
+
+1. **NewAPI 不在容器里。** 它是 systemd 原生服务，没有 docker 网络可加入。
+2. **这台机器原本没有 Docker。** 需要先装，见 7.1。
+3. **这是一台跑着对外营业服务的机器**（51tokens.vip 有付费用户）。任何操作都要
+   考虑「出错会不会影响 NewAPI」。号池的所有组件都不发布可路由端口、不占用
+   80/443/3000、容器内 PG/Redis 不发布端口因而不会和 MariaDB 冲突。
+
 ### 7.1 网络拓扑
 
 ```text
-┌─────────────────────── 公司服务器 ───────────────────────┐
-│                                                          │
-│  ┌──────────┐   http://sub2api:8080   ┌───────────────┐  │
-│  │  NewAPI  │ ──────────────────────► │    sub2api    │  │
-│  └──────────┘   （共享 docker 网络）   └───────┬───────┘  │
-│                                                │          │
-│                                    sub2api-network        │
-│                                        ┌───────┴───────┐  │
-│                                        │ postgres redis│  │
-│                                        └───────────────┘  │
-│                                                          │
-│  127.0.0.1:18080 ← 仅回环，供 SSH 隧道访问管理后台        │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────── 公司服务器 ────────────────────┐
+│                                                    │
+│  new-api (systemd, :3000) ──┐                      │
+│  nginx (:80/:443) → 3000    │                      │
+│  MariaDB                    │ http://127.0.0.1:18080
+│                             ▼                      │
+│  docker ──► sub2api ── 127.0.0.1:18080             │
+│               │                                    │
+│               └── sub2api-network ── postgres redis│
+│                   （不发布任何宿主机端口）           │
+└────────────────────────────────────────────────────┘
 ```
 
-没有域名，没有反向代理，不对办公网暴露任何端口。sub2api 以 `external` 方式加入
-NewAPI 已有的 docker 网络，因此**不需要改动 NewAPI 自己的 compose**。
+没有域名，没有给号池加反代，不对公网暴露任何端口。NewAPI 作为宿主机进程直接走
+回环访问号池，因此**不需要改动 NewAPI 的任何配置文件或 systemd 单元**，只需在
+NewAPI 后台加一个渠道。
 
-### 7.2 准备目录与配置
+### 7.2 安装 Docker 与 swap
+
+这台机器没有 swap 且没有 Docker，部署前补上。**装 Docker 会插入 iptables 规则**，
+虽然号池只绑回环、不依赖 ufw 放行，但操作前后都应确认 NewAPI 仍然正常。
+
+```bash
+# 装之前先记录基线
+systemctl is-active newapi-51tokens.service
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/
+
+# 2G swap
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+# Docker 官方源（Ubuntu 24.04 noble）
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# 装完立刻复查 NewAPI 没受影响
+systemctl is-active newapi-51tokens.service
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/
+docker --version && docker compose version
+```
+
+回滚 Docker：`apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
+docker-compose-plugin && rm -rf /var/lib/docker /etc/apt/sources.list.d/docker.list`。
+
+### 7.3 准备目录与配置
 
 ```bash
 mkdir -p /opt/sub2api-company && cd /opt/sub2api-company
@@ -216,22 +266,15 @@ deploy/company/docker-compose.override.yml -> docker-compose.override.yml
 deploy/company/.env.example                -> .env（按注释填写）
 ```
 
-查出 NewAPI 的网络名并填进 `.env` 的 `NEWAPI_NETWORK`：
-
-```bash
-docker inspect <newapi容器名> \
-  -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
-```
-
-`.env` 至少要填 `NEWAPI_NETWORK`、`POSTGRES_PASSWORD`（缺失时 compose 直接拒绝
-启动）、`ADMIN_PASSWORD`、`JWT_SECRET`、`TOTP_ENCRYPTION_KEY`，并确认
-`SUB2API_IMAGE` 是本次要加载的 tag。密钥用 `openssl rand -hex 32` 生成。
+`.env` 至少要填 `POSTGRES_PASSWORD`（缺失时 compose 直接拒绝启动）、
+`ADMIN_PASSWORD`、`JWT_SECRET`、`TOTP_ENCRYPTION_KEY`，并确认 `SUB2API_IMAGE`
+是本次要加载的 tag。密钥用 `openssl rand -hex 32` 生成。
 
 ```bash
 chmod 600 .env && chown root:root .env
 ```
 
-### 7.3 导入镜像并启动
+### 7.4 导入镜像并启动
 
 ```bash
 docker load -i /tmp/sub2api-company-0.1.156-<commit>.tar.gz
@@ -251,22 +294,26 @@ docker exec sub2api wget -qO- http://localhost:8080/health
 
 确认后删掉临时文件：`rm -f /tmp/sub2api-company-*.tar.gz`
 
-### 7.4 验证 NewAPI 能解析到
+### 7.5 验证回环可达
 
-从 NewAPI 容器内部打一次（把 `<newapi容器名>` 换成实际名字）：
-
-```bash
-docker exec <newapi容器名> sh -c 'wget -qO- http://sub2api:8080/health'
-```
-
-期望输出 `{"status":"ok"}`。如果解析不到，先确认两个容器确实在同一网络：
+NewAPI 是宿主机进程，所以直接在宿主机上打就是它将来走的同一条路径：
 
 ```bash
-docker network inspect "$(grep '^NEWAPI_NETWORK=' /opt/sub2api-company/.env | cut -d= -f2)" \
-  -f '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}'
+curl -fsS http://127.0.0.1:18080/health          # 期望 {"status":"ok"}
+ss -tlnp 'sport = :18080'                        # 期望只绑 127.0.0.1，不是 0.0.0.0
 ```
 
-### 7.5 接入 NewAPI
+第二条**必须确认**：如果显示 `0.0.0.0:18080`，说明 `.env` 的 `BIND_HOST` 没生效，
+管理后台正暴露在公网上（Docker 发布的端口不受 ufw 约束），要立刻改回来。
+
+同时确认没有影响 NewAPI：
+
+```bash
+systemctl is-active newapi-51tokens.service
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/
+```
+
+### 7.6 接入 NewAPI
 
 先在 sub2api 管理后台建一个 API Key（走 SSH 隧道访问）：
 
@@ -279,12 +326,14 @@ ssh -N -L 18080:127.0.0.1:18080 <USER>@<公司主机>
 用 `.env` 里的 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 登录，**立即改密码**，然后创建
 分组、添加账号、生成 API Key。
 
-在 NewAPI 侧新建渠道：
+在 NewAPI 后台新建渠道：
 
 ```text
-Base URL:  http://sub2api:8080
+Base URL:  http://127.0.0.1:18080
 密钥:      sub2api 里生成的 API Key（不是管理员密码）
 ```
+
+不需要改 NewAPI 的 `.env` 或 systemd 单元，只在它的后台加渠道即可。
 
 sub2api 对外暴露的网关路由（都在 API Key 鉴权之后）：
 
