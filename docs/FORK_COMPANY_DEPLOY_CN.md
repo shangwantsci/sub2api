@@ -348,6 +348,62 @@ GET  /v1/models
 
 渠道类型按 NewAPI 侧的习惯选 Anthropic 或 OpenAI 兼容，二者路由都在。
 
+## 7.7 首次部署记录（2026-07-25）
+
+```text
+主机          154.29.158.57:56723
+镜像          sub2api-company:0.1.156-e5d22dcd（255MB，docker load 导入）
+构建 run      30155684968（Company Image，push 触发的 bootstrap 那次）
+artifact      sub2api-company-0.1.156-e5d22dcd.tar.gz
+              sha256 16587cf85c16990a68028c84420676905ae17966adb6c97adb8a880139388d70
+              本地与服务器端校验和一致，传输后已删除 tar 包
+部署目录      /opt/sub2api-company
+Docker        29.6.2 / Compose v5.3.1（本次新装）
+swap          2G（本次新加，/swapfile，已写 fstab）
+容器          sub2api / sub2api-postgres / sub2api-redis 全部 healthy
+版本自检      Sub2API 0.1.156 (commit: e5d22dcd, built: 2026-07-25T11:09:08Z)
+端口          127.0.0.1:18080 -> 8080（已确认不是 0.0.0.0，公网打 000 不可达）
+启动 error 级日志  0
+资源          sub2api 20MB / postgres 64MB / redis 4.3MB，整机用 1.1G / 7.8G
+```
+
+端到端验证（未鉴权探测，404 = 路由已删，401 = 路由在且需鉴权）：
+
+```text
+POST /api/v1/admin/accounts/import/anthropic-session         404 ✓
+GET  /api/v1/admin/accounts/import/anthropic-session/:id     404 ✓
+POST /api/v1/admin/accounts/import/anthropic-session/:id/cancel 404 ✓
+POST /api/v1/admin/accounts/chrome-cookie-auth               404 ✓
+POST /api/v1/admin/accounts/:id/refresh-cookie-auth          404 ✓
+
+POST /api/v1/admin/accounts/cookie-auth                      401 ✓（刻意保留）
+POST /api/v1/admin/accounts/setup-token-cookie-auth          401 ✓（刻意保留）
+POST /api/v1/admin/accounts/data                             401 ✓（刻意保留）
+POST /api/v1/admin/accounts/import/codex-session             401 ✓（刻意保留）
+POST /v1/messages                                            401 ✓
+POST /v1/chat/completions                                    401 ✓
+```
+
+现有业务未受影响：`newapi-51tokens` active、:3000 返回 200、nginx :443 返回 200。
+
+### 一个容易误判的现象
+
+`POST /chat/completions`（不带 `/v1` 前缀）返回 **200 + index.html**，不是 401。
+这不是鉴权漏洞，也不是本分支造成的：前端 SPA 的兜底路由对任何未匹配路径都返回
+index.html，`POST /definitely-not-a-route` 同样是 200。也就是说这条无前缀别名在
+本次构建里没有生效，落到了兜底。
+
+已确认公司分支只改过 4 个后端文件
+（`account_anthropic_session_import.go`、其测试、`account_handler.go`、
+`routes/admin.go`），完全没碰 `routes/gateway.go`，因此 `custom/prod` 上行为一致，
+属上游既有现象。
+
+对接入没有影响：NewAPI 走的是带 `/v1` 前缀的 `/v1/chat/completions`，实测带假 key
+返回 401，鉴权正常。
+
+顺带说明为什么前面「404 = 已删除」的判据依然可靠：`/api/v1/*` 路径由 API 专用的
+404 处理器负责，不会落进 SPA 兜底——五条已删路由返回的都是 404 而不是 200。
+
 ## 8. 后续升级与回滚
 
 ```bash
