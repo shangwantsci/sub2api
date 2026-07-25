@@ -142,6 +142,7 @@ docs/*
 !docs/legal/*.md
 .serena/
 .codex/
+.deploy-scratch/
 .superpowers/
 .worktrees/
 frontend/coverage/

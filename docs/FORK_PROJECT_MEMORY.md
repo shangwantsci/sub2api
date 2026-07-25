@@ -69,6 +69,31 @@ git branch --show-current
 开发新功能，也永远不合回 `custom/prod`。`backend/cmd/server/VERSION` 以
 `custom/prod` 为准，公司分支不单独改。
 
+日常在 `custom/prod` 上开发，改动需要带到公司线时：
+
+```bash
+git switch custom/company
+git merge custom/prod
+# 必检：这两个 spec 是反向断言（断言被删入口不存在），失败即说明合并把入口带回来了
+cd frontend && npm run test:run -- \
+  src/components/account/__tests__/OAuthAuthorizationFlow.spec.ts \
+  src/components/admin/account/__tests__/AccountActionMenu.spark_shadow.spec.ts
+git push origin custom/company
+gh workflow run company-image.yml --ref custom/company
+git switch custom/prod          # 记得切回来
+```
+
+不同步也不会出问题——公司机器跑的是已 `docker load` 的固定 tag，不会自动更新。
+
+三份文档的分工（本文与 `FORK_DEPLOY_RUNBOOK_CN.md` 在两分支上逐字一致，
+`FORK_COMPANY_DEPLOY_CN.md` 只存在于 `custom/company`）：
+
+```text
+FORK_PROJECT_MEMORY.md      共享知识库：设计目标、已实现功能、生产状态、分支矩阵
+FORK_DEPLOY_RUNBOOK_CN.md   生产线运维（custom/prod → GHCR → lumos7.cc）
+FORK_COMPANY_DEPLOY_CN.md   公司线运维（custom/company → artifact → 154.29.158.57）
+```
+
 定时标定不受影响：`release.yml` 的 `claude-calibration` job 在 schedule 触发时
 **硬编码** `ref: custom/prod`，且 GitHub 定时 workflow 只从默认分支 `main` 的
 workflow 文件调度。公司分支的存在与部署对它零影响，反之亦然。
@@ -943,11 +968,21 @@ backend/internal/handler/content_moderation_helper.go
 frontend/src/views/admin/GroupsView.vue
 ```
 
-部署：
+部署（生产线 `custom/prod`）：
 
 ```text
 .github/workflows/release.yml
 docs/FORK_DEPLOY_RUNBOOK_CN.md
 docs/FORK_PROJECT_MEMORY.md
+```
+
+部署（公司线，以下文件**只存在于 `custom/company`**）：
+
+```text
+.github/workflows/company-image.yml          构建 + docker save 成 artifact，不推 registry
+deploy/company/docker-compose.override.yml   image 指向 ${SUB2API_IMAGE} + pull_policy: never
+deploy/company/.env.example                  精简 env 模板
+deploy/company/nginx-sub2api-admin.conf      管理后台 HTTPS 反代，网关路由挡在公网外
+docs/FORK_COMPANY_DEPLOY_CN.md               公司线运维 runbook
 ```
 
