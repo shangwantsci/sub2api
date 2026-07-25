@@ -69,7 +69,9 @@ func TestDefaultBedrockModelMapping_ContainsNewClaudeModels(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"claude-fable-5":  "anthropic.claude-fable-5",
+		"claude-fable-5": "anthropic.claude-fable-5",
+		// Opus 5 走 Messages API 端点，官方 ID 无区域前缀、无 -v1 版本段。
+		"claude-opus-5":   "anthropic.claude-opus-5",
 		"claude-opus-4-8": "us.anthropic.claude-opus-4-8-v1",
 	}
 	for from, want := range cases {

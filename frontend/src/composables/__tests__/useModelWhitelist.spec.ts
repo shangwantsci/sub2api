@@ -42,6 +42,7 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5')
     expect(getModelsByPlatform('claude')).toContain('claude-opus-4-8')
     expect(getModelsByPlatform('antigravity')).toContain('claude-opus-4-8')
+    expect(getModelsByPlatform('claude')).toContain('claude-opus-5')
   })
 
   it('Claude 预设映射包含 Sonnet 5 透传项', () => {

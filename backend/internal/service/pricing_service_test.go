@@ -460,6 +460,74 @@ func TestDefaultPricingIncludesClaudeSonnet5StableSonnetPricing(t *testing.T) {
 	require.True(t, got.SupportsPromptCaching)
 }
 
+func TestDefaultPricingIncludesClaudeOpus5(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	svc := &PricingService{}
+	pricingData, err := svc.parsePricingData(data)
+	require.NoError(t, err)
+	svc.pricingData = pricingData
+
+	got := svc.GetModelPricing("claude-opus-5")
+	require.NotNil(t, got)
+	require.Equal(t, "anthropic", got.LiteLLMProvider)
+	require.Equal(t, "chat", got.Mode)
+	require.InDelta(t, 5e-6, got.InputCostPerToken, 1e-12)
+	require.InDelta(t, 2.5e-5, got.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 6.25e-6, got.CacheCreationInputTokenCost, 1e-12)
+	require.InDelta(t, 1e-5, got.CacheCreationInputTokenCostAbove1hr, 1e-12)
+	require.InDelta(t, 5e-7, got.CacheReadInputTokenCost, 1e-12)
+	require.True(t, got.SupportsPromptCaching)
+}
+
+// Opus 5 / Opus 4.8  都不包含 "claude-opus-4-<minor>" 这样的旧模式串，一旦定价表里
+// 缺少精确条目就会掉进 matchByModelFamily 的 "opus-4" 兜底，而 Phase 3 是遍历 map
+// 取首个命中，会在 $5/$25（4.5+）和 $15/$75（Opus 4/4.1）之间随机跳。这里锁定新增的
+// opus-5 / opus-4.8 家族条目，确保回退价稳定落在同代 Opus 档位上。
+func TestGetModelPricing_ClaudeOpus5FamilyFallbackIsDeterministic(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"claude-opus-4-20250514": {InputCostPerToken: 1.5e-5, OutputCostPerToken: 7.5e-5},
+			"claude-opus-4-1":        {InputCostPerToken: 1.5e-5, OutputCostPerToken: 7.5e-5},
+			"claude-opus-4-5":        {InputCostPerToken: 5e-6, OutputCostPerToken: 2.5e-5},
+			"claude-opus-4-8":        {InputCostPerToken: 5e-6, OutputCostPerToken: 2.5e-5},
+		},
+	}
+
+	// 远程定价表尚未收录 claude-opus-5 时（本地 resources 条目被同名远程条目覆盖前的
+	// 窗口期），Bedrock 形态的 ID 也不会命中精确匹配。
+	for _, model := range []string{"claude-opus-5", "anthropic.claude-opus-5", "us.anthropic.claude-opus-5", "claude-opus-4-8-fast"} {
+		for i := 0; i < 50; i++ {
+			got := svc.GetModelPricing(model)
+			require.NotNil(t, got, "model=%s iteration=%d", model, i)
+			require.InDelta(t, 5e-6, got.InputCostPerToken, 1e-12, "model=%s iteration=%d", model, i)
+			require.InDelta(t, 2.5e-5, got.OutputCostPerToken, 1e-12, "model=%s iteration=%d", model, i)
+		}
+	}
+}
+
+// 动态定价完全不可用时（下载失败且本地文件缺失），BillingService 的硬编码兜底也必须
+// 给出 Opus 档位价，而不是掉进 claude-3-opus 的 $15/$75。
+func TestBillingService_ClaudeOpus5FallbackUsesOpusTierRate(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+
+	for _, model := range []string{"claude-opus-5", "us.anthropic.claude-opus-5", "claude-opus-4-8"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, "model=%s", model)
+		require.InDelta(t, 5e-6, pricing.InputPricePerToken, 1e-12, "model=%s", model)
+		require.InDelta(t, 2.5e-5, pricing.OutputPricePerToken, 1e-12, "model=%s", model)
+		require.InDelta(t, 6.25e-6, pricing.CacheCreationPricePerToken, 1e-12, "model=%s", model)
+		require.InDelta(t, 5e-7, pricing.CacheReadPricePerToken, 1e-12, "model=%s", model)
+	}
+
+	// 旧代 Opus 仍应保留 $15/$75，不能被新分支误伤。
+	legacy, err := svc.GetModelPricing("claude-3-opus-20240229")
+	require.NoError(t, err)
+	require.InDelta(t, 1.5e-5, legacy.InputPricePerToken, 1e-12)
+	require.InDelta(t, 7.5e-5, legacy.OutputPricePerToken, 1e-12)
+}
+
 func TestGetModelPricing_Gpt54MiniUsesDedicatedStaticFallbackWhenRemoteMissing(t *testing.T) {
 	svc := &PricingService{
 		pricingData: map[string]*LiteLLMModelPricing{

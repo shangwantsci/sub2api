@@ -132,6 +132,9 @@ var DefaultBedrockModelMapping = map[string]string{
 	// Claude Fable
 	"claude-fable-5": "anthropic.claude-fable-5",
 	// Claude Opus
+	// Opus 5 走 "Claude in Amazon Bedrock" 的 Messages API 端点，官方 ID 无区域前缀、
+	// 无 -v1 版本段（与 claude-fable-5 相同形态）。
+	"claude-opus-5":            "anthropic.claude-opus-5",
 	"claude-opus-4-8":          "us.anthropic.claude-opus-4-8-v1",
 	"claude-opus-4-7":          "us.anthropic.claude-opus-4-7-v1",
 	"claude-opus-4-6-thinking": "us.anthropic.claude-opus-4-6-v1",

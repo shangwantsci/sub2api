@@ -527,6 +527,20 @@ func TestResolveBedrockModelID(t *testing.T) {
 		assert.Equal(t, "eu.anthropic.claude-opus-4-8-v1", modelID)
 	})
 
+	t.Run("默认 Opus 5 映射使用官方 Bedrock 模型 ID（不加区域前缀）", func(t *testing.T) {
+		account := &Account{
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeBedrock,
+			Credentials: map[string]any{
+				"aws_region": "eu-west-1",
+			},
+		}
+
+		modelID, ok := ResolveBedrockModelID(account, "claude-opus-5")
+		require.True(t, ok)
+		assert.Equal(t, "anthropic.claude-opus-5", modelID)
+	})
+
 	t.Run("默认 Fable 5 映射使用官方 Bedrock 模型 ID", func(t *testing.T) {
 		account := &Account{
 			Platform: PlatformAnthropic,
