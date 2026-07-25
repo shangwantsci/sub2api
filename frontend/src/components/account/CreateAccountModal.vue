@@ -45,29 +45,16 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
-      <div
-        v-if="isAnthropicSessionImportMode"
-        class="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800 dark:border-orange-800/40 dark:bg-orange-900/20 dark:text-orange-200"
-      >
-        <div class="font-semibold">{{ t('admin.accounts.anthropicSessionBulkImportTitle') }}</div>
-        <p class="mt-1 text-xs leading-5">
-          {{ t('admin.accounts.anthropicSessionBulkImportFormHint') }}
-        </p>
-      </div>
       <div>
         <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
         <input
           v-model="form.name"
           type="text"
-          :required="!isAnthropicSessionImportMode && !isGrokSSOInputMethod"
-          :disabled="isAnthropicSessionImportMode"
+          :required="!isGrokSSOInputMethod"
           class="input"
-          :placeholder="isAnthropicSessionImportMode ? t('admin.accounts.anthropicSessionAutoNamePlaceholder') : t('admin.accounts.enterAccountName')"
+          :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
         />
-        <p v-if="isAnthropicSessionImportMode" class="input-hint">
-          {{ t('admin.accounts.anthropicSessionAutoNameHint') }}
-        </p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
@@ -3209,27 +3196,20 @@
         :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
-        :show-chrome-cookie-option="
-          form.platform === 'anthropic' &&
-          addMethod === 'oauth' &&
-          !isAnthropicSessionImportMode
-        "
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
         :show-codex-session-import-option="form.platform === 'openai'"
-        :anthropic-session-bulk-import="isAnthropicSessionImportMode"
         :show-agent-identity-option="form.platform === 'openai'"
         :show-codex-pat-option="form.platform === 'openai'"
         :show-sso-option="form.platform === 'grok'"
         :show-manual-option="true"
-        :initial-input-method="isAnthropicSessionImportMode ? 'cookie' : 'manual'"
+        :initial-input-method="'manual'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
-        @chrome-cookie-auth="handleChromeCookieAuth"
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
@@ -3237,67 +3217,6 @@
         @import-codex-pat="handleOpenAIImportCodexPAT"
         @import-sso="handleGrokImportSSO"
       />
-
-      <div
-        v-if="anthropicSessionImportJob"
-        class="rounded-lg border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-700 dark:bg-dark-800"
-      >
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-              Anthropic session key 批量导入
-            </p>
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ anthropicSessionImportJob.result.processed }} / {{ anthropicSessionImportJob.result.total }}
-            </p>
-          </div>
-          <span
-            class="rounded-full px-2.5 py-1 text-xs font-medium"
-            :class="anthropicSessionImportStatusClass"
-          >
-            {{ anthropicSessionImportStatusText }}
-          </span>
-        </div>
-        <div class="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700">
-          <div
-            class="h-full rounded-full bg-blue-600 transition-all"
-            :style="{ width: `${anthropicSessionImportProgressPercent}%` }"
-          ></div>
-        </div>
-        <div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-          <div class="rounded bg-gray-50 px-2 py-1 dark:bg-dark-700">
-            已创建 {{ anthropicSessionImportJob.result.created }}
-          </div>
-          <div class="rounded bg-gray-50 px-2 py-1 dark:bg-dark-700">
-            已更新 {{ anthropicSessionImportJob.result.updated }}
-          </div>
-          <div class="rounded bg-gray-50 px-2 py-1 dark:bg-dark-700">
-            重复 {{ anthropicSessionImportJob.result.duplicate }}
-          </div>
-          <div class="rounded bg-gray-50 px-2 py-1 dark:bg-dark-700">
-            失败 {{ anthropicSessionImportJob.result.failed }}
-          </div>
-          <div class="rounded bg-gray-50 px-2 py-1 dark:bg-dark-700">
-            进度 {{ anthropicSessionImportProgressPercent }}%
-          </div>
-        </div>
-        <div
-          v-if="anthropicSessionImportRecentItems.length > 0"
-          class="mt-3 max-h-36 space-y-1 overflow-auto text-xs"
-        >
-          <div
-            v-for="item in anthropicSessionImportRecentItems"
-            :key="`${item.index}-${item.action}`"
-            class="flex items-start justify-between gap-3 rounded bg-gray-50 px-2 py-1 dark:bg-dark-700"
-          >
-            <span class="min-w-0 truncate">
-              #{{ item.index }} {{ item.name || item.session_key_hash || '-' }}
-              <span v-if="item.proxy_name" class="text-gray-500"> · {{ item.proxy_name }}</span>
-            </span>
-            <span class="shrink-0 text-gray-500">{{ item.action }}</span>
-          </div>
-        </div>
-      </div>
 
     </div>
 
@@ -3646,7 +3565,6 @@ import type {
   CheckMixedChannelResponse,
   CreateAccountRequest,
   CodexSessionImportMessage,
-  AnthropicSessionImportJobSnapshot,
   OpenAICompactMode,
   OpenAIResponsesMode,
   OpenAIEndpointCapability
@@ -3737,12 +3655,9 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
-  initialMode?: 'standard' | 'anthropic-session-import'
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  initialMode: 'standard'
-})
+const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   created: []
@@ -3809,48 +3724,10 @@ interface TempUnschedRuleForm {
 // State
 const step = ref(1)
 const submitting = ref(false)
-const anthropicSessionImportJob = ref<AnthropicSessionImportJobSnapshot | null>(null)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
-
-const anthropicSessionImportProgressPercent = computed(() => {
-  const progress = anthropicSessionImportJob.value?.progress ?? 0
-  return Math.max(0, Math.min(100, Math.round(progress * 100)))
-})
-
-const anthropicSessionImportStatusText = computed(() => {
-  switch (anthropicSessionImportJob.value?.status) {
-    case 'running':
-      return '导入中'
-    case 'completed':
-      return '已完成'
-    case 'failed':
-      return '失败'
-    case 'canceled':
-      return '已取消'
-    default:
-      return '等待中'
-  }
-})
-
-const anthropicSessionImportStatusClass = computed(() => {
-  switch (anthropicSessionImportJob.value?.status) {
-    case 'completed':
-      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-    case 'failed':
-      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-    case 'canceled':
-      return 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-300'
-    default:
-      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-  }
-})
-
-const anthropicSessionImportRecentItems = computed(() =>
-  (anthropicSessionImportJob.value?.result.items || []).slice(-8).reverse()
-)
 
 const syncPreviewCredentials = computed(() => {
   if (!apiKeyValue.value) return undefined
@@ -4268,18 +4145,7 @@ const isOAuthFlow = computed(() => {
   return accountCategory.value === 'oauth-based'
 })
 
-const isAnthropicSessionImportMode = computed(() =>
-  props.initialMode === 'anthropic-session-import' &&
-  form.platform === 'anthropic' &&
-  accountCategory.value === 'oauth-based' &&
-  addMethod.value === 'setup-token'
-)
-
-const dialogTitle = computed(() =>
-  isAnthropicSessionImportMode.value
-    ? t('admin.accounts.anthropicSessionBulkImportTitle')
-    : t('admin.accounts.createAccount')
-)
+const dialogTitle = computed(() => t('admin.accounts.createAccount'))
 
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
 
@@ -4316,7 +4182,6 @@ watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
-      applyInitialMode()
       // Load TLS fingerprint profiles
       adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
@@ -4792,7 +4657,6 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 // Methods
 const resetForm = () => {
   step.value = 1
-  anthropicSessionImportJob.value = null
   form.name = ''
   form.notes = ''
   form.platform = 'anthropic'
@@ -4903,19 +4767,8 @@ const resetForm = () => {
   clearMixedChannelDialog()
 }
 
-const applyInitialMode = () => {
-  if (props.initialMode !== 'anthropic-session-import') return
-  step.value = 1
-  form.name = ''
-  form.platform = 'anthropic'
-  form.type = 'setup-token'
-  accountCategory.value = 'oauth-based'
-  addMethod.value = 'setup-token'
-}
-
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
-  anthropicSessionImportJob.value = null
   clearMixedChannelDialog()
   emit('close')
 }
@@ -5014,68 +4867,6 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
-const buildAnthropicSessionImportExtra = (): Record<string, unknown> => {
-  const extra: Record<string, unknown> = {}
-
-  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-    extra.window_cost_limit = windowCostLimit.value
-    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-  }
-
-  if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-    extra.max_sessions = maxSessions.value
-    extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-  }
-
-  if (personaEnabled.value) {
-    extra.persona_enabled = true
-    if (personaTimezone.value.trim()) extra.persona_timezone = personaTimezone.value.trim()
-    if (personaLocale.value.trim()) extra.persona_locale = personaLocale.value.trim()
-    if (personaActiveStart.value != null) extra.persona_active_start_hour = personaActiveStart.value
-    if (personaActiveEnd.value != null) extra.persona_active_end_hour = personaActiveEnd.value
-    if (personaMaxConcurrency.value != null) extra.persona_max_concurrency = personaMaxConcurrency.value
-    if (personaDailyCap.value != null) extra.persona_daily_request_cap = personaDailyCap.value
-  }
-
-  if (rpmLimitEnabled.value) {
-    const DEFAULT_BASE_RPM = 15
-    extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-      ? baseRpm.value
-      : DEFAULT_BASE_RPM
-    extra.rpm_strategy = rpmStrategy.value
-    if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-      extra.rpm_sticky_buffer = rpmStickyBuffer.value
-    }
-  }
-
-  if (userMsgQueueMode.value) {
-    extra.user_msg_queue_mode = userMsgQueueMode.value
-  }
-
-  if (tlsFingerprintEnabled.value) {
-    extra.enable_tls_fingerprint = true
-    if (tlsFingerprintProfileId.value) {
-      extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-    }
-  }
-
-  if (sessionIdMaskingEnabled.value) {
-    extra.session_id_masking_enabled = true
-  }
-
-  if (cacheTTLOverrideEnabled.value) {
-    extra.cache_ttl_override_enabled = true
-    extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-  }
-
-  if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-    extra.custom_base_url_enabled = true
-    extra.custom_base_url = customBaseUrl.value.trim()
-  }
-
-  return extra
-}
-
 // Helper function to create account with mixed channel warning handling
 const doCreateAccount = async (payload: CreateAccountRequest) => {
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
@@ -5170,7 +4961,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 const handleSubmit = async () => {
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
-    if (!isAnthropicSessionImportMode.value && !isGrokSSOInputMethod.value && !form.name.trim()) {
+    if (!isGrokSSOInputMethod.value && !form.name.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
@@ -6381,101 +6172,7 @@ const handleExchangeCode = async () => {
   }
 }
 
-const waitAnthropicSessionImport = (ms: number) =>
-  new Promise<void>((resolve) => window.setTimeout(resolve, ms))
-
-const formatAnthropicSessionImportFailures = (job: AnthropicSessionImportJobSnapshot | null) => {
-  return (job?.result.items || [])
-    .filter((item) => item.action === 'failed')
-    .slice(-10)
-    .map((item) => `#${item.index} ${item.name || item.session_key_hash || ''}: ${item.message || 'failed'}`)
-    .join('\n')
-}
-
-const pollAnthropicSessionImportJob = async (jobId: string) => {
-  let snapshot = await adminAPI.accounts.getAnthropicSessionImport(jobId)
-  anthropicSessionImportJob.value = snapshot
-
-  while (snapshot.status === 'running') {
-    await waitAnthropicSessionImport(1000)
-    snapshot = await adminAPI.accounts.getAnthropicSessionImport(jobId)
-    anthropicSessionImportJob.value = snapshot
-  }
-
-  return snapshot
-}
-
-const handleAnthropicSessionBulkImport = async (content: string) => {
-  const credentialExtras: Record<string, unknown> = {}
-  applyInterceptWarmup(credentialExtras, interceptWarmupRequests.value, 'create')
-  if (!applyTempUnschedConfig(credentialExtras)) {
-    return
-  }
-
-  oauth.loading.value = true
-  oauth.error.value = ''
-  anthropicSessionImportJob.value = null
-
-  try {
-    const extra = buildAnthropicSessionImportExtra()
-    const fixedProxyId = form.proxy_id ?? null
-    const started = await adminAPI.accounts.startAnthropicSessionImport({
-      content: content.trim(),
-      group_ids: form.group_ids,
-      proxy_mode: fixedProxyId ? 'fixed' : 'auto',
-      fixed_proxy_id: fixedProxyId,
-      account_concurrency: form.concurrency,
-      load_factor: form.load_factor ?? undefined,
-      priority: form.priority,
-      rate_multiplier: form.rate_multiplier,
-      expires_at: form.expires_at,
-      auto_pause_on_expired: autoPauseOnExpired.value,
-      credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
-      extra: Object.keys(extra).length > 0 ? extra : undefined,
-      update_existing: true
-    })
-
-    anthropicSessionImportJob.value = started
-    const finished = await pollAnthropicSessionImportJob(started.id)
-    const result = finished.result
-    const successCount = result.created + result.updated
-
-    if (successCount > 0) {
-      emit('created')
-    }
-
-    if (finished.status === 'completed' && result.failed === 0) {
-      appStore.showSuccess(`导入完成：创建 ${result.created}，更新 ${result.updated}，重复 ${result.duplicate}`)
-      handleClose()
-      return
-    }
-
-    oauth.error.value = [finished.error, formatAnthropicSessionImportFailures(finished)]
-      .filter(Boolean)
-      .join('\n')
-
-    if (successCount > 0) {
-      appStore.showWarning(`导入部分完成：创建 ${result.created}，更新 ${result.updated}，失败 ${result.failed}`)
-      return
-    }
-
-    appStore.showError(oauth.error.value || 'Anthropic session key 导入失败')
-  } catch (error: any) {
-    oauth.error.value =
-      error.response?.data?.detail ||
-      error.response?.data?.message ||
-      error.message ||
-      'Anthropic session key 导入失败'
-    appStore.showError(oauth.error.value)
-  } finally {
-    oauth.loading.value = false
-  }
-}
-
-const handleCookieAuth = async (
-  sessionKey: string,
-  useChromeProfile = false
-) => {
+const handleCookieAuth = async (sessionKey: string) => {
   oauth.loading.value = true
   oauth.error.value = ''
 
@@ -6488,12 +6185,6 @@ const handleCookieAuth = async (
       return
     }
 
-    if (isAnthropicSessionImportMode.value) {
-      oauth.loading.value = false
-      await handleAnthropicSessionBulkImport(sessionKey)
-      return
-    }
-
     const tempUnschedPayload = tempUnschedEnabled.value
       ? buildTempUnschedRules(tempUnschedRules.value)
       : []
@@ -6503,11 +6194,9 @@ const handleCookieAuth = async (
     }
 
     const endpoint =
-      useChromeProfile
-        ? '/admin/accounts/chrome-cookie-auth'
-        : addMethod.value === 'oauth'
-          ? '/admin/accounts/cookie-auth'
-          : '/admin/accounts/setup-token-cookie-auth'
+      addMethod.value === 'oauth'
+        ? '/admin/accounts/cookie-auth'
+        : '/admin/accounts/setup-token-cookie-auth'
 
     let successCount = 0
     let failedCount = 0
@@ -6644,7 +6333,4 @@ const handleCookieAuth = async (
     oauth.loading.value = false
   }
 }
-
-const handleChromeCookieAuth = (sessionKey: string) =>
-  handleCookieAuth(sessionKey, true)
 </script>

@@ -1366,62 +1366,6 @@ export interface CodexSessionImportResult {
   errors?: CodexSessionImportMessage[]
 }
 
-export interface AnthropicSessionImportRequest {
-  content?: string
-  contents?: string[]
-  session_keys?: string[]
-  group_ids?: number[]
-  proxy_mode?: 'auto' | 'fixed' | 'none'
-  fixed_proxy_id?: number | null
-  account_concurrency?: number
-  priority?: number
-  rate_multiplier?: number
-  load_factor?: number | null
-  expires_at?: number | null
-  auto_pause_on_expired?: boolean
-  credential_extras?: Record<string, unknown>
-  extra?: Record<string, unknown>
-  update_existing?: boolean
-  skip_default_group_bind?: boolean
-  confirm_mixed_channel_risk?: boolean
-  job_concurrency?: number
-  delay_min_ms?: number
-  delay_max_ms?: number
-}
-
-export interface AnthropicSessionImportItem {
-  index: number
-  name?: string
-  action: 'created' | 'updated' | 'duplicate' | 'failed'
-  account_id?: number
-  proxy_id?: number
-  proxy_name?: string
-  session_key_hash?: string
-  message?: string
-}
-
-export interface AnthropicSessionImportResult {
-  total: number
-  processed: number
-  created: number
-  updated: number
-  duplicate: number
-  failed: number
-  items?: AnthropicSessionImportItem[]
-}
-
-export interface AnthropicSessionImportJobSnapshot {
-  id: string
-  status: 'running' | 'completed' | 'failed' | 'canceled'
-  progress: number
-  result: AnthropicSessionImportResult
-  error?: string
-  started_at: string
-  updated_at: string
-  finished_at?: string
-  cancelable: boolean
-}
-
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'

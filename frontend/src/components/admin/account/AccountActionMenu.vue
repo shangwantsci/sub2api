@@ -36,10 +36,6 @@
                 <Icon name="refresh" size="sm" />
                 {{ t('admin.accounts.refreshToken') }}
               </button>
-              <button v-if="canRefreshCookie" @click="$emit('refresh-cookie', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-cyan-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-                <Icon name="sync" size="sm" />
-                {{ t('admin.accounts.refreshWithSessionKey') }}
-              </button>
             </template>
             <button v-if="isOpenAIOAuthParent" @click="$emit('create-spark-shadow', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="sparkles" size="sm" />
@@ -72,7 +68,7 @@ import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'refresh-cookie', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
 const { t } = useI18n()
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
@@ -98,14 +94,6 @@ const hasRecoverableState = computed(() => {
 })
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')
-const canRefreshCookie = computed(() =>
-  props.account?.platform === 'anthropic' &&
-  props.account?.type === 'oauth' &&
-  props.account?.status === 'active' &&
-  props.account?.credentials?.oauth_client === 'claude_chrome' &&
-  (props.account?.credentials_status?.has_session_key ??
-    Boolean(props.account?.credentials?.session_key))
-)
 // 影子账号(链接型,持 parent_account_id)不持凭据、type 不可变,凭据/隐私类操作对其无效。
 const isShadow = computed(() => props.account?.parent_account_id != null)
 // A "parent" OpenAI OAuth account is one that is NOT itself a shadow (parent_account_id == null)

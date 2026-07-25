@@ -20,15 +20,14 @@ vi.mock('@/composables/useClipboard', () => ({
 
 import OAuthAuthorizationFlow from '../OAuthAuthorizationFlow.vue'
 
-const mountCookieFlow = (anthropicSessionBulkImport: boolean) =>
+const mountCookieFlow = (addMethod: 'oauth' | 'setup-token') =>
   mount(OAuthAuthorizationFlow, {
     props: {
-      addMethod: 'setup-token',
+      addMethod,
       platform: 'anthropic',
       showCookieOption: true,
       allowMultiple: true,
-      initialInputMethod: 'cookie',
-      anthropicSessionBulkImport
+      initialInputMethod: 'cookie'
     },
     global: {
       stubs: {
@@ -38,41 +37,18 @@ const mountCookieFlow = (anthropicSessionBulkImport: boolean) =>
   })
 
 describe('OAuthAuthorizationFlow', () => {
-  it('keeps normal setup-token cookie auth out of Anthropic session bulk import mode', () => {
-    const wrapper = mountCookieFlow(false)
+  it('renders the standard cookie auto-auth copy for setup-token accounts', () => {
+    const wrapper = mountCookieFlow('setup-token')
 
     expect(wrapper.text()).toContain('admin.accounts.oauth.cookieAutoAuth')
     expect(wrapper.text()).toContain('admin.accounts.oauth.startAutoAuth')
-    expect(wrapper.text()).not.toContain('admin.accounts.oauth.anthropicSessionBulkImport')
     expect(wrapper.find('textarea').attributes('rows')).toBe('3')
   })
 
-  it('uses Anthropic session bulk import copy only when explicitly enabled', () => {
-    const wrapper = mountCookieFlow(true)
+  it('emits plain cookie auth without any Chrome OAuth variant', async () => {
+    const wrapper = mountCookieFlow('oauth')
 
-    expect(wrapper.text()).toContain('admin.accounts.oauth.anthropicSessionBulkImport')
-    expect(wrapper.text()).toContain('admin.accounts.oauth.startBatchImport')
-    expect(wrapper.find('textarea').attributes('rows')).toBe('8')
-  })
-
-  it('emits the Claude Chrome profile for Chrome cookie authorization', async () => {
-    const wrapper = mount(OAuthAuthorizationFlow, {
-      props: {
-        addMethod: 'oauth',
-        platform: 'anthropic',
-        showCookieOption: true,
-        showChromeCookieOption: true,
-        initialInputMethod: 'cookie_chrome'
-      },
-      global: {
-        stubs: {
-          Icon: true
-        }
-      }
-    })
-
-    expect(wrapper.text()).toContain('admin.accounts.oauth.chromeCookieAuth')
-    expect(wrapper.text()).toContain('admin.accounts.oauth.chromeCookieAuthDesc')
+    expect(wrapper.text()).not.toContain('admin.accounts.oauth.chromeCookieAuth')
 
     await wrapper.find('textarea').setValue('sk-ant-sid02-test')
     const submit = wrapper.findAll('button').find((button) =>
@@ -81,9 +57,7 @@ describe('OAuthAuthorizationFlow', () => {
     expect(submit).toBeDefined()
     await submit!.trigger('click')
 
-    expect(wrapper.emitted('chrome-cookie-auth')).toEqual([
-      ['sk-ant-sid02-test']
-    ])
-    expect(wrapper.emitted('cookie-auth')).toBeUndefined()
+    expect(wrapper.emitted('cookie-auth')).toEqual([['sk-ant-sid02-test']])
+    expect(wrapper.emitted('chrome-cookie-auth')).toBeUndefined()
   })
 })

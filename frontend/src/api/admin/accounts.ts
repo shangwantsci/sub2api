@@ -18,8 +18,6 @@ import type {
   AdminDataImportResult,
   CodexSessionImportRequest,
   CodexSessionImportResult,
-  AnthropicSessionImportRequest,
-  AnthropicSessionImportJobSnapshot,
   OpenAICodexPATCreateRequest,
   CheckMixedChannelRequest,
   CheckMixedChannelResponse
@@ -250,17 +248,6 @@ export async function testAccount(id: number): Promise<{
  */
 export async function refreshCredentials(id: number): Promise<Account> {
   const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/refresh`)
-  return data
-}
-
-/**
- * Force a Claude Chrome OAuth account to obtain a new token pair with its
- * stored sessionKey. The backend uses the account's configured proxy.
- */
-export async function refreshCookieAuth(id: number): Promise<Account> {
-  const { data } = await apiClient.post<Account>(
-    `/admin/accounts/${id}/refresh-cookie-auth`
-  )
   return data
 }
 
@@ -676,34 +663,6 @@ export async function importCodexSession(payload: CodexSessionImportRequest): Pr
   return data
 }
 
-export async function startAnthropicSessionImport(
-  payload: AnthropicSessionImportRequest
-): Promise<AnthropicSessionImportJobSnapshot> {
-  const { data } = await apiClient.post<AnthropicSessionImportJobSnapshot>(
-    '/admin/accounts/import/anthropic-session',
-    payload
-  )
-  return data
-}
-
-export async function getAnthropicSessionImport(
-  id: string
-): Promise<AnthropicSessionImportJobSnapshot> {
-  const { data } = await apiClient.get<AnthropicSessionImportJobSnapshot>(
-    `/admin/accounts/import/anthropic-session/${id}`
-  )
-  return data
-}
-
-export async function cancelAnthropicSessionImport(
-  id: string
-): Promise<AnthropicSessionImportJobSnapshot> {
-  const { data } = await apiClient.post<AnthropicSessionImportJobSnapshot>(
-    `/admin/accounts/import/anthropic-session/${id}/cancel`
-  )
-  return data
-}
-
 export async function createOpenAICodexPAT(payload: OpenAICodexPATCreateRequest): Promise<Account> {
   const { data } = await apiClient.post<Account>('/admin/openai/create-from-codex-pat', payload)
   return data
@@ -901,7 +860,6 @@ export const accountsAPI = {
   toggleStatus,
   testAccount,
   refreshCredentials,
-  refreshCookieAuth,
   applyOAuthCredentials,
   getStats,
   clearError,
@@ -928,9 +886,6 @@ export const accountsAPI = {
   exportData,
   importData,
   importCodexSession,
-  startAnthropicSessionImport,
-  getAnthropicSessionImport,
-  cancelAnthropicSessionImport,
   createOpenAICodexPAT,
   getAntigravityDefaultModelMapping,
   batchClearError,

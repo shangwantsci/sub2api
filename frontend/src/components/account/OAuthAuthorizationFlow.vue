@@ -37,17 +37,6 @@
                 cookieAuthMethodLabel
               }}</span>
             </label>
-            <label v-if="showChromeCookieOption" class="flex cursor-pointer items-center gap-2">
-              <input
-                v-model="inputMethod"
-                type="radio"
-                value="cookie_chrome"
-                class="text-blue-600 focus:ring-blue-500"
-              />
-              <span class="text-sm text-blue-900 dark:text-blue-200">{{
-                t('admin.accounts.oauth.chromeCookieAuth')
-              }}</span>
-            </label>
             <label v-if="showRefreshTokenOption" class="flex cursor-pointer items-center gap-2">
               <input
                 v-model="inputMethod"
@@ -451,7 +440,7 @@
         </div>
 
         <!-- Cookie Auto-Auth Form -->
-        <div v-if="inputMethod === 'cookie' || inputMethod === 'cookie_chrome'" class="space-y-4">
+        <div v-if="inputMethod === 'cookie'" class="space-y-4">
           <div
             class="rounded-lg border border-blue-300 bg-white/80 p-4 dark:border-blue-600 dark:bg-gray-800/80"
           >
@@ -495,12 +484,10 @@
               </label>
               <textarea
                 v-model="sessionKeyInput"
-                :rows="isAnthropicSessionBulkImport ? 8 : 3"
+                :rows="3"
                 class="input w-full resize-y font-mono text-sm"
                 :placeholder="
-                  isAnthropicSessionBulkImport
-                    ? t('admin.accounts.oauth.anthropicSessionBulkImportPlaceholder')
-                    : allowMultiple
+                  allowMultiple
                     ? t('admin.accounts.oauth.sessionKeyPlaceholder')
                     : t('admin.accounts.oauth.sessionKeyPlaceholderSingle')
                 "
@@ -509,11 +496,7 @@
                 v-if="parsedKeyCount > 1 && allowMultiple"
                 class="mt-1 text-xs text-blue-600 dark:text-blue-400"
               >
-                {{
-                  isAnthropicSessionBulkImport
-                    ? t('admin.accounts.oauth.batchImportAccounts', { count: parsedKeyCount })
-                    : t('admin.accounts.oauth.batchCreateAccounts', { count: parsedKeyCount })
-                }}
+                {{ t('admin.accounts.oauth.batchCreateAccounts', { count: parsedKeyCount }) }}
               </p>
             </div>
 
@@ -845,13 +828,11 @@ interface Props {
   allowMultiple?: boolean
   methodLabel?: string
   showCookieOption?: boolean // Whether to show cookie auto-auth option
-  showChromeCookieOption?: boolean // Whether to show Claude for Chrome cookie OAuth
   showRefreshTokenOption?: boolean // Whether to show refresh token input option (OpenAI only)
   showMobileRefreshTokenOption?: boolean // Whether to show mobile refresh token option (OpenAI only)
   showSessionTokenOption?: boolean
   showAccessTokenOption?: boolean
   showCodexSessionImportOption?: boolean
-  anthropicSessionBulkImport?: boolean
   showAgentIdentityOption?: boolean
   showCodexPatOption?: boolean
   showSsoOption?: boolean
@@ -871,13 +852,11 @@ const props = withDefaults(defineProps<Props>(), {
   allowMultiple: false,
   methodLabel: 'Authorization Method',
   showCookieOption: true,
-  showChromeCookieOption: false,
   showRefreshTokenOption: false,
   showMobileRefreshTokenOption: false,
   showSessionTokenOption: false,
   showAccessTokenOption: false,
   showCodexSessionImportOption: false,
-  anthropicSessionBulkImport: false,
   showAgentIdentityOption: false,
   showCodexPatOption: false,
   showSsoOption: false,
@@ -891,7 +870,6 @@ const emit = defineEmits<{
   'generate-url': []
   'exchange-code': [code: string]
   'cookie-auth': [sessionKey: string]
-  'chrome-cookie-auth': [sessionKey: string]
   'validate-refresh-token': [refreshToken: string]
   'validate-mobile-refresh-token': [refreshToken: string]
   'validate-session-token': [sessionToken: string]
@@ -904,9 +882,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const isAnthropicSessionBulkImport = computed(() =>
-  props.platform === 'anthropic' && props.addMethod === 'setup-token' && props.anthropicSessionBulkImport
-)
 const showLocalCallbackNotice = computed(() => props.platform === 'openai' || props.platform === 'grok')
 
 // Get translation key based on platform
@@ -936,33 +911,11 @@ const oauthImportantNotice = computed(() => {
   if (props.platform === 'grok') return t('admin.accounts.oauth.grok.importantNotice')
   return ''
 })
-const cookieAuthMethodLabel = computed(() =>
-  isAnthropicSessionBulkImport.value
-    ? t('admin.accounts.oauth.anthropicSessionBulkImport')
-    : t('admin.accounts.oauth.cookieAutoAuth')
-)
-const cookieAuthDescription = computed(() =>
-  inputMethod.value === 'cookie_chrome'
-    ? t('admin.accounts.oauth.chromeCookieAuthDesc')
-    : isAnthropicSessionBulkImport.value
-    ? t('admin.accounts.oauth.anthropicSessionBulkImportDesc')
-    : t('admin.accounts.oauth.cookieAutoAuthDesc')
-)
-const sessionKeyInputLabel = computed(() =>
-  isAnthropicSessionBulkImport.value
-    ? t('admin.accounts.oauth.sessionKeys')
-    : t('admin.accounts.oauth.sessionKey')
-)
-const cookieAuthLoadingText = computed(() =>
-  isAnthropicSessionBulkImport.value
-    ? t('admin.accounts.oauth.importing')
-    : t('admin.accounts.oauth.authorizing')
-)
-const cookieAuthButtonText = computed(() =>
-  isAnthropicSessionBulkImport.value
-    ? t('admin.accounts.oauth.startBatchImport')
-    : t('admin.accounts.oauth.startAutoAuth')
-)
+const cookieAuthMethodLabel = computed(() => t('admin.accounts.oauth.cookieAutoAuth'))
+const cookieAuthDescription = computed(() => t('admin.accounts.oauth.cookieAutoAuthDesc'))
+const sessionKeyInputLabel = computed(() => t('admin.accounts.oauth.sessionKey'))
+const cookieAuthLoadingText = computed(() => t('admin.accounts.oauth.authorizing'))
+const cookieAuthButtonText = computed(() => t('admin.accounts.oauth.startAutoAuth'))
 
 // Local state
 const inputMethod = ref<AuthInputMethod>(props.initialInputMethod)
@@ -982,7 +935,6 @@ const projectId = ref('')
 const methodOptionCount = computed(() => [
   props.showManualOption,
   props.showCookieOption,
-  props.showChromeCookieOption,
   props.showRefreshTokenOption,
   props.showMobileRefreshTokenOption,
   props.showSessionTokenOption,
@@ -1091,11 +1043,7 @@ const handleRegenerate = () => {
 
 const handleCookieAuth = () => {
   if (sessionKeyInput.value.trim()) {
-    if (inputMethod.value === 'cookie_chrome') {
-      emit('chrome-cookie-auth', sessionKeyInput.value)
-    } else {
-      emit('cookie-auth', sessionKeyInput.value)
-    }
+    emit('cookie-auth', sessionKeyInput.value)
   }
 }
 

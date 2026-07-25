@@ -307,7 +307,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/:id/test", h.Admin.Account.Test)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
-		accounts.POST("/:id/refresh-cookie-auth", h.Admin.Account.RefreshCookieAuth)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
 		accounts.POST("/:id/set-privacy", h.Admin.Account.SetPrivacy)
 		accounts.POST("/:id/refresh-tier", h.Admin.Account.RefreshTier)
@@ -328,9 +327,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/batch", h.Admin.Account.BatchCreate)
 		accounts.GET("/data", h.Admin.Account.ExportData)
 		accounts.POST("/data", h.Admin.Account.ImportData)
-		accounts.POST("/import/anthropic-session", h.Admin.Account.StartAnthropicSessionImport)
-		accounts.GET("/import/anthropic-session/:id", h.Admin.Account.GetAnthropicSessionImport)
-		accounts.POST("/import/anthropic-session/:id/cancel", h.Admin.Account.CancelAnthropicSessionImport)
 		accounts.POST("/batch-update-credentials", h.Admin.Account.BatchUpdateCredentials)
 		accounts.POST("/batch-refresh-tier", h.Admin.Account.BatchRefreshTier)
 		accounts.POST("/bulk-update", h.Admin.Account.BulkUpdate)
@@ -350,7 +346,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/exchange-setup-token-code", h.Admin.OAuth.ExchangeSetupTokenCode)
 		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
 		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
-		accounts.POST("/chrome-cookie-auth", h.Admin.OAuth.ChromeCookieAuth)
 	}
 }
 
