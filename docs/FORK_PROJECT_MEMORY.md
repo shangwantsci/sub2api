@@ -20,8 +20,13 @@
 ### 2.1 分支职责
 
 - `custom/prod`：二开应用代码的生产来源。
+- `custom/company`：公司内部部署分支，从 `custom/prod` 派生，只做减法，见 2.3。
 - `main`：保留官方版本线，同时承载 GitHub Actions workflow。
 - `upstream`：官方 `Wei-Shaw/sub2api`，禁止 push。
+
+本文档与 `FORK_DEPLOY_RUNBOOK_CN.md` 在 `custom/prod` 与 `custom/company` 上保持
+**逐字一致**，避免每次同步都在文档上产生冲突。公司线的全部细节只写在
+`FORK_COMPANY_DEPLOY_CN.md`，该文件只存在于 `custom/company`。
 
 ### 2.2 版本和镜像
 
@@ -33,6 +38,40 @@
   - `ghcr.io/shangwantsci/sub2api:<官方 VERSION>-<commit>`：不可变审计/回滚。
 
 二进制 `--version` 必须同时显示官方 VERSION 与二开 commit。
+
+### 2.3 部署线矩阵
+
+本 fork 有两条互不相同的部署线。动手前先确认自己在哪条线上：
+
+```bash
+git branch --show-current
+```
+
+| | 生产线 | 公司线 |
+|---|---|---|
+| 分支 | `custom/prod` | `custom/company` |
+| 应用代码 | 完整 | 删除了两个账号录入入口 |
+| 构建 workflow | `release.yml`（`custom_image_only`） | `company-image.yml` |
+| 产物 | 推送 GHCR | `docker save` 成 artifact，不推任何 registry |
+| 镜像 tag | `ghcr.io/shangwantsci/sub2api:<VER>[-<commit>]` | `sub2api-company:<VER>-<commit>` |
+| 分发 | 服务器 `docker compose pull` | `gh run download` → `scp` → `docker load` |
+| 对外入口 | Caddy 反代 + 域名 | 无域名、无反代，NewAPI 走 docker 内网 |
+| 标定 profile | GitHub 定时自动发布 | 手工同步 |
+| 运维文档 | `FORK_DEPLOY_RUNBOOK_CN.md` | `FORK_COMPANY_DEPLOY_CN.md` |
+
+**危险操作：不要用 `release.yml` 构建 `custom/company`。** `custom_image_only`
+的可变 tag 只由 `backend/cmd/server/VERSION` 决定，两个分支都是 `0.1.156`；这样做
+会把生产正在拉取的 `ghcr.io/shangwantsci/sub2api:0.1.156` 覆盖成公司镜像，生产
+下一次 `docker compose pull` 就会静默换成公司版代码。公司线必须走
+`company-image.yml`，它已内置守卫，拒绝构建 `main` 与 `custom/prod`。
+
+**同步方向单向**：`custom/prod` → `custom/company`。公司分支只做减法，不在其上
+开发新功能，也永远不合回 `custom/prod`。`backend/cmd/server/VERSION` 以
+`custom/prod` 为准，公司分支不单独改。
+
+定时标定不受影响：`release.yml` 的 `claude-calibration` job 在 schedule 触发时
+**硬编码** `ref: custom/prod`，且 GitHub 定时 workflow 只从默认分支 `main` 的
+workflow 文件调度。公司分支的存在与部署对它零影响，反之亦然。
 
 ## 3. 当前生产状态
 
