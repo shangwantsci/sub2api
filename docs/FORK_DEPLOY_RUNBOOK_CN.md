@@ -2,9 +2,10 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-23 已按本流程部署 `0.1.156-a16045ee`，GitHub Actions
-> run `29982187637`；本机/公网健康检查、迁移 179、`identity_only` 策略约束和
-> 前端产物均通过验证。
+> 最近验证：2026-07-25 已按本流程部署 `0.1.156-8782b30f`，GitHub Actions
+> run `30137006332`；`claude-opus-5` 上线、Opus 档定价确定性修复、本机健康检查
+> 与容器版本均通过验证。上一轮为 2026-07-23 的 `0.1.156-a16045ee`
+> （run `29982187637`，迁移 179 与 `identity_only` 策略）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -121,7 +122,7 @@ GitHub Actions 成功后，在服务器 `/opt/sub2api-production`：
 ```bash
 cd /opt/sub2api-production
 APP_VERSION=0.1.156 # 替换为本次 backend/cmd/server/VERSION
-COMMIT=a16045ee  # 替换为本次 8 位 commit
+COMMIT=8782b30f  # 替换为本次 8 位 commit
 MUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}"
 IMMUTABLE="ghcr.io/shangwantsci/sub2api:${APP_VERSION}-${COMMIT}"
 
@@ -143,7 +144,16 @@ docker exec sub2api /app/sub2api --version
 
 这样镜像构建完全在 GitHub runner 上完成，不占用生产机 CPU/内存。
 
-2026-07-23 最近一次验证：
+2026-07-25 最近一次验证：
+
+```text
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-8782b30f
+digest:          sha256:8ec3a0244e68a12182681abd395765773500f7a18ecbd7f2371eda3e565fdb13
+env backup:      backups/.env.20260725-010617.before-8782b30f
+rollback tag:    sub2api-rollback:pre-8782b30f
+```
+
+上一轮 2026-07-23：
 
 ```text
 immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-a16045ee
@@ -293,7 +303,7 @@ docker exec sub2api /app/sub2api --version
 输出应类似：
 
 ```text
-Sub2API 0.1.156 (commit: a16045ee, built: ...)
+Sub2API 0.1.156 (commit: 8782b30f, built: ...)
 ```
 
 ### Anthropic 分组 `identity_only` 发布检查
@@ -482,6 +492,61 @@ opaque 429: 8
 非 1 分钟 cooldown: 0
 streak 字段: 0
 ```
+
+### 新 Claude 官方模型上线检查
+
+原生 Anthropic 账号（OAuth/SetupToken/API Key）在 `model_mapping` 为空时对未知模型
+是透传的，因此"能不能调用"通常不需要发版。真正需要发版的是展示、定价与
+Antigravity/Bedrock 这类闭集通道。上线后应确认：
+
+- `/v1/models` 在分组内所有账号都没配 `model_mapping` 时返回新模型；
+  一旦任一账号配置了非空 mapping，该账号即退化为白名单，必须显式补条目或通配；
+- 新模型的计费不落到错误档位。重点是 `matchByModelFamily`：`claude-opus-5`、
+  `claude-opus-4-8` 都不含 `claude-opus-4-<minor>` 模式串，缺少精确定价条目时会掉进
+  `opus-4` 兜底，而该分支遍历 map 取首个命中，会在 `$5/$25` 与 `$15/$75` 之间随机跳。
+  新模型必须同时补 `resources/model-pricing` 条目和 families 表条目；
+- 远程 LiteLLM 定价表尚未收录新模型时，靠 `pricing.fallback_file`
+  （默认 `./resources/model-pricing/model_prices_and_context_window.json`）的
+  `mergeFallbackPricingData` 补齐。容器内应能查到该 key：
+
+```bash
+docker exec sub2api grep -c '"<新模型 ID>"' \
+  /app/resources/model-pricing/model_prices_and_context_window.json
+```
+
+- mimic profile 归族按 `haiku`/`fable`/`sonnet`/其余归 `opus` 的子串匹配。模型名含这
+  四类词时自动继承正确的 beta 头、`max_tokens` 与 thinking 默认值；全新族名会落
+  `opus` 档，需要单独评估；
+- 1M 上下文类模型不一定需要放行 `context-1m-2025-08-07`。Opus 5 起 1M 是默认行为、
+  不需要 beta header，因此现有"只对 `claude-sonnet-5*` 放行、其余过滤"的策略对它
+  是安全的，不要为了"看起来一致"而扩大白名单；
+- Antigravity/Bedrock 是闭集，不在映射表里的模型会被调度器直接过滤成
+  `no available accounts supporting model`。Antigravity 侧是否已上线新模型，必须先用
+  管理后台"账号管理 → 同步上游模型"确认，不要凭官方发布公告盲加。
+
+2026-07-25 `8782b30f`（`claude-opus-5`）生产验证：
+
+```text
+GitHub Actions run: 30137006332 (custom-image success, 4m54s)
+image digest: sha256:8ec3a0244e68a12182681abd395765773500f7a18ecbd7f2371eda3e565fdb13
+env backup: backups/.env.20260725-010617.before-8782b30f
+rollback tag: sub2api-rollback:pre-8782b30f
+
+容器: 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: 8782b30f, built: 2026-07-25T00:46:41Z)
+本机 /health: {"status":"ok"}
+公网 https://lumos7.cc/health: HTTP 200
+镜像 mutable/immutable ID: 一致
+启动窗口 panic / error 级日志: 0
+容器内定价兜底表含 claude-opus-5: 1（远程 LiteLLM 表尚未收录，走 merge 补齐）
+部署后首轮 token refresh: total=67, needs_refresh=1, refreshed=0, failed=1
+```
+
+该轮唯一 failed 是账号 `2512` 的 SOCKS 代理
+`username/password authentication failed`，属存量代理凭证问题，与本次发布无关。
+
+未覆盖项：`/v1/models` 需要有效 API Key 才能验证，本轮未做端到端确认；Antigravity
+侧 Opus 5 支持情况未探测，因此未加入 `DefaultAntigravityModelMapping`。
 
 ## 回滚
 

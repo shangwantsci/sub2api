@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-23
+> 最后更新：2026-07-25
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -36,14 +36,14 @@
 
 ## 3. 当前生产状态
 
-截至 2026-07-23 Anthropic 分组 `identity_only` 两块提示词模式上线：
+截至 2026-07-25 `claude-opus-5` 上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-a16045ee`
-- 镜像 digest：`sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c`
-- 应用 commit：`a16045ee`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-8782b30f`
+- 镜像 digest：`sha256:8ec3a0244e68a12182681abd395765773500f7a18ecbd7f2371eda3e565fdb13`
+- 应用 commit：`8782b30f`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`29982187637`（`custom-image` success）
+- GitHub Actions run：`30137006332`（`custom-image` success，4m54s）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -74,13 +74,23 @@
   粘性并切换到 Max 账号 `2624`，最终 HTTP 200（4264ms）
 - denial 生效后账号 `2069` 的 Fable 再次选中数为 0；Opus/Haiku/Sonnet 不受该
   模型拒绝影响
-- 部署后首轮 token refresh：`total=87, needs_refresh=3, refreshed=3, failed=0`
-- 部署时 `.env` 备份：`backups/.env.20260723-053306.before-a16045ee`
+- `claude-opus-5` 已进入 `claude.DefaultModels`、Bedrock 默认映射与前端模型列表；
+  容器内定价兜底表含该 key（远程 LiteLLM 表尚未收录，由 `mergeFallbackPricingData`
+  补齐）；Antigravity 侧未加入，待 sync-upstream 探测后再定
+- 本轮启动窗口 panic / error 级日志为 0；容器 8 秒转 healthy
+- 部署后首轮 token refresh：`total=67, needs_refresh=1, refreshed=0, failed=1`；
+  唯一 failed 为账号 `2512` 的 SOCKS 代理
+  `username/password authentication failed`，属存量代理凭证问题
+- 部署时 `.env` 备份：`backups/.env.20260725-010617.before-8782b30f`
+- 上一轮 `a16045ee`（2026-07-23）：digest
+  `sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c`，
+  run `29982187637`，`.env` 备份 `backups/.env.20260723-053306.before-a16045ee`，
+  首轮 token refresh `total=87, needs_refresh=3, refreshed=3, failed=0`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-a16045ee
+sub2api-rollback:pre-8782b30f
 ```
 
 ## 4. 已实现功能
@@ -430,6 +440,71 @@ switch -> 账号 2624 (Max)
 denial 后账号 2069 的 Fable 再次选中数 -> 0
 ```
 
+### 4.12 Claude 模型清单来源与新模型接入
+
+本 fork 不在热路径上动态拉取 Anthropic 模型目录。"有哪些 Claude 模型"由三层决定：
+
+1. **硬编码 canonical 清单** `claude.DefaultModels`
+   （`backend/internal/pkg/claude/constants.go`），用于 `/v1/models` 兜底与管理端
+   "账号可用模型"兜底；
+2. **每账号 `credentials.model_mapping`**：空 = 放行一切；非空 = 白名单语义
+   （支持 `*` 通配，并可重写为上游真实模型名）；
+3. **`/v1/models` 聚合**：`GetAvailableModels` 取分组内所有可调度账号 mapping 的
+   key 并集；全空时回退第 1 层。分组 `models_list_config` 只做展示层过滤。
+
+因此**转发路径上没有全局模型白名单**：原生 Anthropic 账号在 mapping 为空时，未知
+模型只经过 `NormalizeModelID`（仅 3 条短名→带日期名）就原样透传给上游。会拒绝未知
+模型的只有：账号非空 mapping、Antigravity/Bedrock 闭集映射、渠道 `restrict_models`。
+
+管理端 `POST /api/v1/admin/accounts/:id/models/sync-upstream` 会用账号凭证真的去
+`GET https://api.anthropic.com/v1/models`，是确认官方模型 ID 最快的手段，但它**只
+回显、不写入** `model_mapping`。
+
+接入一个新官方模型的最小清单（模板 commit：`514ac5c6a` 加 opus-4-8、`8782b30f`
+加 opus-5）：
+
+- `backend/internal/pkg/claude/constants.go` 的 `DefaultModels`；有短名/带日期两种
+  写法时才需要 `ModelIDOverrides` / `ModelIDReverseOverrides`；
+- `frontend/src/composables/useModelWhitelist.ts` 的 `claudeModels` 与
+  `anthropicPresetMappings`；
+- 定价：`backend/resources/model-pricing/model_prices_and_context_window.json`
+  加条目，并在 `pricing_service.go` 的 `matchByModelFamily` families 表加同代家族档；
+- 用 Bedrock 时补 `domain.DefaultBedrockModelMapping` 与前端 `bedrockPresetMappings`；
+- 用 Antigravity 时补 `DefaultAntigravityModelMapping`、
+  `pkg/antigravity/claude_types.go`、`request_transformer.go` 的 `modelInfoMap`，
+  以及一条照抄 `144_add_opus48_to_model_mapping.sql` 的迁移回填已持久化 mapping。
+
+#### Claude Opus 5（2026-07-24 官方发布）
+
+- API ID `claude-opus-5`，**无日期后缀**，API ID 与 alias 相同（4.6 代起官方改用
+  无日期的 pinned snapshot 命名），因此不需要短名/长名互转；
+- Bedrock `anthropic.claude-opus-5`、Vertex `claude-opus-5`。Bedrock 形态无区域前缀、
+  无 `-v1` 版本段，与 `claude-fable-5` 一致；`AdjustBedrockModelRegionPrefix` 对不含
+  已知区域前缀的 ID 原样返回，因此无论账号 region 都会发出官方 ID；
+- 定价 `$5 / $25` 每百万 token，与 Opus 4.8 相同、为 Fable 5 的一半；缓存写入
+  5m `$6.25`、1h `$10`，缓存命中 `$0.50`，Batch `$2.50 / $12.50`；
+- 1M 上下文，**1M 既是默认也是最大值**，不需要 beta header、无长上下文溢价；
+  最大输出 128k。因此 `context-1m-2025-08-07` 的白名单保持"只放行
+  `claude-sonnet-5*`"即可，过滤该头不影响 Opus 5 拿到 1M；
+- 归族落 `opus` 档，自动继承 `adaptive` thinking + `effort=high`，与官方默认语义
+  一致，mimic profile 无需改动；不含 `fable` 子串，不进 Fable 限流桶；
+- 行为变化（当前代码不受影响，但排查时需知道）：thinking 默认开启；
+  `thinking:{"type":"disabled"}` 配 `effort=xhigh/max` 返回 400；effort 梯度扩展到
+  `max`；不支持 Priority Tier 与 web fetch 工具；prompt cache 最小长度降到 512 tokens。
+
+#### 已修复：Opus 档定价随机误匹配
+
+`claude-opus-5` 与 `claude-opus-4-8` 都不包含 `claude-opus-4-<minor>` 模式串。定价表
+缺少精确条目时，`matchByModelFamily` 的 Phase 1 匹配不上，Phase 2 关键字兜底落进
+`opus-4` 家族，Phase 3 再遍历 map 找首个含 `claude-opus-4` 的 key —— **Go map 迭代
+顺序随机**，表中 11 个命中 key 里有 3 个是 Opus 4 / 4.1 的 `$15/$75`，其余是
+`$5/$25`，导致同一模型每次查价在 1 倍与 3 倍之间跳。`BillingService.getFallbackPricing`
+有同样问题，opus 分支对非 4.5/4.6/4.7 一律回落 `claude-3-opus` 的 `$15/$75`。
+
+`8782b30f` 补齐了 `opus-5`、`opus-4.8` 两档家族条目与硬编码兜底价，并加了 50 次
+循环的确定性回归测试，同时覆盖 `anthropic.claude-opus-5` 这类 Bedrock 形态 ID。
+旧代 Opus 3 / 4 / 4.1 仍保留 `$15/$75`。
+
 ## 5. 当前自动标定状态
 
 首次真实标定：
@@ -489,7 +564,15 @@ gh workflow run release.yml \
 
 `tag` 是旧 workflow contract 的兼容必填值；`custom_image_only=true` 时不会 checkout 或创建该 Git tag。
 
-当前生产 `identity_only` 两块提示词模式镜像构建：
+当前生产 `claude-opus-5` 上线镜像构建：
+
+- run：`30137006332`
+- source commit：`8782b30f`
+- job：`custom-image`
+- 结论：success（4m54s）
+- 其它 release/tag jobs：skipped
+
+上一生产 `identity_only` 两块提示词模式镜像构建：
 
 - run：`29982187637`
 - source commit：`a16045ee`
@@ -497,7 +580,7 @@ gh workflow run release.yml \
 - 结论：success
 - 其它 release/tag jobs：skipped
 
-上一生产 Fable `credits_required` 模型访问拒绝镜像构建：
+更早的 Fable `credits_required` 模型访问拒绝镜像构建：
 
 - run：`29978772874`
 - source commit：`e4fad61d`
@@ -696,7 +779,10 @@ curl -fsS http://127.0.0.1:18080/health
 - 观察 Chrome OAuth 约 8 小时轮换、提前 401 自动恢复、`invalid_grant`/缺失
   `refresh_token` 回退成功率、`account_session_invalid` 永久隔离以及 Cloudflare
   challenge 临时重试；
-- 观察 `oauth_refresh` 的 lock lease lost、CAS skipped 与临时不可调度日志。
+- 观察 `oauth_refresh` 的 lock lease lost、CAS skipped 与临时不可调度日志；
+- `claude-opus-5` 上线后确认 `/v1/models` 实际返回该模型（需有效 API Key，
+  `8782b30f` 部署时未做端到端验证）、usage 记录的单价为 `$5/$25` 而非
+  `$15/$75`，并用 sync-upstream 探测 Antigravity 是否已支持后再决定是否补白名单。
 
 ### P1：Persona 小批灰度
 
@@ -789,6 +875,20 @@ backend/internal/service/gateway_scheduling.go
 backend/internal/service/account_fable_availability.go
 backend/internal/repository/temp_unsched_cache.go
 backend/internal/repository/rpm_cache.go
+```
+
+模型清单与新模型接入：
+
+```text
+backend/internal/pkg/claude/constants.go
+backend/internal/domain/constants.go
+backend/internal/service/account.go
+backend/internal/service/gateway_service.go
+backend/internal/service/upstream_models.go
+backend/internal/service/pricing_service.go
+backend/internal/service/billing_service.go
+backend/resources/model-pricing/model_prices_and_context_window.json
+frontend/src/composables/useModelWhitelist.ts
 ```
 
 Anthropic 分组级客户策略：
