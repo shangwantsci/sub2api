@@ -45,6 +45,20 @@ jobs:
       SOURCE_REF: ${{ github.event.inputs.source_ref || github.ref_name }}
       RETENTION_DAYS: ${{ github.event.inputs.retention_days || '7' }}
     steps:
+      # Keeps the two deployment lines from crossing. Building custom/prod here
+      # would produce production code under a sub2api-company:* tag, which is
+      # the kind of mix-up that is only noticed after it is deployed.
+      - name: Refuse to build a production ref
+        run: |
+          case "$SOURCE_REF" in
+            main|custom/prod|refs/heads/main|refs/heads/custom/prod)
+              echo "::error::$SOURCE_REF belongs to the production line." \
+                   "Build it with release.yml (custom_image_only), not this workflow."
+              exit 1
+              ;;
+          esac
+          echo "source ref $SOURCE_REF accepted"
+
       - name: Checkout requested source ref
         uses: actions/checkout@v6
         with:

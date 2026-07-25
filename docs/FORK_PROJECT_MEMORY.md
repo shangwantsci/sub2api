@@ -24,6 +24,10 @@
 - `main`：保留官方版本线，同时承载 GitHub Actions workflow。
 - `upstream`：官方 `Wei-Shaw/sub2api`，禁止 push。
 
+本文档与 `FORK_DEPLOY_RUNBOOK_CN.md` 在 `custom/prod` 与 `custom/company` 上保持
+**逐字一致**，避免每次同步都在文档上产生冲突。公司线的全部细节只写在
+`FORK_COMPANY_DEPLOY_CN.md`，该文件只存在于 `custom/company`。
+
 ### 2.2 版本和镜像
 
 - 应用语义版本继续读取 `backend/cmd/server/VERSION`，当前为 `0.1.156`。
@@ -35,143 +39,39 @@
 
 二进制 `--version` 必须同时显示官方 VERSION 与二开 commit。
 
-### 2.3 `custom/company`（公司部署）
+### 2.3 部署线矩阵
 
-派生自 `custom/prod` 的 `5670fce7c`（base `54431ec75`）。分支名用 ASCII，避免
-`gh workflow run --ref`、shell 变量和镜像 tag 处理中文。定位是"公司内部部署"，
-只允许做减法：删除不适合内部使用的入口，不在此分支引入新功能。与 `custom/prod`
-的差异应始终可以用一句话说清，需要新功能时先在 `custom/prod` 实现再合并过来。
-
-已删除的两个功能：
-
-**批量导入账号**（Anthropic SessionKey 批量导入）——整条链路移除：
-
-```text
-backend/internal/handler/admin/account_anthropic_session_import.go   已删除
-POST   /api/v1/admin/accounts/import/anthropic-session               已删除
-GET    /api/v1/admin/accounts/import/anthropic-session/:id           已删除
-POST   /api/v1/admin/accounts/import/anthropic-session/:id/cancel    已删除
-```
-
-前端同时移除账号页工具菜单项、工具栏"批量导入"按钮、`CreateAccountModal` 的
-`initialMode='anthropic-session-import'` 模式与任务进度面板、`accounts.ts` 的三个
-API、`types/index.ts` 的四个接口，以及 zh/en 的 13 个 i18n key。
-
-**通过 Chrome OAuth 授权添加账号** —— 只删入口，不动底层：
-
-```text
-POST /api/v1/admin/accounts/chrome-cookie-auth        已删除
-POST /api/v1/admin/accounts/:id/refresh-cookie-auth   已删除
-```
-
-前端移除创建/重授权弹窗的 "Chrome Cookie 授权" 单选、`OAuthAuthorizationFlow` 的
-`cookie_chrome` 输入方式与 `chrome-cookie-auth` 事件、账号操作菜单的
-"使用 SessionKey 重新授权"。
-
-**刻意保留**（重要，不要顺手清理）：4.7 与 4.10 描述的后端 `claude_chrome` 运行时
-逻辑全部保留 —— `token_refresher.go` 的 SessionKey 回退、`oauth_refresh_api.go` 的
-owned lock、`account_repo.go` 的 CAS、`gateway_upstream_request.go` 的
-`ensureClaudeChromeOAuthBeta`、`claude_oauth_error.go` 的错误分层。原因是这些代码与
-`claude_code` 链路深度交织，剥离会威胁主链路；保留后存量 `claude_chrome` 账号仍能
-正常刷新和调度，只是不能再新建或手工重授权。
-
-同样保留：单个 cookie 授权（`/cookie-auth`、`/setup-token-cookie-auth`）、JSON
-数据导入、Codex session 导入、Grok SSO 导入、`POST /accounts/batch` 批量创建。
-
-回归护栏：`OAuthAuthorizationFlow.spec.ts` 与
-`AccountActionMenu.spark_shadow.spec.ts` 已改为断言这些入口**不存在**。合并
-`custom/prod` 或上游时若这两个 spec 失败，说明入口被带回来了。
-
-#### 已知且刻意接受的残留通路
-
-删除的是"专用入口"，不是"批量建号能力"。以下三条 2026-07-25 评审后决定保留，
-不是遗漏，不要当 bug 修：
-
-1. **普通 Cookie 自动授权仍支持多行**。`CreateAccountModal` 的
-   `allow-multiple` 对 anthropic 仍为 true，`handleCookieAuth` 按换行 split 后
-   逐个调 `/cookie-auth` 建号，UI 提示"将批量创建 N 个账号"。等价于批量导入的
-   简化版（无异步任务、进度、查重、自动命名、自动分代理）。保留原因：维护者
-   自己要用。
-2. **JSON 数据导入**（`POST /accounts/data`）可一次导入多个账号，且
-   `credentials` 是自由字段。
-3. **Chrome 账号仍可手工构造**。`POST /accounts`、`POST /accounts/batch`、
-   数据导入的 `credentials` 都不校验 `oauth_client`，写入
-   `{oauth_client: "claude_chrome", session_key: "..."}` 后，保留下来的后台
-   刷新器会自动完成 Chrome SessionKey 授权。点界面做不到，curl 可以。
-
-三条都要求**管理员**权限（`/admin` 路由组挂 `AdminAuthMiddleware`），普通用户
-无法触达。安全边界靠的是管理员账号控制，不是入口删除。
-
-已确认安全：`POST /accounts/batch-update-credentials` 的 `field` 被
-`binding:"oneof=account_uuid org_uuid intercept_warmup_requests"` 限死，
-无法用它改 `oauth_client` 或 `session_key`。
-
-#### 自动标定与本分支的关系
-
-`.github/workflows/release.yml` 的 `claude-calibration` job 在 schedule 触发时
-**硬编码** `ref: custom/prod`，且 GitHub 定时 workflow 只从默认分支 `main` 的
-workflow 文件调度。因此 `custom/company` 的存在与部署对 6 小时定时标定**零影响**，
-反之亦然。publish 目标 `CC_CALIBRATE_GATEWAY_URL` 指向原生产网关，不会误发到
-公司机器。
-
-代价：公司机器不在 publish 目标里，永远收不到标定 profile，按 4.3 节回退编译
-内置常量。功能正常，但伪装特征会随官方 CLI 升级变旧。
-
-已决定用**手工同步**，不改 `release.yml`（改它风险最高）。步骤：
+本 fork 有两条互不相同的部署线。动手前先确认自己在哪条线上：
 
 ```bash
-# 1. 取最近一次定时标定的 profile（artifact 保留 14 天）
-gh run list --workflow Release --repo shangwantsci/sub2api --limit 10
-gh run download <RUN_ID> --repo shangwantsci/sub2api \
-  --name "claude-calibration-<RUN_ID>" --dir /tmp/cal
-
-# 2. 发布到公司网关（同一个工具，workflow 用的也是它）
-node tools/cc-calibrate/publish.js \
-  /tmp/cal/profile-*.json \
-  https://<公司网关域名> \
-  "<公司 ADMIN_API_KEY>"
+git branch --show-current
 ```
 
-`publish.js` POST 到 `/api/v1/admin/settings/claude-calibrated-profile`，用
-`x-api-key` 头；HTTP 200 即成功，网关约 60 秒内热加载。发布后在设置页确认
-published + valid、CLI 版本与 guard 结果。
+| | 生产线 | 公司线 |
+|---|---|---|
+| 分支 | `custom/prod` | `custom/company` |
+| 应用代码 | 完整 | 删除了两个账号录入入口 |
+| 构建 workflow | `release.yml`（`custom_image_only`） | `company-image.yml` |
+| 产物 | 推送 GHCR | `docker save` 成 artifact，不推任何 registry |
+| 镜像 tag | `ghcr.io/shangwantsci/sub2api:<VER>[-<commit>]` | `sub2api-company:<VER>-<commit>` |
+| 分发 | 服务器 `docker compose pull` | `gh run download` → `scp` → `docker load` |
+| 对外入口 | Caddy 反代 + 域名 | 无域名、无反代，NewAPI 走 docker 内网 |
+| 标定 profile | GitHub 定时自动发布 | 手工同步 |
+| 运维文档 | `FORK_DEPLOY_RUNBOOK_CN.md` | `FORK_COMPANY_DEPLOY_CN.md` |
 
-注意：artifact 只保留 14 天，超期需要手工触发一次 `calibrate_only=true`
-重新产出。实际节奏按官方 CLI 版本变化走即可，不必每 6 小时同步。
+**危险操作：不要用 `release.yml` 构建 `custom/company`。** `custom_image_only`
+的可变 tag 只由 `backend/cmd/server/VERSION` 决定，两个分支都是 `0.1.156`；这样做
+会把生产正在拉取的 `ghcr.io/shangwantsci/sub2api:0.1.156` 覆盖成公司镜像，生产
+下一次 `docker compose pull` 就会静默换成公司版代码。公司线必须走
+`company-image.yml`，它已内置守卫，拒绝构建 `main` 与 `custom/prod`。
 
-验证记录（2026-07-25）：`go build ./...`、`go vet`、后端
-`handler/service/repository/server` 全部 unit 测试通过；前端 `typecheck`、
-161 个 spec / 1139 条断言、`lint`、生产 `build` 均通过。
+**同步方向单向**：`custom/prod` → `custom/company`。公司分支只做减法，不在其上
+开发新功能，也永远不合回 `custom/prod`。`backend/cmd/server/VERSION` 以
+`custom/prod` 为准，公司分支不单独改。
 
-#### 构建与分发：不要复用 `custom_image_only`
-
-`release.yml` 的 `custom_image_only` 只按 `backend/cmd/server/VERSION` 打 tag，
-两个分支都是 `0.1.156`。用它构建公司分支会把 GHCR 的可变 tag
-`ghcr.io/shangwantsci/sub2api:0.1.156` 覆盖成公司镜像，而现有生产 `.env` 正钉在
-该 tag 上，下一次 `docker compose pull` 就会把公司版拉进生产。**这是本分支最大的
-误操作风险。**
-
-改用 `.github/workflows/company-image.yml`（本分支新增）：全程 `push: false`，
-构建后 `docker save | gzip` + sha256 上传为 artifact，本地 tag 为
-`sub2api-company:<VERSION>-<commit>`，与 GHCR 命名空间不重叠。分发走
-`gh run download` → `scp` → `docker load`，因此公司服务器**不需要任何 registry
-凭据**，也不需要本机装 Docker（这台 Mac 上没有）。
-
-该工作流刻意不放默认分支 `main`，以免与 `release.yml` 的定时标定产生牵连；代价是
-必须靠临时 `push` 触发器 bootstrap 注册一次。完整步骤见
-`docs/FORK_COMPANY_DEPLOY_CN.md`。
-
-部署产物：
-
-```text
-deploy/company/docker-compose.override.yml   image 指向 ${SUB2API_IMAGE} + pull_policy: never
-deploy/company/.env.example                  精简 env 模板（全新机器用）
-docs/FORK_COMPANY_DEPLOY_CN.md               公司部署 runbook
-```
-
-override 刻意不重定义 `ports`：Compose 对 `ports` 是追加而非替换，重定义会同时
-发布两个端口（含基础文件的 `0.0.0.0:8080`），除非宿主机 Compose ≥ v2.24 支持
-`!override`。监听地址统一由 `.env` 的 `BIND_HOST`/`SERVER_PORT` 控制。
+定时标定不受影响：`release.yml` 的 `claude-calibration` job 在 schedule 触发时
+**硬编码** `ref: custom/prod`，且 GitHub 定时 workflow 只从默认分支 `main` 的
+workflow 文件调度。公司分支的存在与部署对它零影响，反之亦然。
 
 ## 3. 当前生产状态
 

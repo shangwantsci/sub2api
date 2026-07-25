@@ -5,23 +5,61 @@
 #
 #   docker compose -f docker-compose.local.yml -f docker-compose.override.yml up -d
 #
-# The only change is where the image comes from. Everything else -- including
-# the listen address -- is already parameterised by the base file and is driven
-# from .env, so this override deliberately stays tiny (redefining `ports` here
-# would append a second published port rather than replace the base one, unless
-# the host runs Compose v2.24+ with `!override`).
-#
-# The company image is transferred as a tarball and installed with
-# `docker load`, so it lives only in this host's docker daemon under a local tag
-# such as sub2api-company:0.1.156-5670fce7c. That tag is in no registry, so:
-#
-#   - never run `docker compose pull sub2api` on this host, and
-#   - pull_policy is pinned to `never` so an accidental `up` cannot try either.
-#
-# Bind address and port come from BIND_HOST / SERVER_PORT in .env.
+# Topology: sub2api has no public entry point. NewAPI already runs on this host
+# and reaches the pool over a shared docker network as http://sub2api:8080.
+# There is no domain and no reverse proxy.
 # =============================================================================
 
 services:
   sub2api:
-    image: ${SUB2API_IMAGE:?SUB2API_IMAGE is required, e.g. sub2api-company:0.1.156-5670fce7c}
+    # -------------------------------------------------------------------------
+    # Image: transferred as a tarball and installed with `docker load`, so it
+    # lives only in this host's docker daemon under a local tag such as
+    # sub2api-company:0.1.156-5670fce7c. That tag is in no registry, so never
+    # run `docker compose pull sub2api`; pull_policy makes an accidental `up`
+    # fail fast instead of trying to fetch it.
+    # -------------------------------------------------------------------------
+    image: "${SUB2API_IMAGE:?set SUB2API_IMAGE in .env to the loaded tag}"
     pull_policy: never
+
+    # -------------------------------------------------------------------------
+    # Networks
+    # -------------------------------------------------------------------------
+    # sub2api-network is the base file's internal network (postgres + redis).
+    # newapi is NewAPI's existing network, joined as external so NewAPI's own
+    # compose project is never touched. Both are listed explicitly: Compose
+    # appends service-level network lists rather than replacing them, and
+    # repeating the base entry is harmless while making the intent readable.
+    #
+    # Container DNS: NewAPI resolves this service as `sub2api` (container_name)
+    # on the shared network, so its channel Base URL is http://sub2api:8080.
+    networks:
+      - sub2api-network
+      - newapi
+
+    # -------------------------------------------------------------------------
+    # Published ports
+    # -------------------------------------------------------------------------
+    # The base file publishes ${BIND_HOST}:${SERVER_PORT}->8080. BIND_HOST is
+    # pinned to 127.0.0.1 in .env, so the port is reachable only from the host
+    # itself, never from the office network. It exists purely so you can
+    # administer the pool over an SSH tunnel:
+    #
+    #   ssh -N -L 18080:127.0.0.1:18080 <USER>@<HOST>
+    #   # then browse http://localhost:18080 on your laptop
+    #
+    # NewAPI does NOT use this port -- it goes over the shared docker network.
+    #
+    # If you want literally zero published ports, uncomment the line below.
+    # Requires Compose >= v2.24 (older versions fail to parse !reset, which is
+    # a safe fail-closed outcome). You then lose the SSH-tunnel admin path and
+    # must reach the UI another way.
+    # ports: !reset []
+
+networks:
+  # NewAPI's existing network, joined from the outside so NewAPI's own compose
+  # project needs no changes. Find the name with:
+  #   docker inspect <newapi-container> --format '{{json .NetworkSettings.Networks}}'
+  newapi:
+    external: true
+    name: "${NEWAPI_NETWORK:?set NEWAPI_NETWORK in .env to NewAPI's docker network name}"
