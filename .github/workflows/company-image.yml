@@ -1,0 +1,134 @@
+name: Company Image
+
+# Builds the company-deployment branch into a docker image tarball and uploads
+# it as a workflow artifact. Deliberately never pushes to GHCR: the shared
+# mutable tag ghcr.io/<owner>/sub2api:<VERSION> is owned by the custom/prod
+# production deployment, and pushing this branch under the same VERSION would
+# overwrite the image production pulls.
+#
+# Transfer path: gh run download -> scp -> docker load on the company server.
+# The company server therefore never needs registry credentials.
+
+# BOOTSTRAP ONLY -- remove the `push` trigger after the first successful run.
+# GitHub refuses to dispatch a workflow_dispatch workflow that has never run and
+# does not exist on the default branch, and this file is deliberately kept off
+# `main` so it cannot interfere with release.yml's calibration schedule. Pushing
+# once with this trigger registers the workflow (and produces the first image);
+# afterwards `gh workflow run company-image.yml --ref custom/company` works and
+# this trigger should be deleted so ordinary branch pushes stop rebuilding.
+on:
+  push:
+    branches:
+      - custom/company
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Branch/commit to build'
+        required: false
+        type: string
+        default: 'custom/company'
+      retention_days:
+        description: 'Artifact retention in days'
+        required: false
+        type: string
+        default: '7'
+
+permissions:
+  contents: read
+
+jobs:
+  company-image:
+    runs-on: ubuntu-latest
+    # Inputs are absent on the bootstrap `push` run, so fall back to the pushed
+    # branch and the default retention.
+    env:
+      SOURCE_REF: ${{ github.event.inputs.source_ref || github.ref_name }}
+      RETENTION_DAYS: ${{ github.event.inputs.retention_days || '7' }}
+    steps:
+      - name: Checkout requested source ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.source_ref || github.ref_name }}
+          fetch-depth: 1
+
+      - name: Resolve official version and source commit
+        id: metadata
+        shell: bash
+        run: |
+          VERSION="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid backend/cmd/server/VERSION: $VERSION" >&2
+            exit 1
+          fi
+          COMMIT="$(git rev-parse --short=8 HEAD)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "image=sub2api-company:$VERSION-$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "artifact=sub2api-company-$VERSION-$COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image into the local docker daemon
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ steps.metadata.outputs.image }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ steps.metadata.outputs.commit }}
+          cache-from: type=gha,scope=sub2api-company-amd64
+          cache-to: type=gha,mode=max,scope=sub2api-company-amd64
+          provenance: false
+
+      - name: Verify the built binary reports the expected version
+        run: |
+          docker run --rm --entrypoint /app/sub2api \
+            "${{ steps.metadata.outputs.image }}" --version
+
+      - name: Export image tarball
+        run: |
+          mkdir -p /tmp/image
+          docker save "${{ steps.metadata.outputs.image }}" \
+            | gzip -9 > "/tmp/image/${{ steps.metadata.outputs.artifact }}.tar.gz"
+          ls -lh /tmp/image
+
+      - name: Record the image digest for transfer verification
+        id: checksum
+        run: |
+          cd /tmp/image
+          sha256sum "${{ steps.metadata.outputs.artifact }}.tar.gz" \
+            > "${{ steps.metadata.outputs.artifact }}.tar.gz.sha256"
+          cat "${{ steps.metadata.outputs.artifact }}.tar.gz.sha256"
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.metadata.outputs.artifact }}
+          path: /tmp/image/
+          retention-days: ${{ env.RETENTION_DAYS }}
+          compression-level: 0
+
+      - name: Publish transfer instructions
+        run: |
+          {
+            echo "## Company image"
+            echo ""
+            echo "- Source: \`${{ env.SOURCE_REF }}\`"
+            echo "- Commit: \`${{ steps.metadata.outputs.commit }}\`"
+            echo "- App version: \`${{ steps.metadata.outputs.version }}\`"
+            echo "- Local image tag: \`${{ steps.metadata.outputs.image }}\`"
+            echo "- Not pushed to GHCR by design."
+            echo ""
+            echo '```bash'
+            echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }} \\"
+            echo "  --name ${{ steps.metadata.outputs.artifact }} --dir ./transfer"
+            echo "cd transfer && shasum -a 256 -c ${{ steps.metadata.outputs.artifact }}.tar.gz.sha256"
+            echo "scp -P <PORT> ${{ steps.metadata.outputs.artifact }}.tar.gz <USER>@<HOST>:/tmp/"
+            echo "ssh -p <PORT> <USER>@<HOST> 'docker load -i /tmp/${{ steps.metadata.outputs.artifact }}.tar.gz'"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

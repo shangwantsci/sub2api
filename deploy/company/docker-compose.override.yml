@@ -1,0 +1,27 @@
+# =============================================================================
+# Company deployment override
+# =============================================================================
+# Layered on top of deploy/docker-compose.local.yml:
+#
+#   docker compose -f docker-compose.local.yml -f docker-compose.override.yml up -d
+#
+# The only change is where the image comes from. Everything else -- including
+# the listen address -- is already parameterised by the base file and is driven
+# from .env, so this override deliberately stays tiny (redefining `ports` here
+# would append a second published port rather than replace the base one, unless
+# the host runs Compose v2.24+ with `!override`).
+#
+# The company image is transferred as a tarball and installed with
+# `docker load`, so it lives only in this host's docker daemon under a local tag
+# such as sub2api-company:0.1.156-5670fce7c. That tag is in no registry, so:
+#
+#   - never run `docker compose pull sub2api` on this host, and
+#   - pull_policy is pinned to `never` so an accidental `up` cannot try either.
+#
+# Bind address and port come from BIND_HOST / SERVER_PORT in .env.
+# =============================================================================
+
+services:
+  sub2api:
+    image: ${SUB2API_IMAGE:?SUB2API_IMAGE is required, e.g. sub2api-company:0.1.156-5670fce7c}
+    pull_policy: never
