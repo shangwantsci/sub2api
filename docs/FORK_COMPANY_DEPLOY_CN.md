@@ -484,6 +484,81 @@ docker exec sub2api /app/sub2api --version
 旧镜像 tag 不要急着 `docker rmi`，它就是回滚点。回滚只需把 `.env` 的
 `SUB2API_IMAGE` 改回旧 tag 再 `up -d --force-recreate sub2api`，不动数据库和 Redis。
 
+## 8b. 从生产迁移分组与账号（2026-07-25 已执行）
+
+把生产 `custom/prod`（38.244.21.202）上的一个分组连账号带代理复制到公司机器，
+用的就是刻意保留的 JSON 数据导出/导入。
+
+### 导出能带走什么，不能带走什么
+
+`GET /api/v1/admin/accounts/data?group=<ID>&include_proxies=true` 会带上：
+账号名、平台、类型、**凭据原文**、`extra`（persona / base_rpm / max_sessions /
+window_cost_limit / 被动用量快照等）、并发、优先级、倍率、到期时间，以及账号引用
+到的代理（含 host/port/**用户名密码**）。
+
+**带不走两样，必须手工补：**
+
+1. **`status` 不在 `DataAccount` 结构里。** 生产上是 error 的账号会以 active 落地。
+2. **分组归属带不走。** `importData` 里写死 `GroupIDs: nil`，导入后账号是无分组的，
+   必须另外建分组再用 `POST /accounts/bulk-update` 绑定。
+
+分组本身也不在导出范围内，要在目标端重建并复刻配置。
+
+### 本次执行记录
+
+```text
+源            生产 group 16「芭芭拉公司分组」
+目标          公司 group 2，同名
+账号          13 个全部迁移成功（10 setup-token / 3 oauth），0 失败
+代理          13 个全部新建成功（socks5:443，1:1 对应），0 失败
+载荷校验      22029 字节，sha256 0fe56683b32a9b0b191e00854a078a4ee4a5fa1de0e864ac9b5aac149863a96e
+              生产端与公司端逐字节一致
+```
+
+复刻的分组配置（这几项不复刻会导致行为与生产不一致）：
+
+```text
+platform                          = anthropic
+content_review_policy             = disabled
+claude_oauth_system_prompt_policy = identity_only     ← 记忆文档 4.8 节的两块提示词模式
+mcp_xml_inject                    = true
+setup_token / api_key 池权重       = 100 / 0
+models_list_config                = 9 个模型，enabled=false
+```
+
+生产上 10 个账号处于 error，原因全部是凭据层面死亡（6 个 OAuth token revoked、
+2 个 CLAUDE_SESSION_KEY_INVALID、1 个 org 禁用 OAuth、1 个 invalid_grant）。
+**换机器不会复活**，因此导入后统一设为 `schedulable=false`，避免被调度器选中后向
+NewAPI 返回错误。公司机器上的后台刷新器随后独立复现了完全相同的失败原因，反证
+迁移数据是忠实的。
+
+3 个可用账号已实测通过（真实调用 Anthropic，Claude 正常回复）：公司3、公司6、公司7。
+
+### 一个必须知道的后果：迁移进来了 3 个 claude_chrome 账号
+
+公司2、公司3、公司4 的 `credentials.oauth_client = claude_chrome`，其中
+**公司3 是仅有的 3 个可用账号之一**。
+
+它们现在能正常工作，是因为第 2 节所述——后端 `claude_chrome` 的刷新、SessionKey
+回退、CAS 逻辑被刻意保留了，只删了入口。所以：
+
+- **可以**：继续调度、后台自动刷新 token、refresh_token 失效时用已保存的
+  `session_key` 自愈；
+- **不可以**：一旦 `session_key` 也失效，**无法在公司后台重新授权** ——
+  「Chrome Cookie 授权」和「使用 SessionKey 重新授权」两个入口在本分支已删除。
+
+届时的选择是：在生产后台重新授权后再迁移一次，或者按第 3 节第 3 条用 curl 手工
+构造凭据。公司2、公司4 已经是这个状态（SessionKey 已失效），在公司机器上无法救回。
+
+### 复用本流程
+
+1. 生产侧读 `settings.admin_api_key`（**只在服务器本地读取，不外传**），
+   `curl` 导出接口，用 python 把响应的 `data` 字段包成 `{"data": ..., "skip_default_group_bind": true}`；
+2. 传输前后各校验一次 sha256；
+3. 目标侧用管理员账号换 JWT（公司机器没配 `admin_api_key`），建分组 → 导入 →
+   `bulk-update` 绑分组 → `bulk-update` 设置失效账号 `schedulable=false`；
+4. **导出文件含明文凭据**，两端 `/tmp` 与本机临时目录用完立即删除。
+
 ## 9. 标定 profile 手工同步
 
 公司机器不在 GitHub 定时标定的 publish 目标里，默认走编译内置常量（安全，但伪装
