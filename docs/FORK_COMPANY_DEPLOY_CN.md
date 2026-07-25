@@ -294,6 +294,47 @@ docker exec sub2api wget -qO- http://localhost:8080/health
 
 确认后删掉临时文件：`rm -f /tmp/sub2api-company-*.tar.gz`
 
+### 7.4b 管理后台走 HTTPS 对外（2026-07-25 追加）
+
+初版只绑回环、靠 SSH 隧道进后台。后来改为对外开放，但**没有**直接发布
+`0.0.0.0:18080`，原因是两点：
+
+1. **Docker 发布的端口不受 ufw 管辖。** Docker 把规则插在 iptables 的
+   `nat/PREROUTING`，在 ufw 的 INPUT 过滤之前执行。直接发布会让 18080 对整个
+   互联网开放，而 `ufw status` 里根本看不到它——防火墙看起来是关着的。
+2. **明文 HTTP。** 登录密码、会话 cookie、粘贴的 sessionKey / OAuth code 全部
+   裸奔。这台机器的价值就是账号池，而 `session_key` 在数据库里是明文存储的。
+
+改用宿主机 nginx 反代，容器继续只绑 `127.0.0.1:18080`：
+
+```text
+https://www.51tokens.vip:8443  ──nginx──►  127.0.0.1:18080
+```
+
+为什么是非标端口而不是子域名：现有 Let's Encrypt 证书的 SAN **只有**
+`www.51tokens.vip`，不是通配符；而 `pool.` / `api.` 等子域名都没有 DNS 解析。
+复用同一张证书监听同域名的另一个端口，就能立刻拿到合法 HTTPS，无需改 DNS。
+将来若加了子域名 DNS 并签发新证书，把 `listen 8443` 改成 `listen 443` 并换
+`server_name` 即可。**证书 2026-10-21 到期，续期后本配置无需改动（路径不变）。**
+
+配置文件：`deploy/company/nginx-sub2api-admin.conf` →
+服务器 `/www/server/panel/vhost/nginx/sub2api-admin.conf`。它不是宝塔创建的站点，
+宝塔后台里看不到，但 `nginx.conf` 的 `include .../vhost/nginx/*.conf` 会加载它。
+443 端口仍然完全属于 NewAPI，本配置不碰。
+
+**网关推理入口在 nginx 层被挡掉**（返回 404 而非 403，避免对外确认路径存在）：
+`/v1/*`、`/responses*`、`/images/*`、`/videos/*`、`/backend-api/*`、
+`/chat/completions`、`/embeddings`、`/models`、`/alpha/search`。
+
+这样公网只能摸到管理后台，账号池的推理入口完全不暴露。NewAPI 走
+`http://127.0.0.1:18080` 回环，不经过 nginx，因此不受这些拦截影响。
+
+安全性依据：前端 dist 只有 `assets/`、`index.html`、`logo.png` 三项，与上述被挡
+前缀零重叠；`/api/v1/*`（后台 API）与被挡的 `/v1/*` 是不同前缀，不受影响。
+
+应用配置时务必先 `nginx -t` 再 `nginx -s reload`（reload 不断开现有连接），
+并在 reload 后立即复查 NewAPI 与 443 站点。
+
 ### 7.5 验证回环可达
 
 NewAPI 是宿主机进程，所以直接在宿主机上打就是它将来走的同一条路径：
@@ -385,6 +426,23 @@ POST /v1/chat/completions                                    401 ✓
 ```
 
 现有业务未受影响：`newapi-51tokens` active、:3000 返回 200、nginx :443 返回 200。
+
+管理后台 HTTPS 开放后，从**公网**实测：
+
+```text
+https://www.51tokens.vip:8443/        200，ssl_verify_result=0（证书有效）
+POST /v1/messages                     404 ✓（网关已挡在公网外）
+POST /chat/completions                404 ✓
+POST /models                          404 ✓
+/api/v1/admin/accounts                401 ✓（后台 API 可达且需鉴权）
+http://154.29.158.57:18080/health     不可达 ✓（裸端口未暴露）
+https://www.51tokens.vip/             200 ✓（NewAPI 主站未受影响）
+http://127.0.0.1:18080/v1/messages    401 ✓（NewAPI 回环通路未受 nginx 拦截影响）
+```
+
+登录方式：填**邮箱**，不是用户名（数据库里 `users.username` 为空）。
+初始账号 `admin@example.com`，密码在服务器 `/opt/sub2api-company/.env` 的
+`ADMIN_PASSWORD`，首次登录后应立即修改并开启 2FA。
 
 ### 一个容易误判的现象
 
