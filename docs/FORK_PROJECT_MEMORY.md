@@ -55,7 +55,7 @@ git branch --show-current
 | 产物 | 推送 GHCR | `docker save` 成 artifact，不推任何 registry |
 | 镜像 tag | `ghcr.io/shangwantsci/sub2api:<VER>[-<commit>]` | `sub2api-company:<VER>-<commit>` |
 | 分发 | 服务器 `docker compose pull` | `gh run download` → `scp` → `docker load` |
-| 对外入口 | Caddy 反代 + 域名 | 无域名、无反代，NewAPI 走 docker 内网 |
+| 对外入口 | Caddy 反代 + 域名 | 无域名、无反代，NewAPI 走本机回环 |
 | 标定 profile | GitHub 定时自动发布 | 手工同步 |
 | 运维文档 | `FORK_DEPLOY_RUNBOOK_CN.md` | `FORK_COMPANY_DEPLOY_CN.md` |
 
