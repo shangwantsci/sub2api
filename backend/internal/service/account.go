@@ -60,6 +60,12 @@ type Account struct {
 	ParentAccountID *int64 // non-nil → 影子账号（不持凭据，透传母账号凭据）
 	QuotaDimension  string // 用量维度："" / "global" / "spark"
 
+	// ProviderUserID 供号商归属；nil 表示管理员自己上的号。
+	// 结算按此字段聚合，账号软删除后归属仍保留，已产生金额继续计入本期。
+	ProviderUserID *int64
+	// ProviderTier 供号商上号时选择的速率档位（"1".."5" 或 "custom"）。
+	ProviderTier *string
+
 	Proxy         *Proxy
 	AccountGroups []AccountGroup
 	GroupIDs      []int64

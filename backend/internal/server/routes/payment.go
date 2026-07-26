@@ -24,6 +24,8 @@ func RegisterPaymentRoutes(
 	authenticated := v1.Group("/payment")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
+	// 供号商是纯供货方，没有余额也不消费，支付侧接口一律拒绝。
+	authenticated.Use(middleware.ProviderDenyConsumerRoutes())
 	{
 		authenticated.GET("/config", paymentHandler.GetPaymentConfig)
 		authenticated.GET("/checkout-info", paymentHandler.GetCheckoutInfo)

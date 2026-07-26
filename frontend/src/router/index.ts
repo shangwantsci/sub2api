@@ -395,6 +395,78 @@ const routes: RouteRecordRaw[] = [
     }
   },
 
+  // ==================== Provider Portal Routes ====================
+  // 供号商站点。同一套应用内的独立入口：独立登录/注册、独立布局、独立导航，
+  // 视觉与功能上都与主站分开。守卫见 beforeEach 里的 requiresProvider 分支。
+  {
+    path: '/provider',
+    redirect: '/provider/dashboard'
+  },
+  {
+    path: '/provider/login',
+    name: 'ProviderLogin',
+    component: () => import('@/views/provider/ProviderLogin.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Provider Login',
+      titleKey: 'provider.auth.loginTitle'
+    }
+  },
+  {
+    path: '/provider/register',
+    name: 'ProviderRegister',
+    component: () => import('@/views/provider/ProviderRegister.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Provider Register',
+      titleKey: 'provider.auth.registerTitle'
+    }
+  },
+  {
+    path: '/provider/dashboard',
+    name: 'ProviderDashboard',
+    component: () => import('@/views/provider/ProviderDashboard.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresProvider: true,
+      title: 'Provider Dashboard',
+      titleKey: 'provider.dashboard.title'
+    }
+  },
+  {
+    path: '/provider/onboard',
+    name: 'ProviderOnboard',
+    component: () => import('@/views/provider/ProviderOnboard.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresProvider: true,
+      title: 'Onboard Account',
+      titleKey: 'provider.onboard.title'
+    }
+  },
+  {
+    path: '/provider/accounts',
+    name: 'ProviderAccounts',
+    component: () => import('@/views/provider/ProviderAccounts.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresProvider: true,
+      title: 'Provider Accounts',
+      titleKey: 'provider.accounts.title'
+    }
+  },
+  {
+    path: '/provider/billing',
+    name: 'ProviderBilling',
+    component: () => import('@/views/provider/ProviderBilling.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresProvider: true,
+      title: 'Provider Billing',
+      titleKey: 'provider.billing.title'
+    }
+  },
+
   // ==================== Admin Routes ====================
   {
     path: '/admin',
@@ -533,6 +605,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Proxy Management',
       titleKey: 'admin.proxies.title',
       descriptionKey: 'admin.proxies.description'
+    }
+  },
+  {
+    path: '/admin/providers',
+    name: 'AdminProviders',
+    component: () => import('@/views/admin/ProvidersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Provider Settlement',
+      titleKey: 'admin.providers.title',
+      descriptionKey: 'admin.providers.subtitle'
     }
   },
   {
@@ -764,6 +848,7 @@ router.beforeEach(async (to, _from, next) => {
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true
   const requiresAdmin = to.meta.requiresAdmin === true
+  const requiresProvider = to.meta.requiresProvider === true
 
   if (to.path === '/setup') {
     try {
@@ -779,8 +864,22 @@ router.beforeEach(async (to, _from, next) => {
 
   // If route doesn't require auth, allow access
   if (!requiresAuth) {
+    // 已登录的供号商访问供号商登录/注册页，直接送进供号商面板。
+    if (
+      authStore.isAuthenticated &&
+      authStore.isProvider &&
+      (to.path === '/provider/login' || to.path === '/provider/register')
+    ) {
+      next('/provider/dashboard')
+      return
+    }
     // If already authenticated and trying to access login/register, redirect to appropriate dashboard
     if (authStore.isAuthenticated && (to.path === '/login' || to.path === '/register')) {
+      // 供号商是纯供货方，主站仪表盘对他们没有任何内容，直接送回供号商面板。
+      if (authStore.isProvider) {
+        next('/provider/dashboard')
+        return
+      }
       // In backend mode, non-admin users should NOT be redirected away from login
       // (they are blocked from all protected routes, so redirecting would cause a loop)
       if (appStore.backendModeEnabled && !authStore.isAdmin) {
@@ -805,11 +904,22 @@ router.beforeEach(async (to, _from, next) => {
 
   // Route requires authentication
   if (!authStore.isAuthenticated) {
-    // Not authenticated, redirect to login
+    // 供号商路由未登录时回供号商登录页，而不是主站登录页 —— 两个站点的入口是分开的。
     next({
-      path: '/login',
+      path: requiresProvider ? '/provider/login' : '/login',
       query: { redirect: to.fullPath } // Save intended destination
     })
+    return
+  }
+
+  // 供号商双向隔离，与后端 ProviderOnly / ProviderDenyConsumerRoutes 两个守卫一一对应。
+  if (requiresProvider && !authStore.isProvider) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    return
+  }
+  if (!requiresProvider && authStore.isProvider) {
+    // 供号商访问主站任何受保护页面（含 admin 区）一律弹回供号商面板。
+    next('/provider/dashboard')
     return
   }
 

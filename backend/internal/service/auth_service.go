@@ -316,6 +316,18 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale .
 	return s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale))
 }
 
+// SendProviderVerifyCodeAsync 为供号商注册异步发送邮箱验证码。
+//
+// 与 SendVerifyCodeAsync 的唯一差别是准入开关：这里看 provider_portal_enabled，
+// 而不是 registration_enabled。典型部署正是「关闭公开注册、只开供号商邀请码」，
+// 若沿用注册开关，带邮箱验证的供号商注册会在发码这一步就走不通。
+func (s *AuthService) SendProviderVerifyCodeAsync(ctx context.Context, email string, locale ...string) (*SendVerifyCodeResult, error) {
+	if s.settingService == nil || !s.settingService.IsProviderPortalEnabled(ctx) {
+		return nil, ErrProviderPortalDisabled
+	}
+	return s.sendVerifyCodeAsyncAfterGate(ctx, email, locale...)
+}
+
 // SendVerifyCodeAsync 异步发送邮箱验证码并返回倒计时
 func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, locale ...string) (*SendVerifyCodeResult, error) {
 	logger.LegacyPrintf("service.auth", "[Auth] SendVerifyCodeAsync called for email: %s", email)
@@ -326,6 +338,12 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, loc
 		return nil, ErrRegDisabled
 	}
 
+	return s.sendVerifyCodeAsyncAfterGate(ctx, email, locale...)
+}
+
+// sendVerifyCodeAsyncAfterGate 是发码流程中与准入开关无关的部分。
+// 调用方负责先校验各自的开关（注册开关 / 供号商站点开关）。
+func (s *AuthService) sendVerifyCodeAsyncAfterGate(ctx context.Context, email string, locale ...string) (*SendVerifyCodeResult, error) {
 	if isReservedEmail(email) {
 		return nil, ErrEmailReserved
 	}

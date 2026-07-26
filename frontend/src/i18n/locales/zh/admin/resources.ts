@@ -257,6 +257,7 @@ export default {
         concurrency: '并发数',
         subscription: '订阅',
         invitation: '邀请码',
+        provider_invite: '供号商邀请码',
         // 管理员在用户管理页面调整余额/并发时产生的记录
         admin_balance: '余额（管理员）',
         admin_concurrency: '并发数（管理员）'
@@ -267,6 +268,9 @@ export default {
       subscription: '订阅',
       invitation: '邀请码',
       invitationHint: '邀请码用于限制用户注册，使用后自动标记为已使用。',
+      providerInvite: '供号商邀请码',
+      providerInviteHint:
+        '供号商邀请码只能用于供号商站点注册，凭码注册的用户会被标记为供号商，只能上号与查看对账，不能调用。建议在备注里记录发给了谁。',
       allTypes: '全部类型',
       allStatus: '全部状态',
       unused: '未使用',

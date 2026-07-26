@@ -18,11 +18,14 @@ type User struct {
 	AvatarSHA256   string
 	PasswordHash   string
 	Role           string
-	Balance        float64
-	FrozenBalance  float64
-	Concurrency    int
-	Status         string
-	AllowedGroups  []int64
+	// IsProvider 供号商能力位。Role 仍为 RoleUser，但只能访问 /provider 站点，
+	// 消费侧接口（API Key、网关、余额）一律拒绝。
+	IsProvider    bool
+	Balance       float64
+	FrozenBalance float64
+	Concurrency   int
+	Status        string
+	AllowedGroups []int64
 	TokenVersion   int64 // Incremented on password change to invalidate existing tokens
 	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
 	// value expected in JWT claims and refresh-token state.
@@ -66,6 +69,14 @@ type User struct {
 
 func (u *User) IsAdmin() bool {
 	return u.Role == RoleAdmin
+}
+
+// IsProviderUser 判断用户是否为供号商。
+//
+// 命名带 User 后缀是为了避开同名字段 IsProvider。管理员即便误置该标志也不算供号商，
+// 避免管理员被 provider 守卫意外降级。
+func (u *User) IsProviderUser() bool {
+	return u != nil && u.IsProvider && u.Role != RoleAdmin
 }
 
 func (u *User) IsActive() bool {

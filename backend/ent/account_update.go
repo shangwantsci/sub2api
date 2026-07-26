@@ -585,6 +585,53 @@ func (_u *AccountUpdate) SetNillableQuotaDimension(v *account.QuotaDimension) *A
 	return _u
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (_u *AccountUpdate) SetProviderUserID(v int64) *AccountUpdate {
+	_u.mutation.ResetProviderUserID()
+	_u.mutation.SetProviderUserID(v)
+	return _u
+}
+
+// SetNillableProviderUserID sets the "provider_user_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableProviderUserID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetProviderUserID(*v)
+	}
+	return _u
+}
+
+// AddProviderUserID adds value to the "provider_user_id" field.
+func (_u *AccountUpdate) AddProviderUserID(v int64) *AccountUpdate {
+	_u.mutation.AddProviderUserID(v)
+	return _u
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (_u *AccountUpdate) ClearProviderUserID() *AccountUpdate {
+	_u.mutation.ClearProviderUserID()
+	return _u
+}
+
+// SetProviderTier sets the "provider_tier" field.
+func (_u *AccountUpdate) SetProviderTier(v string) *AccountUpdate {
+	_u.mutation.SetProviderTier(v)
+	return _u
+}
+
+// SetNillableProviderTier sets the "provider_tier" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableProviderTier(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetProviderTier(*v)
+	}
+	return _u
+}
+
+// ClearProviderTier clears the value of the "provider_tier" field.
+func (_u *AccountUpdate) ClearProviderTier() *AccountUpdate {
+	_u.mutation.ClearProviderTier()
+	return _u
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdate) AddGroupIDs(ids ...int64) *AccountUpdate {
 	_u.mutation.AddGroupIDs(ids...)
@@ -808,6 +855,11 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "Account.quota_dimension": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ProviderTier(); ok {
+		if err := account.ProviderTierValidator(v); err != nil {
+			return &ValidationError{Name: "provider_tier", err: fmt.Errorf(`ent: validator failed for field "Account.provider_tier": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -972,6 +1024,21 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.QuotaDimension(); ok {
 		_spec.SetField(account.FieldQuotaDimension, field.TypeEnum, value)
+	}
+	if value, ok := _u.mutation.ProviderUserID(); ok {
+		_spec.SetField(account.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProviderUserID(); ok {
+		_spec.AddField(account.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.ProviderUserIDCleared() {
+		_spec.ClearField(account.FieldProviderUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ProviderTier(); ok {
+		_spec.SetField(account.FieldProviderTier, field.TypeString, value)
+	}
+	if _u.mutation.ProviderTierCleared() {
+		_spec.ClearField(account.FieldProviderTier, field.TypeString)
 	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1752,6 +1819,53 @@ func (_u *AccountUpdateOne) SetNillableQuotaDimension(v *account.QuotaDimension)
 	return _u
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (_u *AccountUpdateOne) SetProviderUserID(v int64) *AccountUpdateOne {
+	_u.mutation.ResetProviderUserID()
+	_u.mutation.SetProviderUserID(v)
+	return _u
+}
+
+// SetNillableProviderUserID sets the "provider_user_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableProviderUserID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetProviderUserID(*v)
+	}
+	return _u
+}
+
+// AddProviderUserID adds value to the "provider_user_id" field.
+func (_u *AccountUpdateOne) AddProviderUserID(v int64) *AccountUpdateOne {
+	_u.mutation.AddProviderUserID(v)
+	return _u
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (_u *AccountUpdateOne) ClearProviderUserID() *AccountUpdateOne {
+	_u.mutation.ClearProviderUserID()
+	return _u
+}
+
+// SetProviderTier sets the "provider_tier" field.
+func (_u *AccountUpdateOne) SetProviderTier(v string) *AccountUpdateOne {
+	_u.mutation.SetProviderTier(v)
+	return _u
+}
+
+// SetNillableProviderTier sets the "provider_tier" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableProviderTier(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetProviderTier(*v)
+	}
+	return _u
+}
+
+// ClearProviderTier clears the value of the "provider_tier" field.
+func (_u *AccountUpdateOne) ClearProviderTier() *AccountUpdateOne {
+	_u.mutation.ClearProviderTier()
+	return _u
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdateOne) AddGroupIDs(ids ...int64) *AccountUpdateOne {
 	_u.mutation.AddGroupIDs(ids...)
@@ -1988,6 +2102,11 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "Account.quota_dimension": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ProviderTier(); ok {
+		if err := account.ProviderTierValidator(v); err != nil {
+			return &ValidationError{Name: "provider_tier", err: fmt.Errorf(`ent: validator failed for field "Account.provider_tier": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -2169,6 +2288,21 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.QuotaDimension(); ok {
 		_spec.SetField(account.FieldQuotaDimension, field.TypeEnum, value)
+	}
+	if value, ok := _u.mutation.ProviderUserID(); ok {
+		_spec.SetField(account.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProviderUserID(); ok {
+		_spec.AddField(account.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.ProviderUserIDCleared() {
+		_spec.ClearField(account.FieldProviderUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ProviderTier(); ok {
+		_spec.SetField(account.FieldProviderTier, field.TypeString, value)
+	}
+	if _u.mutation.ProviderTierCleared() {
+		_spec.ClearField(account.FieldProviderTier, field.TypeString)
 	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{

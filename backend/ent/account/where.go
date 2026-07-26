@@ -200,6 +200,16 @@ func ParentAccountID(v int64) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldParentAccountID, v))
 }
 
+// ProviderUserID applies equality check predicate on the "provider_user_id" field. It's identical to ProviderUserIDEQ.
+func ProviderUserID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProviderUserID, v))
+}
+
+// ProviderTier applies equality check predicate on the "provider_tier" field. It's identical to ProviderTierEQ.
+func ProviderTier(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProviderTier, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldCreatedAt, v))
@@ -1648,6 +1658,131 @@ func QuotaDimensionIn(vs ...QuotaDimension) predicate.Account {
 // QuotaDimensionNotIn applies the NotIn predicate on the "quota_dimension" field.
 func QuotaDimensionNotIn(vs ...QuotaDimension) predicate.Account {
 	return predicate.Account(sql.FieldNotIn(FieldQuotaDimension, vs...))
+}
+
+// ProviderUserIDEQ applies the EQ predicate on the "provider_user_id" field.
+func ProviderUserIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProviderUserID, v))
+}
+
+// ProviderUserIDNEQ applies the NEQ predicate on the "provider_user_id" field.
+func ProviderUserIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldProviderUserID, v))
+}
+
+// ProviderUserIDIn applies the In predicate on the "provider_user_id" field.
+func ProviderUserIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldProviderUserID, vs...))
+}
+
+// ProviderUserIDNotIn applies the NotIn predicate on the "provider_user_id" field.
+func ProviderUserIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldProviderUserID, vs...))
+}
+
+// ProviderUserIDGT applies the GT predicate on the "provider_user_id" field.
+func ProviderUserIDGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldProviderUserID, v))
+}
+
+// ProviderUserIDGTE applies the GTE predicate on the "provider_user_id" field.
+func ProviderUserIDGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldProviderUserID, v))
+}
+
+// ProviderUserIDLT applies the LT predicate on the "provider_user_id" field.
+func ProviderUserIDLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldProviderUserID, v))
+}
+
+// ProviderUserIDLTE applies the LTE predicate on the "provider_user_id" field.
+func ProviderUserIDLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldProviderUserID, v))
+}
+
+// ProviderUserIDIsNil applies the IsNil predicate on the "provider_user_id" field.
+func ProviderUserIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldProviderUserID))
+}
+
+// ProviderUserIDNotNil applies the NotNil predicate on the "provider_user_id" field.
+func ProviderUserIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldProviderUserID))
+}
+
+// ProviderTierEQ applies the EQ predicate on the "provider_tier" field.
+func ProviderTierEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProviderTier, v))
+}
+
+// ProviderTierNEQ applies the NEQ predicate on the "provider_tier" field.
+func ProviderTierNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldProviderTier, v))
+}
+
+// ProviderTierIn applies the In predicate on the "provider_tier" field.
+func ProviderTierIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldProviderTier, vs...))
+}
+
+// ProviderTierNotIn applies the NotIn predicate on the "provider_tier" field.
+func ProviderTierNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldProviderTier, vs...))
+}
+
+// ProviderTierGT applies the GT predicate on the "provider_tier" field.
+func ProviderTierGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldProviderTier, v))
+}
+
+// ProviderTierGTE applies the GTE predicate on the "provider_tier" field.
+func ProviderTierGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldProviderTier, v))
+}
+
+// ProviderTierLT applies the LT predicate on the "provider_tier" field.
+func ProviderTierLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldProviderTier, v))
+}
+
+// ProviderTierLTE applies the LTE predicate on the "provider_tier" field.
+func ProviderTierLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldProviderTier, v))
+}
+
+// ProviderTierContains applies the Contains predicate on the "provider_tier" field.
+func ProviderTierContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldProviderTier, v))
+}
+
+// ProviderTierHasPrefix applies the HasPrefix predicate on the "provider_tier" field.
+func ProviderTierHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldProviderTier, v))
+}
+
+// ProviderTierHasSuffix applies the HasSuffix predicate on the "provider_tier" field.
+func ProviderTierHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldProviderTier, v))
+}
+
+// ProviderTierIsNil applies the IsNil predicate on the "provider_tier" field.
+func ProviderTierIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldProviderTier))
+}
+
+// ProviderTierNotNil applies the NotNil predicate on the "provider_tier" field.
+func ProviderTierNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldProviderTier))
+}
+
+// ProviderTierEqualFold applies the EqualFold predicate on the "provider_tier" field.
+func ProviderTierEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldProviderTier, v))
+}
+
+// ProviderTierContainsFold applies the ContainsFold predicate on the "provider_tier" field.
+func ProviderTierContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldProviderTier, v))
 }
 
 // HasGroups applies the HasEdge predicate on the "groups" edge.

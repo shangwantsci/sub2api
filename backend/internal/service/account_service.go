@@ -75,6 +75,16 @@ type AccountRepository interface {
 	ListActive(ctx context.Context) ([]Account, error)
 	ListByPlatform(ctx context.Context, platform string) ([]Account, error)
 
+	// ListByProvider 返回某供号商名下未删除的账号，按创建时间倒序。
+	ListByProvider(ctx context.Context, providerUserID int64) ([]Account, error)
+	// ListByProviderTier 返回某档位下未删除的供号商账号，供「应用到存量」回填。
+	ListByProviderTier(ctx context.Context, tier string) ([]Account, error)
+	// CountByProviderTier 返回某档位当前账号数，供设置页二次确认预览。
+	CountByProviderTier(ctx context.Context, tier string) (int, error)
+	// UpdateProviderTierParams 回填档位参数。extra 由调用方增量合并后整体传入，
+	// 调用方必须保证未被档位触碰的键原样保留。
+	UpdateProviderTierParams(ctx context.Context, id int64, concurrency, loadFactor int, extra map[string]any) error
+
 	UpdateLastUsed(ctx context.Context, id int64) error
 	BatchUpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error
 	SetError(ctx context.Context, id int64, errorMsg string) error
@@ -116,8 +126,22 @@ type AccountRepository interface {
 	// ListShadowsByParent 返回指定父账号的影子账号；当前实现仅查 quota_dimension='spark'（唯一预设）。
 	// ⚠️ 新增影子维度时：须更新此函数（或新增维度专用列举），并检查所有调用点（级联删除/一母一影校验/type 守卫），否则会静默漏掉新维度。
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
+	// ListByProviderPaged 分页返回某供号商名下的账号。
+	ListByProviderPaged(ctx context.Context, providerUserID int64, params pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error)
+	// DistinctNonProviderPrioritiesByGroup 返回每个分组内「非供号商账号」已有的 priority 去重值。
+	//
+	// 供管理端设置页提示优先级冲突：调度里 priority 是硬门槛，
+	// 只有分组内数值最小的那批账号会被选中，其余完全拿不到流量。
+	DistinctNonProviderPrioritiesByGroup(ctx context.Context) (map[int64][]int, error)
 }
 
+// AccountDuplicateRepository carries the atomic account-plus-groups write.
+//
+// Despite the name (it was introduced for account duplication), this is the general
+// capability for creating an account together with its group bindings in one transaction,
+// and the normal creation path uses it too. Creating the account and binding groups as two
+// separate writes leaves an orphaned, group-less account behind whenever the second write
+// fails, while the caller sees only an error and assumes nothing happened.
 type AccountDuplicateRepository interface {
 	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
 	// and the scheduler outbox event for the new routing snapshot.

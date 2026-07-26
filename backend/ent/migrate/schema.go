@@ -126,6 +126,8 @@ var (
 		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
 		{Name: "quota_dimension", Type: field.TypeEnum, Enums: []string{"global", "spark"}, Default: "global"},
+		{Name: "provider_user_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "provider_tier", Type: field.TypeString, Nullable: true, Size: 20},
 		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "parent_account_id", Type: field.TypeInt64, Nullable: true},
 	}
@@ -137,13 +139,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[31]},
+				Columns:    []*schema.Column{AccountsColumns[33]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "accounts_accounts_children",
-				Columns:    []*schema.Column{AccountsColumns[32]},
+				Columns:    []*schema.Column{AccountsColumns[34]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.Restrict,
 			},
@@ -167,7 +169,7 @@ var (
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[31]},
+				Columns: []*schema.Column{AccountsColumns[33]},
 			},
 			{
 				Name:    "account_priority",
@@ -217,7 +219,12 @@ var (
 			{
 				Name:    "account_parent_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[32]},
+				Columns: []*schema.Column{AccountsColumns[34]},
+			},
+			{
+				Name:    "account_provider_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[31]},
 			},
 		},
 	}
@@ -1307,6 +1314,74 @@ var (
 			},
 		},
 	}
+	// ProviderSettlementsColumns holds the columns for the "provider_settlements" table.
+	ProviderSettlementsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "provider_user_id", Type: field.TypeInt64},
+		{Name: "period_start", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "period_end", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "standard_cost", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "requests", Type: field.TypeInt64, Default: 0},
+		{Name: "tokens", Type: field.TypeInt64, Default: 0},
+		{Name: "account_count", Type: field.TypeInt, Default: 0},
+		{Name: "last_usage_id", Type: field.TypeInt64, Default: 0},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "settled"},
+		{Name: "settled_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "settled_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "voided_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "voided_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "void_reason", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// ProviderSettlementsTable holds the schema information for the "provider_settlements" table.
+	ProviderSettlementsTable = &schema.Table{
+		Name:       "provider_settlements",
+		Columns:    ProviderSettlementsColumns,
+		PrimaryKey: []*schema.Column{ProviderSettlementsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "providersettlement_provider_user_id_period_end",
+				Unique:  false,
+				Columns: []*schema.Column{ProviderSettlementsColumns[1], ProviderSettlementsColumns[3]},
+			},
+			{
+				Name:    "providersettlement_status",
+				Unique:  false,
+				Columns: []*schema.Column{ProviderSettlementsColumns[9]},
+			},
+		},
+	}
+	// ProviderSettlementItemsColumns holds the columns for the "provider_settlement_items" table.
+	ProviderSettlementItemsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "settlement_id", Type: field.TypeInt64},
+		{Name: "account_id", Type: field.TypeInt64},
+		{Name: "account_name", Type: field.TypeString, Size: 100, Default: ""},
+		{Name: "offline", Type: field.TypeBool, Default: false},
+		{Name: "requests", Type: field.TypeInt64, Default: 0},
+		{Name: "tokens", Type: field.TypeInt64, Default: 0},
+		{Name: "standard_cost", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// ProviderSettlementItemsTable holds the schema information for the "provider_settlement_items" table.
+	ProviderSettlementItemsTable = &schema.Table{
+		Name:       "provider_settlement_items",
+		Columns:    ProviderSettlementItemsColumns,
+		PrimaryKey: []*schema.Column{ProviderSettlementItemsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "providersettlementitem_settlement_id_account_id",
+				Unique:  true,
+				Columns: []*schema.Column{ProviderSettlementItemsColumns[1], ProviderSettlementItemsColumns[2]},
+			},
+			{
+				Name:    "providersettlementitem_settlement_id",
+				Unique:  false,
+				Columns: []*schema.Column{ProviderSettlementItemsColumns[1]},
+			},
+		},
+	}
 	// ProxiesColumns holds the columns for the "proxies" table.
 	ProxiesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1701,6 +1776,7 @@ var (
 		{Name: "email", Type: field.TypeString, Size: 255},
 		{Name: "password_hash", Type: field.TypeString, Size: 255},
 		{Name: "role", Type: field.TypeString, Size: 20, Default: "user"},
+		{Name: "is_provider", Type: field.TypeBool, Default: false},
 		{Name: "balance", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "frozen_balance", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "concurrency", Type: field.TypeInt, Default: 5},
@@ -1729,7 +1805,7 @@ var (
 			{
 				Name:    "user_status",
 				Unique:  false,
-				Columns: []*schema.Column{UsersColumns[10]},
+				Columns: []*schema.Column{UsersColumns[11]},
 			},
 			{
 				Name:    "user_deleted_at",
@@ -2019,6 +2095,8 @@ var (
 		PendingAuthSessionsTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
+		ProviderSettlementsTable,
+		ProviderSettlementItemsTable,
 		ProxiesTable,
 		RedeemCodesTable,
 		SecuritySecretsTable,
@@ -2127,6 +2205,12 @@ func init() {
 	PromoCodeUsagesTable.ForeignKeys[1].RefTable = UsersTable
 	PromoCodeUsagesTable.Annotation = &entsql.Annotation{
 		Table: "promo_code_usages",
+	}
+	ProviderSettlementsTable.Annotation = &entsql.Annotation{
+		Table: "provider_settlements",
+	}
+	ProviderSettlementItemsTable.Annotation = &entsql.Annotation{
+		Table: "provider_settlement_items",
 	}
 	ProxiesTable.ForeignKeys[0].RefTable = ProxiesTable
 	ProxiesTable.Annotation = &entsql.Annotation{

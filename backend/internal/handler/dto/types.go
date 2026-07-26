@@ -9,10 +9,12 @@ import (
 )
 
 type User struct {
-	ID            int64      `json:"id"`
-	Email         string     `json:"email"`
-	Username      string     `json:"username"`
-	Role          string     `json:"role"`
+	ID       int64  `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	// IsProvider 供号商能力位；true 表示该用户只能使用 /provider 站点。
+	IsProvider    bool       `json:"is_provider"`
 	Balance       float64    `json:"balance"`
 	FrozenBalance float64    `json:"frozen_balance"`
 	Concurrency   int        `json:"concurrency"`
@@ -296,6 +298,11 @@ type Account struct {
 
 	GroupIDs []int64  `json:"group_ids,omitempty"`
 	Groups   []*Group `json:"groups,omitempty"`
+
+	// 供号商归属。仅管理端可见，用于对账溯源；供号商侧走 handler/provider 的独立视图。
+	ProviderUserID *int64  `json:"provider_user_id,omitempty"`
+	ProviderEmail  string  `json:"provider_email,omitempty"`
+	ProviderTier   *string `json:"provider_tier,omitempty"`
 }
 
 type AccountGroup struct {

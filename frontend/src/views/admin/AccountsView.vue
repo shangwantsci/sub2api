@@ -246,6 +246,20 @@
             <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-300">{{ value }}</span>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
+          <!-- 供号商来源：区分管理员自己上的号与供号商托管的号，便于对账溯源 -->
+          <template #cell-provider="{ row }">
+            <div v-if="row.provider_user_id" class="text-sm">
+              <span class="text-gray-700 dark:text-gray-300">
+                #{{ row.provider_user_id }}
+              </span>
+              <span v-if="row.provider_tier" class="ml-1 text-xs text-gray-400">
+                ({{ row.provider_tier }})
+              </span>
+            </div>
+            <span v-else class="text-sm text-gray-400 dark:text-dark-500">
+              {{ t('admin.accounts.providerSelfManaged') }}
+            </span>
+          </template>
           <template #cell-platform_type="{ row }">
             <div class="flex min-w-0 flex-col gap-1">
               <div class="flex flex-wrap items-center gap-1">
@@ -452,6 +466,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -573,8 +588,10 @@ const exportingData = ref(false)
 // Account tools dropdown
 const showAccountToolsDropdown = ref(false)
 const accountToolsDropdownRef = ref<HTMLElement | null>(null)
+// 组件测试常不带 router 挂载，useRoute() 此时返回 undefined，故取值处一律做空值保护。
+const route = useRoute()
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'scheduler_score', 'rate_multiplier']
+const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'scheduler_score', 'rate_multiplier', 'provider']
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
 // One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
@@ -866,6 +883,8 @@ const {
     privacy_mode: '',
     group: '',
     search: '',
+    // 支持从供号商对账面板深链过来只看某个供号商的账号。
+    provider_user_id: '',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
@@ -1325,6 +1344,7 @@ const allColumns = computed(() => {
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
+    { key: 'provider', label: t('admin.accounts.columns.provider'), sortable: false },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
     { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
   )
@@ -1941,6 +1961,12 @@ const handleClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(async () => {
+  // 从供号商对账面板深链过来时预置筛选，并让该列可见，否则看不出筛的是谁。
+  const providerFromQuery = route?.query?.provider_user_id
+  if (typeof providerFromQuery === 'string' && providerFromQuery.trim() !== '') {
+    params.provider_user_id = providerFromQuery.trim()
+    hiddenColumns.delete('provider')
+  }
   load()
   try {
     const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])

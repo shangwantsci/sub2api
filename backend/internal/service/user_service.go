@@ -98,6 +98,8 @@ type UserRepository interface {
 
 	List(ctx context.Context, params pagination.PaginationParams) ([]User, *pagination.PaginationResult, error)
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UserListFilters) ([]User, *pagination.PaginationResult, error)
+	// ListProviders 返回所有供号商用户，供管理端对账列表使用。
+	ListProviders(ctx context.Context) ([]User, error)
 	GetLatestUsedAtByUserIDs(ctx context.Context, userIDs []int64) (map[int64]*time.Time, error)
 	GetLatestUsedAtByUserID(ctx context.Context, userID int64) (*time.Time, error)
 	UpdateUserLastActiveAt(ctx context.Context, userID int64, activeAt time.Time) error

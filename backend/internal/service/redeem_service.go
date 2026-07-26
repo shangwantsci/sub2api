@@ -198,7 +198,7 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 	}
 
 	// 邀请码类型不需要数值，其他类型需要非零值（支持负数用于退款）
-	if req.Type != RedeemTypeInvitation && req.Value == 0 {
+	if !isValuelessRedeemType(req.Type) && req.Value == 0 {
 		return nil, errors.New("value must not be zero")
 	}
 
@@ -213,7 +213,7 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 
 	// 邀请码类型的 value 设为 0
 	value := req.Value
-	if codeType == RedeemTypeInvitation {
+	if isValuelessRedeemType(codeType) {
 		value = 0
 	}
 
@@ -254,7 +254,7 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	if code.Type == "" {
 		code.Type = RedeemTypeBalance
 	}
-	if code.Type != RedeemTypeInvitation && code.Value == 0 {
+	if !isValuelessRedeemType(code.Type) && code.Value == 0 {
 		return errors.New("value must not be zero")
 	}
 	if code.Status == "" {
@@ -377,9 +377,18 @@ func (s *RedeemService) releaseRedeemLock(ctx context.Context, code string) {
 	_ = s.cache.ReleaseRedeemLock(ctx, code)
 }
 
+// isValuelessRedeemType 报告该类型的兑换码是否不携带面额。
+// 邀请类兑换码只用于注册准入，value 恒为 0。
+func isValuelessRedeemType(codeType string) bool {
+	return codeType == RedeemTypeInvitation || codeType == RedeemTypeProviderInvite
+}
+
 func unsupportedRedeemTypeError(codeType string) error {
-	if codeType == RedeemTypeInvitation {
+	switch codeType {
+	case RedeemTypeInvitation:
 		return infraerrors.BadRequest("REDEEM_CODE_UNSUPPORTED_TYPE", "invitation codes can only be used during registration")
+	case RedeemTypeProviderInvite:
+		return infraerrors.BadRequest("REDEEM_CODE_UNSUPPORTED_TYPE", "provider invite codes can only be used during provider registration")
 	}
 	return infraerrors.BadRequest("REDEEM_CODE_UNSUPPORTED_TYPE", fmt.Sprintf("unsupported redeem type: %s", codeType))
 }

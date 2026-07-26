@@ -59,6 +59,18 @@ type DashboardAggregationService struct {
 	lockCache  LeaderLockCache
 	db         *sql.DB
 	instanceID string
+
+	// settlementGuard 用于在删除 usage_logs 前，把保留截止点夹到「最早未结算周期起点」之前。
+	// 供号商的待结算金额是直接查 usage_logs 算出来的，删掉未结算区间的行会让应付金额
+	// 静默缩水，且没有任何报错。nil 表示未接入（例如测试），此时不做额外保护。
+	settlementGuard ProviderSettlementRetentionGuard
+}
+
+// ProviderSettlementRetentionGuard 提供「哪些 usage 行还不能删」的下界。
+type ProviderSettlementRetentionGuard interface {
+	// EarliestUnsettledStart 返回所有供号商中最早的未结算周期起点。
+	// 返回零值表示没有需要保护的数据。
+	EarliestUnsettledStart(ctx context.Context) (time.Time, error)
 }
 
 // NewDashboardAggregationService 创建聚合服务。
@@ -84,6 +96,40 @@ func (s *DashboardAggregationService) SetLeaderLock(lockCache LeaderLockCache, d
 	}
 	s.lockCache = lockCache
 	s.db = db
+}
+
+// SetProviderSettlementGuard 注入供号商结算保护。必须在启动清理作业前调用。
+func (s *DashboardAggregationService) SetProviderSettlementGuard(guard ProviderSettlementRetentionGuard) {
+	if s == nil {
+		return
+	}
+	s.settlementGuard = guard
+}
+
+// clampUsageCutoffForSettlement 把 usage_logs 的保留截止点夹到未结算区间之前。
+//
+// 读取失败时返回零值（放弃本轮清理）而不是原截止点：宁可多留一轮数据，
+// 也不能在不确定的情况下删掉可能还没结算的应付流水。
+func (s *DashboardAggregationService) clampUsageCutoffForSettlement(
+	ctx context.Context,
+	cutoff time.Time,
+) (time.Time, bool) {
+	if s.settlementGuard == nil {
+		return cutoff, true
+	}
+	earliest, err := s.settlementGuard.EarliestUnsettledStart(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.dashboard_aggregation",
+			"[DashboardAggregation] 无法确定供号商未结算区间，跳过本轮 usage_logs 清理: %v", err)
+		return time.Time{}, false
+	}
+	if earliest.IsZero() || cutoff.Before(earliest) {
+		return cutoff, true
+	}
+	logger.LegacyPrintf("service.dashboard_aggregation",
+		"[DashboardAggregation] usage_logs 保留截止点被供号商未结算区间夹紧: %s -> %s",
+		cutoff.Format(time.RFC3339), earliest.Format(time.RFC3339))
+	return earliest, true
 }
 
 // Start 启动定时聚合作业（重启生效配置）。
@@ -336,9 +382,12 @@ func (s *DashboardAggregationService) maybeCleanupRetention(ctx context.Context,
 	if aggErr != nil {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 聚合保留清理失败: %v", aggErr)
 	}
-	usageErr := s.repo.CleanupUsageLogs(ctx, usageCutoff)
-	if usageErr != nil {
-		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] usage_logs 保留清理失败: %v", usageErr)
+	var usageErr error
+	if safeCutoff, ok := s.clampUsageCutoffForSettlement(ctx, usageCutoff); ok {
+		usageErr = s.repo.CleanupUsageLogs(ctx, safeCutoff)
+		if usageErr != nil {
+			logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] usage_logs 保留清理失败: %v", usageErr)
+		}
 	}
 	dedupErr := s.repo.CleanupUsageBillingDedup(ctx, dedupCutoff)
 	if dedupErr != nil {

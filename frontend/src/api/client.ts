@@ -34,6 +34,19 @@ let isRefreshing = false
 let refreshSubscribers: Array<(token: string) => void> = []
 
 /**
+ * Send an expired session back to the login page that matches the current site.
+ *
+ * The provider portal (`/provider/*`) has its own login screen. Sending a provider
+ * to the consumer `/login` breaks the separation between the two sites: they end up
+ * on a page that is not theirs, and the router only bounces them back afterwards.
+ */
+function redirectToLogin(): void {
+  const path = window.location.pathname
+  if (path.includes('/login')) return
+  window.location.href = path.startsWith('/provider') ? '/provider/login' : '/login'
+}
+
+/**
  * Subscribe to token refresh completion
  */
 function subscribeTokenRefresh(callback: (token: string) => void): void {
@@ -266,9 +279,7 @@ apiClient.interceptors.response.use(
             localStorage.removeItem('token_expires_at')
             sessionStorage.setItem('auth_expired', '1')
 
-            if (!window.location.pathname.includes('/login')) {
-              window.location.href = '/login'
-            }
+            redirectToLogin()
 
             return Promise.reject({
               status: 401,
@@ -296,10 +307,7 @@ apiClient.interceptors.response.use(
         if ((hasToken || sentAuth) && !isAuthEndpoint) {
           sessionStorage.setItem('auth_expired', '1')
         }
-        // Only redirect if not already on login page
-        if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login'
-        }
+        redirectToLogin()
       }
 
       // Return structured error

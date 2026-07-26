@@ -82,6 +82,7 @@ const (
 	RedeemTypeConcurrency      = domain.RedeemTypeConcurrency
 	RedeemTypeSubscription     = domain.RedeemTypeSubscription
 	RedeemTypeInvitation       = domain.RedeemTypeInvitation
+	RedeemTypeProviderInvite   = domain.RedeemTypeProviderInvite
 	RedeemTypeAffiliateBalance = "affiliate_balance"
 )
 
@@ -453,6 +454,36 @@ const (
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
+
+	// ===== 供号商站点（Provider Portal）=====
+	// SettingKeyProviderPortalEnabled 供号商站点总开关；关闭时注册与所有 /provider 接口一并关停
+	SettingKeyProviderPortalEnabled = "provider_portal_enabled"
+	// SettingKeyProviderSelectableGroups 可选托管类型 JSON 数组，每项含
+	// group_id / label / description / enabled / sort。label 与 description 是对外文案，
+	// 供号商只看到这两项，真实策略（内容审查、系统提示词注入）永不下发。
+	SettingKeyProviderSelectableGroups = "provider_selectable_groups"
+	// SettingKeyProviderDefaultGroupID 供号商上号未指定托管类型时使用的默认分组
+	SettingKeyProviderDefaultGroupID = "provider_default_group_id"
+	// SettingKeyProviderCapacityTiers 1-5 档速率定义 JSON 数组，每项含
+	// tier / label / concurrency / max_sessions / base_rpm / window_cost_limit / enabled
+	SettingKeyProviderCapacityTiers = "provider_capacity_tiers"
+	// SettingKeyProviderDefaultTier 默认档位（种子值 "3"）
+	SettingKeyProviderDefaultTier = "provider_default_tier"
+	// SettingKeyProviderCustomTierEnabled 是否允许供号商使用自定义档
+	SettingKeyProviderCustomTierEnabled = "provider_custom_tier_enabled"
+	// SettingKeyProviderCustomTierCaps 自定义档护栏上限 JSON
+	SettingKeyProviderCustomTierCaps = "provider_custom_tier_caps"
+	// SettingKeyProviderSettlementTimezone 结算时区（种子值 Asia/Shanghai）。
+	// 对账按日聚合强制使用该时区，绝不沿用请求里由浏览器注入的 timezone 参数，
+	// 否则管理员与供号商看到的每日明细会按各自时区切分而对不上。
+	SettingKeyProviderSettlementTimezone = "provider_settlement_timezone"
+	// SettingKeyProviderSettlementCooldownSeconds 结算冷却期（秒，种子值 600）。
+	// usage_logs 异步写入，封账终点往回退这段时间，让尚未提交的记录先落定。
+	SettingKeyProviderSettlementCooldownSeconds = "provider_settlement_cooldown_seconds"
+	// SettingKeyProviderAccountPriority 供号商账号的调度优先级（种子值 1）。
+	// 注意调度里 priority 是硬门槛而非权重：filterByMinPriority 只保留数值最小的一批，
+	// 其余完全不参与。因此该值必须与同分组内其它账号一致，否则一边会被永久饿死。
+	SettingKeyProviderAccountPriority = "provider_account_priority"
 
 	// Gateway Forwarding Behavior
 	// SettingKeyEnableFingerprintUnification 是否统一 OAuth 账号的 X-Stainless-* 指纹头（默认 true）

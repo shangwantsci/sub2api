@@ -41,6 +41,9 @@ const (
 	RedeemTypeConcurrency  = "concurrency"
 	RedeemTypeSubscription = "subscription"
 	RedeemTypeInvitation   = "invitation"
+	// RedeemTypeProviderInvite 供号商注册邀请码。与 RedeemTypeInvitation 分开，
+	// 因为它只能用于 /provider 注册且会把新用户标记为供号商。
+	RedeemTypeProviderInvite = "provider_invite"
 )
 
 // PromoCode status constants

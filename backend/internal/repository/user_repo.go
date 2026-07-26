@@ -90,6 +90,7 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		SetNotes(userIn.Notes).
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
+		SetIsProvider(userIn.IsProvider).
 		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
@@ -132,6 +133,25 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 	}
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
+	}
+	return out, nil
+}
+
+// ListProviders 返回所有供号商用户（不含已软删除），按注册时间升序。
+// 供号商数量远小于普通用户，管理端对账列表一次取全即可。
+func (r *userRepository) ListProviders(ctx context.Context) ([]service.User, error) {
+	rows, err := r.client.User.Query().
+		Where(dbuser.IsProviderEQ(true)).
+		Order(dbent.Asc(dbuser.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.User, 0, len(rows))
+	for _, m := range rows {
+		if converted := userEntityToService(m); converted != nil {
+			out = append(out, *converted)
+		}
 	}
 	return out, nil
 }
@@ -233,6 +253,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		SetNotes(userIn.Notes).
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
+		SetIsProvider(userIn.IsProvider).
 		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).

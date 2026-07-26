@@ -433,6 +433,34 @@ func (_c *AccountCreate) SetNillableQuotaDimension(v *account.QuotaDimension) *A
 	return _c
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (_c *AccountCreate) SetProviderUserID(v int64) *AccountCreate {
+	_c.mutation.SetProviderUserID(v)
+	return _c
+}
+
+// SetNillableProviderUserID sets the "provider_user_id" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableProviderUserID(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetProviderUserID(*v)
+	}
+	return _c
+}
+
+// SetProviderTier sets the "provider_tier" field.
+func (_c *AccountCreate) SetProviderTier(v string) *AccountCreate {
+	_c.mutation.SetProviderTier(v)
+	return _c
+}
+
+// SetNillableProviderTier sets the "provider_tier" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableProviderTier(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetProviderTier(*v)
+	}
+	return _c
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_c *AccountCreate) AddGroupIDs(ids ...int64) *AccountCreate {
 	_c.mutation.AddGroupIDs(ids...)
@@ -679,6 +707,11 @@ func (_c *AccountCreate) check() error {
 			return &ValidationError{Name: "quota_dimension", err: fmt.Errorf(`ent: validator failed for field "Account.quota_dimension": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.ProviderTier(); ok {
+		if err := account.ProviderTierValidator(v); err != nil {
+			return &ValidationError{Name: "provider_tier", err: fmt.Errorf(`ent: validator failed for field "Account.provider_tier": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -825,6 +858,14 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.QuotaDimension(); ok {
 		_spec.SetField(account.FieldQuotaDimension, field.TypeEnum, value)
 		_node.QuotaDimension = value
+	}
+	if value, ok := _c.mutation.ProviderUserID(); ok {
+		_spec.SetField(account.FieldProviderUserID, field.TypeInt64, value)
+		_node.ProviderUserID = &value
+	}
+	if value, ok := _c.mutation.ProviderTier(); ok {
+		_spec.SetField(account.FieldProviderTier, field.TypeString, value)
+		_node.ProviderTier = &value
 	}
 	if nodes := _c.mutation.GroupsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1474,6 +1515,48 @@ func (u *AccountUpsert) UpdateQuotaDimension() *AccountUpsert {
 	return u
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (u *AccountUpsert) SetProviderUserID(v int64) *AccountUpsert {
+	u.Set(account.FieldProviderUserID, v)
+	return u
+}
+
+// UpdateProviderUserID sets the "provider_user_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateProviderUserID() *AccountUpsert {
+	u.SetExcluded(account.FieldProviderUserID)
+	return u
+}
+
+// AddProviderUserID adds v to the "provider_user_id" field.
+func (u *AccountUpsert) AddProviderUserID(v int64) *AccountUpsert {
+	u.Add(account.FieldProviderUserID, v)
+	return u
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (u *AccountUpsert) ClearProviderUserID() *AccountUpsert {
+	u.SetNull(account.FieldProviderUserID)
+	return u
+}
+
+// SetProviderTier sets the "provider_tier" field.
+func (u *AccountUpsert) SetProviderTier(v string) *AccountUpsert {
+	u.Set(account.FieldProviderTier, v)
+	return u
+}
+
+// UpdateProviderTier sets the "provider_tier" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateProviderTier() *AccountUpsert {
+	u.SetExcluded(account.FieldProviderTier)
+	return u
+}
+
+// ClearProviderTier clears the value of the "provider_tier" field.
+func (u *AccountUpsert) ClearProviderTier() *AccountUpsert {
+	u.SetNull(account.FieldProviderTier)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -2111,6 +2194,55 @@ func (u *AccountUpsertOne) SetQuotaDimension(v account.QuotaDimension) *AccountU
 func (u *AccountUpsertOne) UpdateQuotaDimension() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateQuotaDimension()
+	})
+}
+
+// SetProviderUserID sets the "provider_user_id" field.
+func (u *AccountUpsertOne) SetProviderUserID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProviderUserID(v)
+	})
+}
+
+// AddProviderUserID adds v to the "provider_user_id" field.
+func (u *AccountUpsertOne) AddProviderUserID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddProviderUserID(v)
+	})
+}
+
+// UpdateProviderUserID sets the "provider_user_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateProviderUserID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProviderUserID()
+	})
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (u *AccountUpsertOne) ClearProviderUserID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearProviderUserID()
+	})
+}
+
+// SetProviderTier sets the "provider_tier" field.
+func (u *AccountUpsertOne) SetProviderTier(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProviderTier(v)
+	})
+}
+
+// UpdateProviderTier sets the "provider_tier" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateProviderTier() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProviderTier()
+	})
+}
+
+// ClearProviderTier clears the value of the "provider_tier" field.
+func (u *AccountUpsertOne) ClearProviderTier() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearProviderTier()
 	})
 }
 
@@ -2917,6 +3049,55 @@ func (u *AccountUpsertBulk) SetQuotaDimension(v account.QuotaDimension) *Account
 func (u *AccountUpsertBulk) UpdateQuotaDimension() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateQuotaDimension()
+	})
+}
+
+// SetProviderUserID sets the "provider_user_id" field.
+func (u *AccountUpsertBulk) SetProviderUserID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProviderUserID(v)
+	})
+}
+
+// AddProviderUserID adds v to the "provider_user_id" field.
+func (u *AccountUpsertBulk) AddProviderUserID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddProviderUserID(v)
+	})
+}
+
+// UpdateProviderUserID sets the "provider_user_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateProviderUserID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProviderUserID()
+	})
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (u *AccountUpsertBulk) ClearProviderUserID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearProviderUserID()
+	})
+}
+
+// SetProviderTier sets the "provider_tier" field.
+func (u *AccountUpsertBulk) SetProviderTier(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProviderTier(v)
+	})
+}
+
+// UpdateProviderTier sets the "provider_tier" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateProviderTier() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProviderTier()
+	})
+}
+
+// ClearProviderTier clears the value of the "provider_tier" field.
+func (u *AccountUpsertBulk) ClearProviderTier() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearProviderTier()
 	})
 }
 

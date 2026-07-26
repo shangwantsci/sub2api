@@ -251,6 +251,9 @@ export default {
       subscription: 'Subscription',
       invitation: 'Invitation',
       invitationHint: 'Invitation codes are used to restrict user registration. They are automatically marked as used after use.',
+      providerInvite: 'Provider invite',
+      providerInviteHint:
+        'Provider invite codes only work on the provider portal. Whoever registers with one is marked as a provider: they can add accounts and view settlement, but cannot call the API. Record who you gave it to in the notes.',
       unused: 'Unused',
       used: 'Used',
       columns: {
@@ -316,6 +319,7 @@ export default {
         concurrency: 'Concurrency',
         subscription: 'Subscription',
         invitation: 'Invitation',
+        provider_invite: 'Provider Invite',
         // Admin adjustment types (created when admin modifies user balance/concurrency)
         admin_balance: 'Balance (Admin)',
         admin_concurrency: 'Concurrency (Admin)'

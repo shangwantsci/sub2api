@@ -522,6 +522,42 @@ func (h *AccountHandler) listAccountSchedulerScoreFilterPool(
 
 // List handles listing all accounts with pagination
 // GET /api/v1/admin/accounts
+// parseProviderUserIDFilter 解析可选的 provider_user_id 查询参数。
+// 返回 (id, 是否提供, 错误)。
+func parseProviderUserIDFilter(c *gin.Context) (int64, bool, error) {
+	raw := strings.TrimSpace(c.Query("provider_user_id"))
+	if raw == "" {
+		return 0, false, nil
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false, infraerrors.BadRequest("INVALID_PROVIDER_FILTER", "invalid provider_user_id filter")
+	}
+	return id, true, nil
+}
+
+// listAccountsByProvider 返回某供号商名下的账号（内存分页）。
+func (h *AccountHandler) listAccountsByProvider(
+	ctx context.Context,
+	providerUserID int64,
+	page, pageSize int,
+) ([]service.Account, int64, error) {
+	all, err := h.adminService.ListAccountsByProvider(ctx, providerUserID)
+	if err != nil {
+		return nil, 0, err
+	}
+	total := int64(len(all))
+	start := (page - 1) * pageSize
+	if start >= len(all) {
+		return []service.Account{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[start:end], total, nil
+}
+
 func (h *AccountHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")
@@ -558,7 +594,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	var (
+		accounts []service.Account
+		total    int64
+		err      error
+	)
+	if providerFilter, ok, parseErr := parseProviderUserIDFilter(c); parseErr != nil {
+		response.ErrorFrom(c, parseErr)
+		return
+	} else if ok {
+		// 按供号商筛选走独立路径，避免为一个低频的对账筛选去改 ListWithFilters 的
+		// 位置参数签名（它被大量调用方与测试替身实现）。单个供号商的账号数量是几十级别，
+		// 内存分页足够，也不会引入新的 SQL 分支。
+		accounts, total, err = h.listAccountsByProvider(c.Request.Context(), providerFilter, page, pageSize)
+	} else {
+		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

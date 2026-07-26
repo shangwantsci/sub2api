@@ -2,6 +2,8 @@ export default {
   common: {
     loading: 'Loading...',
     submitting: 'Submitting...',
+    required: 'Required',
+    retry: 'Retry',
     justNow: 'just now',
     peakRateTooltip: 'Peak rate: {window}',
     peakRateImageNote: '; image tokens billed as tokens are also affected, per-image billing is unaffected',
@@ -166,6 +168,7 @@ export default {
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     proxies: 'Proxies',
+    providers: 'Provider Settlement',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',

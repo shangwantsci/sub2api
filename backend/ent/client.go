@@ -39,6 +39,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/providersettlement"
+	"github.com/Wei-Shaw/sub2api/ent/providersettlementitem"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -110,6 +112,10 @@ type Client struct {
 	PromoCode *PromoCodeClient
 	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
 	PromoCodeUsage *PromoCodeUsageClient
+	// ProviderSettlement is the client for interacting with the ProviderSettlement builders.
+	ProviderSettlement *ProviderSettlementClient
+	// ProviderSettlementItem is the client for interacting with the ProviderSettlementItem builders.
+	ProviderSettlementItem *ProviderSettlementItemClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
@@ -173,6 +179,8 @@ func (c *Client) init() {
 	c.PendingAuthSession = NewPendingAuthSessionClient(c.config)
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
+	c.ProviderSettlement = NewProviderSettlementClient(c.config)
+	c.ProviderSettlementItem = NewProviderSettlementItemClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
 	c.RedeemCode = NewRedeemCodeClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
@@ -303,6 +311,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
+		ProviderSettlement:            NewProviderSettlementClient(cfg),
+		ProviderSettlementItem:        NewProviderSettlementItemClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
@@ -360,6 +370,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
+		ProviderSettlement:            NewProviderSettlementClient(cfg),
+		ProviderSettlementItem:        NewProviderSettlementItemClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
@@ -410,10 +422,11 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.ProviderSettlement, c.ProviderSettlementItem, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -430,10 +443,11 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.ProviderSettlement, c.ProviderSettlementItem, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -490,6 +504,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PromoCode.mutate(ctx, m)
 	case *PromoCodeUsageMutation:
 		return c.PromoCodeUsage.mutate(ctx, m)
+	case *ProviderSettlementMutation:
+		return c.ProviderSettlement.mutate(ctx, m)
+	case *ProviderSettlementItemMutation:
+		return c.ProviderSettlementItem.mutate(ctx, m)
 	case *ProxyMutation:
 		return c.Proxy.mutate(ctx, m)
 	case *RedeemCodeMutation:
@@ -4312,6 +4330,272 @@ func (c *PromoCodeUsageClient) mutate(ctx context.Context, m *PromoCodeUsageMuta
 	}
 }
 
+// ProviderSettlementClient is a client for the ProviderSettlement schema.
+type ProviderSettlementClient struct {
+	config
+}
+
+// NewProviderSettlementClient returns a client for the ProviderSettlement from the given config.
+func NewProviderSettlementClient(c config) *ProviderSettlementClient {
+	return &ProviderSettlementClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `providersettlement.Hooks(f(g(h())))`.
+func (c *ProviderSettlementClient) Use(hooks ...Hook) {
+	c.hooks.ProviderSettlement = append(c.hooks.ProviderSettlement, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `providersettlement.Intercept(f(g(h())))`.
+func (c *ProviderSettlementClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ProviderSettlement = append(c.inters.ProviderSettlement, interceptors...)
+}
+
+// Create returns a builder for creating a ProviderSettlement entity.
+func (c *ProviderSettlementClient) Create() *ProviderSettlementCreate {
+	mutation := newProviderSettlementMutation(c.config, OpCreate)
+	return &ProviderSettlementCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ProviderSettlement entities.
+func (c *ProviderSettlementClient) CreateBulk(builders ...*ProviderSettlementCreate) *ProviderSettlementCreateBulk {
+	return &ProviderSettlementCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ProviderSettlementClient) MapCreateBulk(slice any, setFunc func(*ProviderSettlementCreate, int)) *ProviderSettlementCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ProviderSettlementCreateBulk{err: fmt.Errorf("calling to ProviderSettlementClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ProviderSettlementCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ProviderSettlementCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ProviderSettlement.
+func (c *ProviderSettlementClient) Update() *ProviderSettlementUpdate {
+	mutation := newProviderSettlementMutation(c.config, OpUpdate)
+	return &ProviderSettlementUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ProviderSettlementClient) UpdateOne(_m *ProviderSettlement) *ProviderSettlementUpdateOne {
+	mutation := newProviderSettlementMutation(c.config, OpUpdateOne, withProviderSettlement(_m))
+	return &ProviderSettlementUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ProviderSettlementClient) UpdateOneID(id int64) *ProviderSettlementUpdateOne {
+	mutation := newProviderSettlementMutation(c.config, OpUpdateOne, withProviderSettlementID(id))
+	return &ProviderSettlementUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ProviderSettlement.
+func (c *ProviderSettlementClient) Delete() *ProviderSettlementDelete {
+	mutation := newProviderSettlementMutation(c.config, OpDelete)
+	return &ProviderSettlementDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ProviderSettlementClient) DeleteOne(_m *ProviderSettlement) *ProviderSettlementDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ProviderSettlementClient) DeleteOneID(id int64) *ProviderSettlementDeleteOne {
+	builder := c.Delete().Where(providersettlement.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ProviderSettlementDeleteOne{builder}
+}
+
+// Query returns a query builder for ProviderSettlement.
+func (c *ProviderSettlementClient) Query() *ProviderSettlementQuery {
+	return &ProviderSettlementQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeProviderSettlement},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ProviderSettlement entity by its id.
+func (c *ProviderSettlementClient) Get(ctx context.Context, id int64) (*ProviderSettlement, error) {
+	return c.Query().Where(providersettlement.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ProviderSettlementClient) GetX(ctx context.Context, id int64) *ProviderSettlement {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ProviderSettlementClient) Hooks() []Hook {
+	return c.hooks.ProviderSettlement
+}
+
+// Interceptors returns the client interceptors.
+func (c *ProviderSettlementClient) Interceptors() []Interceptor {
+	return c.inters.ProviderSettlement
+}
+
+func (c *ProviderSettlementClient) mutate(ctx context.Context, m *ProviderSettlementMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ProviderSettlementCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ProviderSettlementUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ProviderSettlementUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ProviderSettlementDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ProviderSettlement mutation op: %q", m.Op())
+	}
+}
+
+// ProviderSettlementItemClient is a client for the ProviderSettlementItem schema.
+type ProviderSettlementItemClient struct {
+	config
+}
+
+// NewProviderSettlementItemClient returns a client for the ProviderSettlementItem from the given config.
+func NewProviderSettlementItemClient(c config) *ProviderSettlementItemClient {
+	return &ProviderSettlementItemClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `providersettlementitem.Hooks(f(g(h())))`.
+func (c *ProviderSettlementItemClient) Use(hooks ...Hook) {
+	c.hooks.ProviderSettlementItem = append(c.hooks.ProviderSettlementItem, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `providersettlementitem.Intercept(f(g(h())))`.
+func (c *ProviderSettlementItemClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ProviderSettlementItem = append(c.inters.ProviderSettlementItem, interceptors...)
+}
+
+// Create returns a builder for creating a ProviderSettlementItem entity.
+func (c *ProviderSettlementItemClient) Create() *ProviderSettlementItemCreate {
+	mutation := newProviderSettlementItemMutation(c.config, OpCreate)
+	return &ProviderSettlementItemCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ProviderSettlementItem entities.
+func (c *ProviderSettlementItemClient) CreateBulk(builders ...*ProviderSettlementItemCreate) *ProviderSettlementItemCreateBulk {
+	return &ProviderSettlementItemCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ProviderSettlementItemClient) MapCreateBulk(slice any, setFunc func(*ProviderSettlementItemCreate, int)) *ProviderSettlementItemCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ProviderSettlementItemCreateBulk{err: fmt.Errorf("calling to ProviderSettlementItemClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ProviderSettlementItemCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ProviderSettlementItemCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ProviderSettlementItem.
+func (c *ProviderSettlementItemClient) Update() *ProviderSettlementItemUpdate {
+	mutation := newProviderSettlementItemMutation(c.config, OpUpdate)
+	return &ProviderSettlementItemUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ProviderSettlementItemClient) UpdateOne(_m *ProviderSettlementItem) *ProviderSettlementItemUpdateOne {
+	mutation := newProviderSettlementItemMutation(c.config, OpUpdateOne, withProviderSettlementItem(_m))
+	return &ProviderSettlementItemUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ProviderSettlementItemClient) UpdateOneID(id int64) *ProviderSettlementItemUpdateOne {
+	mutation := newProviderSettlementItemMutation(c.config, OpUpdateOne, withProviderSettlementItemID(id))
+	return &ProviderSettlementItemUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ProviderSettlementItem.
+func (c *ProviderSettlementItemClient) Delete() *ProviderSettlementItemDelete {
+	mutation := newProviderSettlementItemMutation(c.config, OpDelete)
+	return &ProviderSettlementItemDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ProviderSettlementItemClient) DeleteOne(_m *ProviderSettlementItem) *ProviderSettlementItemDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ProviderSettlementItemClient) DeleteOneID(id int64) *ProviderSettlementItemDeleteOne {
+	builder := c.Delete().Where(providersettlementitem.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ProviderSettlementItemDeleteOne{builder}
+}
+
+// Query returns a query builder for ProviderSettlementItem.
+func (c *ProviderSettlementItemClient) Query() *ProviderSettlementItemQuery {
+	return &ProviderSettlementItemQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeProviderSettlementItem},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ProviderSettlementItem entity by its id.
+func (c *ProviderSettlementItemClient) Get(ctx context.Context, id int64) (*ProviderSettlementItem, error) {
+	return c.Query().Where(providersettlementitem.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ProviderSettlementItemClient) GetX(ctx context.Context, id int64) *ProviderSettlementItem {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ProviderSettlementItemClient) Hooks() []Hook {
+	return c.hooks.ProviderSettlementItem
+}
+
+// Interceptors returns the client interceptors.
+func (c *ProviderSettlementItemClient) Interceptors() []Interceptor {
+	return c.inters.ProviderSettlementItem
+}
+
+func (c *ProviderSettlementItemClient) mutate(ctx context.Context, m *ProviderSettlementItemMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ProviderSettlementItemCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ProviderSettlementItemUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ProviderSettlementItemUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ProviderSettlementItemDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ProviderSettlementItem mutation op: %q", m.Op())
+	}
+}
+
 // ProxyClient is a client for the Proxy schema.
 type ProxyClient struct {
 	config
@@ -6671,10 +6955,11 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, ErrorPassthroughRule, Group, IdempotencyRecord,
 		IdentityAdoptionDecision, PaymentAuditLog, PaymentOrder,
-		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
-		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
+		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage,
+		ProviderSettlement, ProviderSettlementItem, Proxy, RedeemCode, SecuritySecret,
+		Setting, SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog,
+		User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6682,10 +6967,11 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, ErrorPassthroughRule, Group, IdempotencyRecord,
 		IdentityAdoptionDecision, PaymentAuditLog, PaymentOrder,
-		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
-		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
+		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage,
+		ProviderSettlement, ProviderSettlementItem, Proxy, RedeemCode, SecuritySecret,
+		Setting, SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog,
+		User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

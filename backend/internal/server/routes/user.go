@@ -18,6 +18,8 @@ func RegisterUserRoutes(
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
+	// 供号商是纯供货方，消费侧接口一律拒绝。
+	authenticated.Use(middleware.ProviderDenyConsumerRoutes())
 	{
 		// 用户接口
 		user := authenticated.Group("/user")

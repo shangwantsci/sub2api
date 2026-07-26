@@ -35,6 +35,9 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h)
 
+		// 供号商对账与设置
+		registerProviderAdminRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
@@ -288,6 +291,33 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
 		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
 		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
+	}
+}
+
+// registerProviderAdminRoutes 注册供号商对账面板与供货商设置接口。
+//
+// 结算与作废是有金额后果的管理员专属操作，全部落在 /admin 下，受 adminAuth 保护。
+func registerProviderAdminRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin == nil || h.Admin.Provider == nil {
+		return
+	}
+	providers := admin.Group("/providers")
+	{
+		providers.GET("", h.Admin.Provider.List)
+		providers.POST("/settle-batch", h.Admin.Provider.SettleBatch)
+		providers.POST("/settlements/:id/void", h.Admin.Provider.Void)
+		providers.GET("/settlements/:id/export", h.Admin.Provider.ExportSettlement)
+		providers.GET("/:id/current-period", h.Admin.Provider.GetCurrentPeriod)
+		providers.POST("/:id/settle", h.Admin.Provider.Settle)
+		providers.GET("/:id/settlements", h.Admin.Provider.ListSettlements)
+	}
+
+	settings := admin.Group("/provider-settings")
+	{
+		settings.GET("", h.Admin.Provider.GetSettings)
+		settings.PUT("", h.Admin.Provider.UpdateSettings)
+		settings.GET("/tiers/:tier/affected-count", h.Admin.Provider.GetTierAffectedCount)
+		settings.POST("/tiers/:tier/apply-existing", h.Admin.Provider.ApplyTierToExisting)
 	}
 }
 

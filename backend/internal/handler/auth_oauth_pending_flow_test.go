@@ -3145,6 +3145,10 @@ func (r *oauthPendingFlowUserRepo) ListWithFilters(context.Context, pagination.P
 	panic("unexpected ListWithFilters call")
 }
 
+func (r *oauthPendingFlowUserRepo) ListProviders(context.Context) ([]service.User, error) {
+	panic("unexpected ListProviders call")
+}
+
 func (r *oauthPendingFlowUserRepo) UpdateBalance(ctx context.Context, userID int64, amount float64) error {
 	client := r.client
 	if tx := dbent.TxFromContext(ctx); tx != nil {

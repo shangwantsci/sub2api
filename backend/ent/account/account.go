@@ -80,6 +80,10 @@ const (
 	FieldParentAccountID = "parent_account_id"
 	// FieldQuotaDimension holds the string denoting the quota_dimension field in the database.
 	FieldQuotaDimension = "quota_dimension"
+	// FieldProviderUserID holds the string denoting the provider_user_id field in the database.
+	FieldProviderUserID = "provider_user_id"
+	// FieldProviderTier holds the string denoting the provider_tier field in the database.
+	FieldProviderTier = "provider_tier"
 	// EdgeGroups holds the string denoting the groups edge name in mutations.
 	EdgeGroups = "groups"
 	// EdgeProxy holds the string denoting the proxy edge name in mutations.
@@ -165,6 +169,8 @@ var Columns = []string{
 	FieldSessionWindowStatus,
 	FieldParentAccountID,
 	FieldQuotaDimension,
+	FieldProviderUserID,
+	FieldProviderTier,
 }
 
 var (
@@ -225,6 +231,8 @@ var (
 	DefaultSchedulable bool
 	// SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	SessionWindowStatusValidator func(string) error
+	// ProviderTierValidator is a validator for the "provider_tier" field. It is called by the builders before save.
+	ProviderTierValidator func(string) error
 )
 
 // QuotaDimension defines the type for the "quota_dimension" enum field.
@@ -409,6 +417,16 @@ func ByParentAccountID(opts ...sql.OrderTermOption) OrderOption {
 // ByQuotaDimension orders the results by the quota_dimension field.
 func ByQuotaDimension(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldQuotaDimension, opts...).ToFunc()
+}
+
+// ByProviderUserID orders the results by the provider_user_id field.
+func ByProviderUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProviderUserID, opts...).ToFunc()
+}
+
+// ByProviderTier orders the results by the provider_tier field.
+func ByProviderTier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProviderTier, opts...).ToFunc()
 }
 
 // ByGroupsCount orders the results by groups count.

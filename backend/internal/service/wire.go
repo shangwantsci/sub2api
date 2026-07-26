@@ -254,9 +254,21 @@ func ProvideGrokTokenProvider(
 }
 
 // ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
-func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *DashboardAggregationService {
+//
+// settlementGuard 必须在 Start 之前注入：清理作业一旦跑起来就会按保留期删 usage_logs，
+// 而 guard 决定「哪些行因为还没结算而不能删」。晚注入意味着启动后的第一轮清理
+// 可能删掉供号商未结算区间的数据，且删掉就找不回来了。
+func ProvideDashboardAggregationService(
+	repo DashboardAggregationRepository,
+	timingWheel *TimingWheelService,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+	cfg *config.Config,
+	settlementGuard ProviderSettlementRetentionGuard,
+) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
 	svc.SetLeaderLock(lockCache, db)
+	svc.SetProviderSettlementGuard(settlementGuard)
 	svc.Start()
 	return svc
 }
@@ -628,6 +640,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupService,
 	NewAccountService,
 	NewProxyService,
+	NewProviderSettlementService,
 	NewRedeemService,
 	NewPromoService,
 	NewUsageService,

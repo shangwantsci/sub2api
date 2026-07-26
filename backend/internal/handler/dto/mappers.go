@@ -17,6 +17,7 @@ func UserFromServiceShallow(u *service.User) *User {
 		Email:                      u.Email,
 		Username:                   u.Username,
 		Role:                       u.Role,
+		IsProvider:                 u.IsProvider,
 		Balance:                    u.Balance,
 		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,
@@ -258,6 +259,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		GroupIDs:                a.GroupIDs,
 		ParentAccountID:         a.ParentAccountID,
 		QuotaDimension:          a.QuotaDimension,
+		ProviderUserID:          a.ProviderUserID,
+		ProviderTier:            a.ProviderTier,
 	}
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）

@@ -26,3 +26,14 @@ func GetUserRoleFromContext(c *gin.Context) (string, bool) {
 	role, ok := value.(string)
 	return role, ok
 }
+
+// IsProviderFromContext 报告当前请求主体是否为供号商。
+// 未认证或键缺失时返回 false。
+func IsProviderFromContext(c *gin.Context) bool {
+	value, exists := c.Get(string(ContextKeyIsProvider))
+	if !exists {
+		return false
+	}
+	isProvider, ok := value.(bool)
+	return ok && isProvider
+}

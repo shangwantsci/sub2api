@@ -92,6 +92,13 @@ type AdminService interface {
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
+	// ApplyTierToExistingProviderAccounts 把某档位最新参数回填到该档现有供号商账号。
+	// 只增量合并档位相关的 extra 键，persona_* 等其它持久设置原样保留。
+	ApplyTierToExistingProviderAccounts(ctx context.Context, tier ResolvedProviderTier) (ProviderTierApplyResult, error)
+	// CountProviderAccountsByTier 返回某档位当前账号数，供设置页二次确认预览。
+	CountProviderAccountsByTier(ctx context.Context, tier string) (int, error)
+	// ListAccountsByProvider 返回某供号商名下的账号，供管理端按供号商筛选。
+	ListAccountsByProvider(ctx context.Context, providerUserID int64) ([]Account, error)
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
 	// 若账号不存在返回 ErrAccountNotFound；若账号存在但不在 fallback 状态，返回 ErrAccountNotInFallback。
 	RevertAccountProxyFallback(ctx context.Context, id int64) error
@@ -340,6 +347,11 @@ type CreateAccountInput struct {
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
+	// ProviderUserID marks the owning provider when the account is onboarded through
+	// the provider portal. Settlement aggregates on this; nil means admin-onboarded.
+	ProviderUserID *int64
+	// ProviderTier records the capacity tier picked at provider onboarding.
+	ProviderTier *string
 }
 
 // ShadowOptions is the input for CreateShadow.

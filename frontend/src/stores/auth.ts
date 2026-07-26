@@ -90,6 +90,12 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value?.role === 'admin'
   })
 
+  // 供号商只能使用 /provider 站点。管理员即便误置该标志也不算供号商，
+  // 与后端 User.IsProviderUser() 的判定保持一致。
+  const isProvider = computed(() => {
+    return user.value?.is_provider === true && user.value?.role !== 'admin'
+  })
+
   const isSimpleMode = computed(() => runMode.value === 'simple')
   const hasPendingAuthSession = computed(() => pendingAuthSession.value !== null)
 
@@ -481,6 +487,7 @@ export const useAuthStore = defineStore('auth', () => {
     // Computed
     isAuthenticated,
     isAdmin,
+    isProvider,
     isSimpleMode,
     hasPendingAuthSession,
 

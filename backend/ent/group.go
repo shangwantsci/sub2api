@@ -123,7 +123,7 @@ type Group struct {
 	AnthropicAPIKeyPoolWeight int `json:"anthropic_api_key_pool_weight,omitempty"`
 	// Anthropic 分组内容审查策略：inherit, enabled, disabled
 	ContentReviewPolicy string `json:"content_review_policy,omitempty"`
-	// Anthropic 分组 Claude OAuth system prompt 注入策略：inherit, enabled, disabled
+	// Anthropic 分组 Claude OAuth system prompt 注入策略：inherit, enabled, identity_only, disabled
 	ClaudeOauthSystemPromptPolicy string `json:"claude_oauth_system_prompt_policy,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.

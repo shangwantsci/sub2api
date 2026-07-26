@@ -20,6 +20,13 @@ declare module 'vue-router' {
     requiresAdmin?: boolean
 
     /**
+     * Whether this route belongs to the provider portal and requires provider capability.
+     * Provider accounts are supply-side only; they cannot access consumer or admin routes.
+     * @default false
+     */
+    requiresProvider?: boolean
+
+    /**
      * Page title for this route
      */
     title?: string

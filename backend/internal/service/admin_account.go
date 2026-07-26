@@ -395,17 +395,19 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
 	account := &Account{
-		Name:        input.Name,
-		Notes:       normalizeAccountNotes(input.Notes),
-		Platform:    input.Platform,
-		Type:        input.Type,
-		Credentials: input.Credentials,
-		Extra:       accountExtra,
-		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:    input.Priority,
-		Status:      StatusActive,
-		Schedulable: true,
+		Name:           input.Name,
+		Notes:          normalizeAccountNotes(input.Notes),
+		Platform:       input.Platform,
+		Type:           input.Type,
+		Credentials:    input.Credentials,
+		Extra:          accountExtra,
+		ProxyID:        input.ProxyID,
+		Concurrency:    normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:       input.Priority,
+		Status:         StatusActive,
+		Schedulable:    true,
+		ProviderUserID: input.ProviderUserID,
+		ProviderTier:   input.ProviderTier,
 	}
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
@@ -542,15 +544,21 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	}
 	// 人格地理默认：按代理出口国家 prefill 时区 / 一致性告警（fail-open）。
 	s.applyPersonaGeoDefaults(ctx, account.Extra, account.ProxyID)
-	if err := s.accountRepo.Create(ctx, account); err != nil {
-		return nil, err
-	}
 
-	// 绑定分组
+	// 账号与分组绑定必须同事务：分开写的话，绑组失败会让一个没有任何分组的账号
+	// 留在库里，而调用方收到的是错误，以为什么都没发生，于是去回滚它自己建的资源
+	// （例如供号商上号时先建的代理），却因为账号还引用着而删不掉，最终留下孤儿。
 	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+		groups := make([]AccountGroup, 0, len(groupIDs))
+		for i, groupID := range groupIDs {
+			// 组内优先级沿用 BindGroups 的 i+1 语义，保持两条路径一致。
+			groups = append(groups, AccountGroup{GroupID: groupID, Priority: i + 1})
+		}
+		if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, account, groups); err != nil {
 			return nil, err
 		}
+	} else if err := s.accountRepo.Create(ctx, account); err != nil {
+		return nil, err
 	}
 
 	// OAuth 账号：创建后异步设置隐私。

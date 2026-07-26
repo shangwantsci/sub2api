@@ -288,7 +288,7 @@
               <Select v-model="generateForm.type" :options="typeOptions" />
             </div>
             <!-- 余额/并发类型：显示数值输入 -->
-            <div v-if="generateForm.type !== 'subscription' && generateForm.type !== 'invitation'">
+            <div v-if="generateForm.type !== 'subscription' && !isInviteType">
               <label class="input-label">
                 {{
                   generateForm.type === 'balance'
@@ -309,6 +309,14 @@
             <div v-if="generateForm.type === 'invitation'" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
               <p class="text-sm text-blue-700 dark:text-blue-300">
                 {{ t('admin.redeem.invitationHint') }}
+              </p>
+            </div>
+            <div
+              v-if="generateForm.type === 'provider_invite'"
+              class="rounded-lg bg-indigo-50 p-3 dark:bg-indigo-900/20"
+            >
+              <p class="text-sm text-indigo-700 dark:text-indigo-300">
+                {{ t('admin.redeem.providerInviteHint') }}
               </p>
             </div>
             <!-- 订阅类型：显示分组选择和有效天数 -->
@@ -735,15 +743,22 @@ const typeOptions = computed(() => [
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
-  { value: 'invitation', label: t('admin.redeem.invitation') }
+  { value: 'invitation', label: t('admin.redeem.invitation') },
+  { value: 'provider_invite', label: t('admin.redeem.providerInvite') }
 ])
+
+// 邀请类兑换码不携带面额，value 恒为 0，与后端 isValuelessRedeemType 对应。
+const isInviteType = computed(
+  () => generateForm.type === 'invitation' || generateForm.type === 'provider_invite'
+)
 
 const filterTypeOptions = computed(() => [
   { value: '', label: t('admin.redeem.allTypes') },
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
-  { value: 'invitation', label: t('admin.redeem.invitation') }
+  { value: 'invitation', label: t('admin.redeem.invitation') },
+  { value: 'provider_invite', label: t('admin.redeem.providerInvite') }
 ])
 
 const filterStatusOptions = computed(() => [
@@ -841,7 +856,7 @@ const generateForm = reactive({
 watch(
   () => generateForm.type,
   (newType) => {
-    if (newType === 'invitation') {
+    if (newType === 'invitation' || newType === 'provider_invite') {
       generateForm.value = 0
     } else if (generateForm.value === 0) {
       generateForm.value = 10

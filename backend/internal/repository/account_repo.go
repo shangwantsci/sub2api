@@ -113,7 +113,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
-		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
+		SetAutoPauseOnExpired(account.AutoPauseOnExpired).
+		SetNillableProviderUserID(account.ProviderUserID).
+		SetNillableProviderTier(account.ProviderTier)
 
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
@@ -911,6 +913,127 @@ func (r *accountRepository) ListByPlatform(ctx context.Context, platform string)
 		return nil, err
 	}
 	return r.accountsToService(ctx, accounts)
+}
+
+// ListByProvider 返回某供号商名下的账号（软删除的不含在内，由 Ent interceptor 自动过滤）。
+func (r *accountRepository) ListByProvider(ctx context.Context, providerUserID int64) ([]service.Account, error) {
+	accounts, err := r.client.Account.Query().
+		Where(dbaccount.ProviderUserIDEQ(providerUserID)).
+		Order(dbent.Desc(dbaccount.FieldCreatedAt)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
+// ListByProviderPaged 分页返回某供号商名下的账号，按创建时间倒序。
+func (r *accountRepository) ListByProviderPaged(
+	ctx context.Context,
+	providerUserID int64,
+	params pagination.PaginationParams,
+) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.client.Account.Query().Where(dbaccount.ProviderUserIDEQ(providerUserID))
+
+	// Clone 后再 Count：软删除 interceptor 的谓词会附着在查询上，直接复用会污染。
+	total, err := q.Clone().Count(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	accounts, err := q.
+		Order(dbent.Desc(dbaccount.FieldCreatedAt)).
+		Offset(params.Offset()).
+		Limit(params.Limit()).
+		All(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	out, err := r.accountsToService(ctx, accounts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, paginationResultFromTotal(int64(total), params), nil
+}
+
+// DistinctNonProviderPrioritiesByGroup 返回每个分组内非供号商账号已有的 priority 去重值。
+//
+// 只统计非供号商账号：供号商账号的 priority 由设置统一控制，
+// 把它们算进来会让设置页永远和自己冲突。
+func (r *accountRepository) DistinctNonProviderPrioritiesByGroup(ctx context.Context) (map[int64][]int, error) {
+	const query = `
+		SELECT ag.group_id, a.priority
+		FROM account_groups ag
+		JOIN accounts a ON a.id = ag.account_id
+		WHERE a.deleted_at IS NULL
+			AND a.provider_user_id IS NULL
+		GROUP BY ag.group_id, a.priority
+		ORDER BY ag.group_id, a.priority
+	`
+	rows, err := r.sql.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[int64][]int)
+	for rows.Next() {
+		var groupID int64
+		var priority int
+		if err := rows.Scan(&groupID, &priority); err != nil {
+			return nil, err
+		}
+		out[groupID] = append(out[groupID], priority)
+	}
+	return out, rows.Err()
+}
+
+func (r *accountRepository) ListByProviderTier(ctx context.Context, tier string) ([]service.Account, error) {
+	accounts, err := r.client.Account.Query().
+		Where(
+			dbaccount.ProviderTierEQ(tier),
+			dbaccount.ProviderUserIDNotNil(),
+		).
+		Order(dbent.Asc(dbaccount.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
+func (r *accountRepository) CountByProviderTier(ctx context.Context, tier string) (int, error) {
+	return r.client.Account.Query().
+		Where(
+			dbaccount.ProviderTierEQ(tier),
+			dbaccount.ProviderUserIDNotNil(),
+		).
+		Count(ctx)
+}
+
+// UpdateProviderTierParams 回填档位参数。
+//
+// extra 必须由调用方增量合并后整体传入：这里做的是整列覆盖，若调用方直接构造一个
+// 只含档位键的 map，会清掉 persona_* 等持久设置。见 ApplyProviderTierToExtra。
+func (r *accountRepository) UpdateProviderTierParams(
+	ctx context.Context,
+	id int64,
+	concurrency, loadFactor int,
+	extra map[string]any,
+) error {
+	err := r.client.Account.UpdateOneID(id).
+		SetConcurrency(concurrency).
+		SetLoadFactor(loadFactor).
+		SetExtra(normalizeJSONMap(extra)).
+		Exec(ctx)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue provider tier update failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return nil
 }
 
 func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error {
@@ -3190,6 +3313,8 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		SessionWindowStatus:     derefString(m.SessionWindowStatus),
 		ParentAccountID:         m.ParentAccountID,
 		QuotaDimension:          string(m.QuotaDimension),
+		ProviderUserID:          m.ProviderUserID,
+		ProviderTier:            m.ProviderTier,
 	}
 }
 

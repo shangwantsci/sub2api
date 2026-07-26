@@ -27,6 +27,8 @@ const (
 	FieldPasswordHash = "password_hash"
 	// FieldRole holds the string denoting the role field in the database.
 	FieldRole = "role"
+	// FieldIsProvider holds the string denoting the is_provider field in the database.
+	FieldIsProvider = "is_provider"
 	// FieldBalance holds the string denoting the balance field in the database.
 	FieldBalance = "balance"
 	// FieldFrozenBalance holds the string denoting the frozen_balance field in the database.
@@ -200,6 +202,7 @@ var Columns = []string{
 	FieldEmail,
 	FieldPasswordHash,
 	FieldRole,
+	FieldIsProvider,
 	FieldBalance,
 	FieldFrozenBalance,
 	FieldConcurrency,
@@ -258,6 +261,8 @@ var (
 	DefaultRole string
 	// RoleValidator is a validator for the "role" field. It is called by the builders before save.
 	RoleValidator func(string) error
+	// DefaultIsProvider holds the default value on creation for the "is_provider" field.
+	DefaultIsProvider bool
 	// DefaultBalance holds the default value on creation for the "balance" field.
 	DefaultBalance float64
 	// DefaultFrozenBalance holds the default value on creation for the "frozen_balance" field.
@@ -328,6 +333,11 @@ func ByPasswordHash(opts ...sql.OrderTermOption) OrderOption {
 // ByRole orders the results by the role field.
 func ByRole(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRole, opts...).ToFunc()
+}
+
+// ByIsProvider orders the results by the is_provider field.
+func ByIsProvider(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldIsProvider, opts...).ToFunc()
 }
 
 // ByBalance orders the results by the balance field.

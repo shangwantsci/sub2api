@@ -524,6 +524,7 @@ export default {
         admin: '管理员',
         user: '用户'
       },
+      providerBadge: '供号商',
       form: {
         emailLabel: '邮箱',
         emailPlaceholder: '请输入邮箱',

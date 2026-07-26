@@ -7491,13 +7491,22 @@
         </div>
         <!-- /Tab: Email -->
 
+        <!-- Tab: Provider -->
+        <!-- 供货商设置自带保存栏与未保存拦截，故排除在下方通用保存按钮之外。 -->
+        <div v-show="activeTab === 'provider'">
+          <ProviderSettingsPanel />
+        </div>
+
         <!-- Tab: Backup -->
         <div v-show="activeTab === 'backup'">
           <BackupSettings />
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div
+          v-show="activeTab !== 'backup' && activeTab !== 'provider'"
+          class="flex justify-end"
+        >
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -7614,6 +7623,7 @@ import Toggle from "@/components/common/Toggle.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
+import ProviderSettingsPanel from "@/components/admin/provider/ProviderSettingsPanel.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import { useClipboard } from "@/composables/useClipboard";
@@ -7665,6 +7675,7 @@ type SettingsTab =
   | "gateway"
   | "payment"
   | "email"
+  | "provider"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
 const settingsTabs = [
@@ -7676,6 +7687,7 @@ const settingsTabs = [
   { key: "gateway" as SettingsTab, icon: "server" as const },
   { key: "payment" as SettingsTab, icon: "creditCard" as const },
   { key: "email" as SettingsTab, icon: "mail" as const },
+  { key: "provider" as SettingsTab, icon: "user" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
 

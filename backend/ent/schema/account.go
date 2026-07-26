@@ -206,6 +206,20 @@ func (Account) Fields() []ent.Field {
 			Comment("Parent account id for a linked spark shadow (NULL = normal)."),
 		field.Enum("quota_dimension").Values("global", "spark").Default("global").
 			Comment("'global' (default) or 'spark' (shadow reads codex_bengalfox)."),
+
+		// provider_user_id: 供号商归属。NULL 表示管理员自己上的号。
+		// 结算按此字段聚合，账号软删除后该归属仍保留，已产生的金额继续计入本期。
+		field.Int64("provider_user_id").
+			Optional().
+			Nillable().
+			Comment("Owning provider user id (NULL = onboarded by admin)."),
+		// provider_tier: 供号商上号时选择的速率档位（"1".."5" 或 "custom"）。
+		// 仅用于展示与「应用到存量」回填筛选，不参与调度。
+		field.String("provider_tier").
+			MaxLen(20).
+			Optional().
+			Nillable().
+			Comment("Capacity tier chosen at provider onboarding."),
 	}
 }
 
@@ -254,5 +268,6 @@ func (Account) Indexes() []ent.Index {
 		index.Fields("priority", "status"),
 		index.Fields("deleted_at"), // 软删除查询优化
 		index.Fields("parent_account_id"),
+		index.Fields("provider_user_id"), // 按供号商归属筛选与结算聚合
 	}
 }

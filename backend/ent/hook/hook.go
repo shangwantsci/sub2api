@@ -297,6 +297,30 @@ func (f PromoCodeUsageFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Val
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PromoCodeUsageMutation", m)
 }
 
+// The ProviderSettlementFunc type is an adapter to allow the use of ordinary
+// function as ProviderSettlement mutator.
+type ProviderSettlementFunc func(context.Context, *ent.ProviderSettlementMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProviderSettlementFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProviderSettlementMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProviderSettlementMutation", m)
+}
+
+// The ProviderSettlementItemFunc type is an adapter to allow the use of ordinary
+// function as ProviderSettlementItem mutator.
+type ProviderSettlementItemFunc func(context.Context, *ent.ProviderSettlementItemMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProviderSettlementItemFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProviderSettlementItemMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProviderSettlementItemMutation", m)
+}
+
 // The ProxyFunc type is an adapter to allow the use of ordinary
 // function as Proxy mutator.
 type ProxyFunc func(context.Context, *ent.ProxyMutation) (ent.Value, error)

@@ -62,6 +62,17 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 	return newSchedulerCacheWithChunkSizes(rdb, mgetChunkSize, writeChunkSize)
 }
 
+// ProvideProviderUsageReader 暴露 usageLogRepository 上的供号商对账查询。
+// 这些查询定义在 usage_log_repo_provider.go，与普通用量统计共用同一个仓储实例。
+func ProvideProviderUsageReader(client *ent.Client, sqlDB *sql.DB) service.ProviderUsageReader {
+	return newUsageLogRepositoryWithSQL(client, sqlDB)
+}
+
+// ProvideProviderUserReader 暴露 userRepository 上的供号商用户读取。
+func ProvideProviderUserReader(repo service.UserRepository) service.ProviderUserReader {
+	return repo
+}
+
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
@@ -77,6 +88,9 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
 	NewUsageLogRepository,
+	NewProviderSettlementRepository,
+	ProvideProviderUsageReader,
+	ProvideProviderUserReader,
 	NewUsageBillingRepository,
 	NewBatchImageRepository,
 	NewIdempotencyRepository,

@@ -310,10 +310,16 @@
             </div>
           </template>
 
-          <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
-              {{ t('admin.users.roles.' + value) }}
-            </span>
+          <template #cell-role="{ value, row }">
+            <div class="flex flex-wrap items-center gap-1">
+              <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
+                {{ t('admin.users.roles.' + value) }}
+              </span>
+              <!-- 供号商是纯供货方，与普通用户能力完全不同，列表里要一眼能分辨 -->
+              <span v-if="row.is_provider" class="badge badge-primary">
+                {{ t('admin.users.providerBadge') }}
+              </span>
+            </div>
           </template>
 
           <template #cell-groups="{ row }">

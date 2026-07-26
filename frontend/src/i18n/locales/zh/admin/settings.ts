@@ -12,6 +12,7 @@ export default {
         email: '邮件设置',
         backup: '数据备份',
         payment: '支付设置',
+        provider: '供货商',
       },
       features: {
         channelMonitor: {

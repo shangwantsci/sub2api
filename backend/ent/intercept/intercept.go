@@ -33,6 +33,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/providersettlement"
+	"github.com/Wei-Shaw/sub2api/ent/providersettlementitem"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -753,6 +755,60 @@ func (f TraversePromoCodeUsage) Traverse(ctx context.Context, q ent.Query) error
 	return fmt.Errorf("unexpected query type %T. expect *ent.PromoCodeUsageQuery", q)
 }
 
+// The ProviderSettlementFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ProviderSettlementFunc func(context.Context, *ent.ProviderSettlementQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f ProviderSettlementFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.ProviderSettlementQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.ProviderSettlementQuery", q)
+}
+
+// The TraverseProviderSettlement type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseProviderSettlement func(context.Context, *ent.ProviderSettlementQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseProviderSettlement) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseProviderSettlement) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.ProviderSettlementQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.ProviderSettlementQuery", q)
+}
+
+// The ProviderSettlementItemFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ProviderSettlementItemFunc func(context.Context, *ent.ProviderSettlementItemQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f ProviderSettlementItemFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.ProviderSettlementItemQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.ProviderSettlementItemQuery", q)
+}
+
+// The TraverseProviderSettlementItem type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseProviderSettlementItem func(context.Context, *ent.ProviderSettlementItemQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseProviderSettlementItem) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseProviderSettlementItem) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.ProviderSettlementItemQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.ProviderSettlementItemQuery", q)
+}
+
 // The ProxyFunc type is an adapter to allow the use of ordinary function as a Querier.
 type ProxyFunc func(context.Context, *ent.ProxyQuery) (ent.Value, error)
 
@@ -1182,6 +1238,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.PromoCodeQuery, predicate.PromoCode, promocode.OrderOption]{typ: ent.TypePromoCode, tq: q}, nil
 	case *ent.PromoCodeUsageQuery:
 		return &query[*ent.PromoCodeUsageQuery, predicate.PromoCodeUsage, promocodeusage.OrderOption]{typ: ent.TypePromoCodeUsage, tq: q}, nil
+	case *ent.ProviderSettlementQuery:
+		return &query[*ent.ProviderSettlementQuery, predicate.ProviderSettlement, providersettlement.OrderOption]{typ: ent.TypeProviderSettlement, tq: q}, nil
+	case *ent.ProviderSettlementItemQuery:
+		return &query[*ent.ProviderSettlementItemQuery, predicate.ProviderSettlementItem, providersettlementitem.OrderOption]{typ: ent.TypeProviderSettlementItem, tq: q}, nil
 	case *ent.ProxyQuery:
 		return &query[*ent.ProxyQuery, predicate.Proxy, proxy.OrderOption]{typ: ent.TypeProxy, tq: q}, nil
 	case *ent.RedeemCodeQuery:

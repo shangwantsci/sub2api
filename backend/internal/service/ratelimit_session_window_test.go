@@ -102,6 +102,18 @@ func (m *sessionWindowMockRepo) ListOAuthRefreshCandidates(context.Context) ([]A
 func (m *sessionWindowMockRepo) ListByPlatform(context.Context, string) ([]Account, error) {
 	panic("unexpected")
 }
+func (m *sessionWindowMockRepo) ListByProvider(context.Context, int64) ([]Account, error) {
+	panic("unexpected")
+}
+func (m *sessionWindowMockRepo) ListByProviderTier(context.Context, string) ([]Account, error) {
+	panic("unexpected")
+}
+func (m *sessionWindowMockRepo) CountByProviderTier(context.Context, string) (int, error) {
+	panic("unexpected")
+}
+func (m *sessionWindowMockRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
+	panic("unexpected")
+}
 func (m *sessionWindowMockRepo) UpdateLastUsed(context.Context, int64) error { panic("unexpected") }
 func (m *sessionWindowMockRepo) BatchUpdateLastUsed(context.Context, map[int64]time.Time) error {
 	panic("unexpected")

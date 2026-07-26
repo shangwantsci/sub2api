@@ -91,6 +91,7 @@ export default {
       notes: '备注',
       notesPlaceholder: '请输入备注',
       notesHint: '备注可选',
+      providerSelfManaged: '自有',
       // Filter options
       allPlatforms: '全部平台',
       allTypes: '全部类型',
@@ -113,6 +114,7 @@ export default {
         type: '类型',
         capacity: '容量',
         notes: '备注',
+        provider: '供号商来源',
         priority: '优先级',
         billingRateMultiplier: '账号倍率',
         weight: '权重',

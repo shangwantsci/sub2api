@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
+	"github.com/Wei-Shaw/sub2api/internal/handler/provider"
 )
 
 // AdminHandlers contains all admin-related HTTP handlers
@@ -38,6 +39,7 @@ type AdminHandlers struct {
 	Payment                *admin.PaymentHandler
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
+	Provider               *admin.ProviderHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -59,6 +61,7 @@ type Handlers struct {
 	PaymentWebhook   *PaymentWebhookHandler
 	AvailableChannel *AvailableChannelHandler
 	BatchImage       *BatchImageHandler
+	Provider         *provider.Handler
 }
 
 // BuildInfo contains build-time information

@@ -29,6 +29,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/providersettlement"
+	"github.com/Wei-Shaw/sub2api/ent/providersettlementitem"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
@@ -45,6 +47,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/shopspring/decimal"
 )
 
 // The init function reads all schema descriptors with runtime code
@@ -259,6 +262,10 @@ func init() {
 	accountDescSessionWindowStatus := accountFields[26].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.
 	account.SessionWindowStatusValidator = accountDescSessionWindowStatus.Validators[0].(func(string) error)
+	// accountDescProviderTier is the schema descriptor for provider_tier field.
+	accountDescProviderTier := accountFields[30].Descriptor()
+	// account.ProviderTierValidator is a validator for the "provider_tier" field. It is called by the builders before save.
+	account.ProviderTierValidator = accountDescProviderTier.Validators[0].(func(string) error)
 	accountgroupFields := schema.AccountGroup{}.Fields()
 	_ = accountgroupFields
 	// accountgroupDescPriority is the schema descriptor for priority field.
@@ -1518,6 +1525,70 @@ func init() {
 	promocodeusageDescUsedAt := promocodeusageFields[3].Descriptor()
 	// promocodeusage.DefaultUsedAt holds the default value on creation for the used_at field.
 	promocodeusage.DefaultUsedAt = promocodeusageDescUsedAt.Default.(func() time.Time)
+	providersettlementFields := schema.ProviderSettlement{}.Fields()
+	_ = providersettlementFields
+	// providersettlementDescStandardCost is the schema descriptor for standard_cost field.
+	providersettlementDescStandardCost := providersettlementFields[3].Descriptor()
+	// providersettlement.DefaultStandardCost holds the default value on creation for the standard_cost field.
+	providersettlement.DefaultStandardCost = providersettlementDescStandardCost.Default.(func() decimal.Decimal)
+	// providersettlementDescRequests is the schema descriptor for requests field.
+	providersettlementDescRequests := providersettlementFields[4].Descriptor()
+	// providersettlement.DefaultRequests holds the default value on creation for the requests field.
+	providersettlement.DefaultRequests = providersettlementDescRequests.Default.(int64)
+	// providersettlementDescTokens is the schema descriptor for tokens field.
+	providersettlementDescTokens := providersettlementFields[5].Descriptor()
+	// providersettlement.DefaultTokens holds the default value on creation for the tokens field.
+	providersettlement.DefaultTokens = providersettlementDescTokens.Default.(int64)
+	// providersettlementDescAccountCount is the schema descriptor for account_count field.
+	providersettlementDescAccountCount := providersettlementFields[6].Descriptor()
+	// providersettlement.DefaultAccountCount holds the default value on creation for the account_count field.
+	providersettlement.DefaultAccountCount = providersettlementDescAccountCount.Default.(int)
+	// providersettlementDescLastUsageID is the schema descriptor for last_usage_id field.
+	providersettlementDescLastUsageID := providersettlementFields[7].Descriptor()
+	// providersettlement.DefaultLastUsageID holds the default value on creation for the last_usage_id field.
+	providersettlement.DefaultLastUsageID = providersettlementDescLastUsageID.Default.(int64)
+	// providersettlementDescStatus is the schema descriptor for status field.
+	providersettlementDescStatus := providersettlementFields[8].Descriptor()
+	// providersettlement.DefaultStatus holds the default value on creation for the status field.
+	providersettlement.DefaultStatus = providersettlementDescStatus.Default.(string)
+	// providersettlement.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	providersettlement.StatusValidator = providersettlementDescStatus.Validators[0].(func(string) error)
+	// providersettlementDescSettledAt is the schema descriptor for settled_at field.
+	providersettlementDescSettledAt := providersettlementFields[9].Descriptor()
+	// providersettlement.DefaultSettledAt holds the default value on creation for the settled_at field.
+	providersettlement.DefaultSettledAt = providersettlementDescSettledAt.Default.(func() time.Time)
+	// providersettlementDescCreatedAt is the schema descriptor for created_at field.
+	providersettlementDescCreatedAt := providersettlementFields[15].Descriptor()
+	// providersettlement.DefaultCreatedAt holds the default value on creation for the created_at field.
+	providersettlement.DefaultCreatedAt = providersettlementDescCreatedAt.Default.(func() time.Time)
+	providersettlementitemFields := schema.ProviderSettlementItem{}.Fields()
+	_ = providersettlementitemFields
+	// providersettlementitemDescAccountName is the schema descriptor for account_name field.
+	providersettlementitemDescAccountName := providersettlementitemFields[2].Descriptor()
+	// providersettlementitem.DefaultAccountName holds the default value on creation for the account_name field.
+	providersettlementitem.DefaultAccountName = providersettlementitemDescAccountName.Default.(string)
+	// providersettlementitem.AccountNameValidator is a validator for the "account_name" field. It is called by the builders before save.
+	providersettlementitem.AccountNameValidator = providersettlementitemDescAccountName.Validators[0].(func(string) error)
+	// providersettlementitemDescOffline is the schema descriptor for offline field.
+	providersettlementitemDescOffline := providersettlementitemFields[3].Descriptor()
+	// providersettlementitem.DefaultOffline holds the default value on creation for the offline field.
+	providersettlementitem.DefaultOffline = providersettlementitemDescOffline.Default.(bool)
+	// providersettlementitemDescRequests is the schema descriptor for requests field.
+	providersettlementitemDescRequests := providersettlementitemFields[4].Descriptor()
+	// providersettlementitem.DefaultRequests holds the default value on creation for the requests field.
+	providersettlementitem.DefaultRequests = providersettlementitemDescRequests.Default.(int64)
+	// providersettlementitemDescTokens is the schema descriptor for tokens field.
+	providersettlementitemDescTokens := providersettlementitemFields[5].Descriptor()
+	// providersettlementitem.DefaultTokens holds the default value on creation for the tokens field.
+	providersettlementitem.DefaultTokens = providersettlementitemDescTokens.Default.(int64)
+	// providersettlementitemDescStandardCost is the schema descriptor for standard_cost field.
+	providersettlementitemDescStandardCost := providersettlementitemFields[6].Descriptor()
+	// providersettlementitem.DefaultStandardCost holds the default value on creation for the standard_cost field.
+	providersettlementitem.DefaultStandardCost = providersettlementitemDescStandardCost.Default.(func() decimal.Decimal)
+	// providersettlementitemDescCreatedAt is the schema descriptor for created_at field.
+	providersettlementitemDescCreatedAt := providersettlementitemFields[7].Descriptor()
+	// providersettlementitem.DefaultCreatedAt holds the default value on creation for the created_at field.
+	providersettlementitem.DefaultCreatedAt = providersettlementitemDescCreatedAt.Default.(func() time.Time)
 	proxyMixin := schema.Proxy{}.Mixin()
 	proxyMixinHooks1 := proxyMixin[1].Hooks()
 	proxy.Hooks[0] = proxyMixinHooks1[0]
@@ -2091,62 +2162,66 @@ func init() {
 	user.DefaultRole = userDescRole.Default.(string)
 	// user.RoleValidator is a validator for the "role" field. It is called by the builders before save.
 	user.RoleValidator = userDescRole.Validators[0].(func(string) error)
+	// userDescIsProvider is the schema descriptor for is_provider field.
+	userDescIsProvider := userFields[3].Descriptor()
+	// user.DefaultIsProvider holds the default value on creation for the is_provider field.
+	user.DefaultIsProvider = userDescIsProvider.Default.(bool)
 	// userDescBalance is the schema descriptor for balance field.
-	userDescBalance := userFields[3].Descriptor()
+	userDescBalance := userFields[4].Descriptor()
 	// user.DefaultBalance holds the default value on creation for the balance field.
 	user.DefaultBalance = userDescBalance.Default.(float64)
 	// userDescFrozenBalance is the schema descriptor for frozen_balance field.
-	userDescFrozenBalance := userFields[4].Descriptor()
+	userDescFrozenBalance := userFields[5].Descriptor()
 	// user.DefaultFrozenBalance holds the default value on creation for the frozen_balance field.
 	user.DefaultFrozenBalance = userDescFrozenBalance.Default.(float64)
 	// userDescConcurrency is the schema descriptor for concurrency field.
-	userDescConcurrency := userFields[5].Descriptor()
+	userDescConcurrency := userFields[6].Descriptor()
 	// user.DefaultConcurrency holds the default value on creation for the concurrency field.
 	user.DefaultConcurrency = userDescConcurrency.Default.(int)
 	// userDescStatus is the schema descriptor for status field.
-	userDescStatus := userFields[6].Descriptor()
+	userDescStatus := userFields[7].Descriptor()
 	// user.DefaultStatus holds the default value on creation for the status field.
 	user.DefaultStatus = userDescStatus.Default.(string)
 	// user.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	user.StatusValidator = userDescStatus.Validators[0].(func(string) error)
 	// userDescUsername is the schema descriptor for username field.
-	userDescUsername := userFields[7].Descriptor()
+	userDescUsername := userFields[8].Descriptor()
 	// user.DefaultUsername holds the default value on creation for the username field.
 	user.DefaultUsername = userDescUsername.Default.(string)
 	// user.UsernameValidator is a validator for the "username" field. It is called by the builders before save.
 	user.UsernameValidator = userDescUsername.Validators[0].(func(string) error)
 	// userDescNotes is the schema descriptor for notes field.
-	userDescNotes := userFields[8].Descriptor()
+	userDescNotes := userFields[9].Descriptor()
 	// user.DefaultNotes holds the default value on creation for the notes field.
 	user.DefaultNotes = userDescNotes.Default.(string)
 	// userDescTotpEnabled is the schema descriptor for totp_enabled field.
-	userDescTotpEnabled := userFields[10].Descriptor()
+	userDescTotpEnabled := userFields[11].Descriptor()
 	// user.DefaultTotpEnabled holds the default value on creation for the totp_enabled field.
 	user.DefaultTotpEnabled = userDescTotpEnabled.Default.(bool)
 	// userDescSignupSource is the schema descriptor for signup_source field.
-	userDescSignupSource := userFields[12].Descriptor()
+	userDescSignupSource := userFields[13].Descriptor()
 	// user.DefaultSignupSource holds the default value on creation for the signup_source field.
 	user.DefaultSignupSource = userDescSignupSource.Default.(string)
 	// user.SignupSourceValidator is a validator for the "signup_source" field. It is called by the builders before save.
 	user.SignupSourceValidator = userDescSignupSource.Validators[0].(func(string) error)
 	// userDescBalanceNotifyEnabled is the schema descriptor for balance_notify_enabled field.
-	userDescBalanceNotifyEnabled := userFields[15].Descriptor()
+	userDescBalanceNotifyEnabled := userFields[16].Descriptor()
 	// user.DefaultBalanceNotifyEnabled holds the default value on creation for the balance_notify_enabled field.
 	user.DefaultBalanceNotifyEnabled = userDescBalanceNotifyEnabled.Default.(bool)
 	// userDescBalanceNotifyThresholdType is the schema descriptor for balance_notify_threshold_type field.
-	userDescBalanceNotifyThresholdType := userFields[16].Descriptor()
+	userDescBalanceNotifyThresholdType := userFields[17].Descriptor()
 	// user.DefaultBalanceNotifyThresholdType holds the default value on creation for the balance_notify_threshold_type field.
 	user.DefaultBalanceNotifyThresholdType = userDescBalanceNotifyThresholdType.Default.(string)
 	// userDescBalanceNotifyExtraEmails is the schema descriptor for balance_notify_extra_emails field.
-	userDescBalanceNotifyExtraEmails := userFields[18].Descriptor()
+	userDescBalanceNotifyExtraEmails := userFields[19].Descriptor()
 	// user.DefaultBalanceNotifyExtraEmails holds the default value on creation for the balance_notify_extra_emails field.
 	user.DefaultBalanceNotifyExtraEmails = userDescBalanceNotifyExtraEmails.Default.(string)
 	// userDescTotalRecharged is the schema descriptor for total_recharged field.
-	userDescTotalRecharged := userFields[19].Descriptor()
+	userDescTotalRecharged := userFields[20].Descriptor()
 	// user.DefaultTotalRecharged holds the default value on creation for the total_recharged field.
 	user.DefaultTotalRecharged = userDescTotalRecharged.Default.(float64)
 	// userDescRpmLimit is the schema descriptor for rpm_limit field.
-	userDescRpmLimit := userFields[20].Descriptor()
+	userDescRpmLimit := userFields[21].Descriptor()
 	// user.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	user.DefaultRpmLimit = userDescRpmLimit.Default.(int)
 	userallowedgroupFields := schema.UserAllowedGroup{}.Fields()

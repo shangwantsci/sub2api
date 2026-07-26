@@ -635,6 +635,7 @@ export default {
         admin: 'Admin',
         user: 'User'
       },
+      providerBadge: 'Provider',
       // Settings Dropdowns
       filterSettings: 'Filter Settings',
       columnSettings: 'Column Settings',

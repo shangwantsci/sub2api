@@ -359,6 +359,76 @@ constraint: inherit / enabled / identity_only / disabled
 首轮 token refresh: total=87, needs_refresh=3, refreshed=3, failed=0
 ```
 
+### 供号商站点发布检查（本次含两个 DB 迁移）
+
+与最近几次「无 schema 迁移」的部署不同，供号商站点带两个新迁移，**必须按序执行**：
+
+```text
+backend/migrations/180_add_provider_portal.sql
+backend/migrations/181_provider_settlement_integrity.sql
+```
+
+180 给 `users` 加 `is_provider`、给 `accounts` 加 `provider_user_id`（partial index）
+与 `provider_tier`、新建 `provider_settlements` 表。
+
+181 依赖 180 建出的表，补财务完整性：`provider_settlements` 加 `last_usage_id`
+（封账水位）与 `void_reason`、金额/周期 CHECK 约束、
+`(provider_user_id, period_end) WHERE status='settled'` 的 partial unique index，
+并新建明细快照表 `provider_settlement_items`。
+
+两者全部是 `ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` /
+`DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT`，幂等可重跑，不改动既有数据。
+存量账号的 `provider_user_id` 为 NULL 即「管理员自有」。首次发布时
+`provider_settlements` 为空表，181 的约束与唯一索引不会与存量数据冲突。
+
+迁移由应用启动时自动执行，因此部署顺序不变；但**回滚需要注意**：旧镜像不认识
+这些列，读取时会忽略它们，不会报错，所以应用层可以直接回滚。真正不可逆的是
+`provider_settlements` 里已生成的结算单——回滚应用不会删除它们，重新上线后仍然有效。
+
+部署后确认：
+
+```bash
+docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
+  logs --since=5m sub2api | grep -i migration
+```
+
+检查：
+
+- 迁移 180 与 181 都已应用，无报错；
+- `/api/v1/auth/me` 返回体多出 `is_provider` 字段（值为 false）；
+- 供号商站点默认关闭：`provider_portal_enabled` 未配置时为 false，
+  此时 `/api/v1/provider/*` 全部返回 404，注册接口返回 403
+  `PROVIDER_PORTAL_DISABLED`；
+- 管理端「系统设置 → 供货商」tab 可打开，档位显示 1-5 档种子值；
+- 管理端「供号商对账」菜单可打开，列表为空；
+- 既有功能冒烟：能正常新建账号（该路径改成了账号与绑组同事务）、
+  能正常登录、用量清理日志无异常。
+
+开启站点前还需要在设置页完成：勾选至少一个 Anthropic 分组作为托管类型并填写对外文案、
+设好默认托管类型与默认档位、确认结算时区与结算冷却期、**核对调度优先级**，
+然后才把 `provider_portal_enabled` 打开。
+邀请码在「兑换码」页选「供号商邀请码」类型生成。
+
+#### 打开 `provider_portal_enabled` 之前必须先处理
+
+结算并发、封账水位、清理保护、邀请码事务、明细快照这几项**已经解决**
+（advisory lock + 事务、冷却期 + `last_usage_id`、`EarliestUnsettledStart` 夹紧、
+注册事务化、`provider_settlement_items`）。仍需在开站前确认的是：
+
+- **调度优先级**：`provider_account_priority` 种子值为 1，必须与托管分组内自有账号
+  的 priority 一致。调度里 priority 是硬门槛而非权重，取值不同会让其中一边
+  **永久拿不到任何流量且没有报错**。设置页会扫描并告警，保存前务必看这条提示。
+- **托管分组的自定义定价**：结算按 `SUM(usage_logs.total_cost)` 计算，
+  渠道自定义单价与分组图片单价会计入其中，等于按加价后的金额付给供号商。
+  开站前核对选作托管类型的分组有没有配自定义定价。
+- **站点关闭并未阻断登录**：`/api/v1/auth/login` 不检查门户开关，
+  已存在的供号商账号在关站后仍能登录并进入前端面板（业务接口全 404）。
+  首次发布时门户关闭、不存在任何供号商账号，该缺口不可达；
+  但在开站并产生供号商账号之后若要再次关站，需先补上这道校验。
+- **供号商没有改密入口**：`ProviderDenyConsumerRoutes` 挡掉了 `/user/password`，
+  开站前需补入口或约定由管理员代改。
+- 其余见 `FORK_PROJECT_MEMORY.md` 的 4.8.1。
+
 ### Claude Chrome OAuth 401 自动恢复发布检查
 
 这类修复不能只看容器 healthy。还应确认：

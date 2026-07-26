@@ -42,6 +42,8 @@ export async function list(
     group?: string
     search?: string
     privacy_mode?: string
+    /** 按供号商归属筛选；后端走独立分页路径。 */
+    provider_user_id?: string
     lite?: string
     include_scheduler_score?: string
     sort_by?: string
@@ -78,6 +80,8 @@ export async function listWithEtag(
     group?: string
     search?: string
     privacy_mode?: string
+    /** 按供号商归属筛选；后端走独立分页路径。 */
+    provider_user_id?: string
     lite?: string
     include_scheduler_score?: string
     sort_by?: string

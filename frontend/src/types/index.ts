@@ -85,6 +85,8 @@ export interface User {
   oidc_bound?: boolean
   wechat_bound?: boolean
   role: 'admin' | 'user' // User role for authorization
+  // 供号商能力位。role 仍为 user，但只能使用 /provider 站点，消费侧接口一律拒绝。
+  is_provider?: boolean
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -902,6 +904,10 @@ export interface Account {
   proxy_id: number | null
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
+  // 供号商归属，仅管理端可见；用于对账溯源与按供号商筛选。
+  provider_user_id?: number | null
+  provider_email?: string
+  provider_tier?: string | null
   concurrency: number
   load_factor?: number | null
   pool_weight?: number | null
@@ -1424,7 +1430,13 @@ export interface AnthropicSessionImportJobSnapshot {
 
 // ==================== Usage & Redeem Types ====================
 
-export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
+export type RedeemCodeType =
+  | 'balance'
+  | 'concurrency'
+  | 'subscription'
+  | 'invitation'
+  // provider_invite 只能用于 /provider 注册，且会把新用户标记为供号商。
+  | 'provider_invite'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>

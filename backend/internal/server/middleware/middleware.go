@@ -18,6 +18,10 @@ const (
 	ContextKeyUser ContextKey = "user"
 	// ContextKeyUserRole 当前用户角色（string）
 	ContextKeyUserRole ContextKey = "user_role"
+	// ContextKeyIsProvider 当前用户是否为供号商（bool）。
+	// 由 jwtAuth 写入，ProviderOnly 与 ProviderDenyConsumerRoutes 双向隔离都读它，
+	// 避免每个守卫各查一次库。
+	ContextKeyIsProvider ContextKey = "is_provider"
 	// ContextKeyAPIKey API密钥上下文键
 	ContextKeyAPIKey ContextKey = "api_key"
 	// ContextKeySubscription 订阅上下文键

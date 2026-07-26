@@ -102,6 +102,20 @@ func (_c *UserCreate) SetNillableRole(v *string) *UserCreate {
 	return _c
 }
 
+// SetIsProvider sets the "is_provider" field.
+func (_c *UserCreate) SetIsProvider(v bool) *UserCreate {
+	_c.mutation.SetIsProvider(v)
+	return _c
+}
+
+// SetNillableIsProvider sets the "is_provider" field if the given value is not nil.
+func (_c *UserCreate) SetNillableIsProvider(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetIsProvider(*v)
+	}
+	return _c
+}
+
 // SetBalance sets the "balance" field.
 func (_c *UserCreate) SetBalance(v float64) *UserCreate {
 	_c.mutation.SetBalance(v)
@@ -604,6 +618,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRole
 		_c.mutation.SetRole(v)
 	}
+	if _, ok := _c.mutation.IsProvider(); !ok {
+		v := user.DefaultIsProvider
+		_c.mutation.SetIsProvider(v)
+	}
 	if _, ok := _c.mutation.Balance(); !ok {
 		v := user.DefaultBalance
 		_c.mutation.SetBalance(v)
@@ -690,6 +708,9 @@ func (_c *UserCreate) check() error {
 		if err := user.RoleValidator(v); err != nil {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "User.role": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.IsProvider(); !ok {
+		return &ValidationError{Name: "is_provider", err: errors.New(`ent: missing required field "User.is_provider"`)}
 	}
 	if _, ok := _c.mutation.Balance(); !ok {
 		return &ValidationError{Name: "balance", err: errors.New(`ent: missing required field "User.balance"`)}
@@ -795,6 +816,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 		_node.Role = value
+	}
+	if value, ok := _c.mutation.IsProvider(); ok {
+		_spec.SetField(user.FieldIsProvider, field.TypeBool, value)
+		_node.IsProvider = value
 	}
 	if value, ok := _c.mutation.Balance(); ok {
 		_spec.SetField(user.FieldBalance, field.TypeFloat64, value)
@@ -1195,6 +1220,18 @@ func (u *UserUpsert) SetRole(v string) *UserUpsert {
 // UpdateRole sets the "role" field to the value that was provided on create.
 func (u *UserUpsert) UpdateRole() *UserUpsert {
 	u.SetExcluded(user.FieldRole)
+	return u
+}
+
+// SetIsProvider sets the "is_provider" field.
+func (u *UserUpsert) SetIsProvider(v bool) *UserUpsert {
+	u.Set(user.FieldIsProvider, v)
+	return u
+}
+
+// UpdateIsProvider sets the "is_provider" field to the value that was provided on create.
+func (u *UserUpsert) UpdateIsProvider() *UserUpsert {
+	u.SetExcluded(user.FieldIsProvider)
 	return u
 }
 
@@ -1599,6 +1636,20 @@ func (u *UserUpsertOne) SetRole(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRole() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRole()
+	})
+}
+
+// SetIsProvider sets the "is_provider" field.
+func (u *UserUpsertOne) SetIsProvider(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetIsProvider(v)
+	})
+}
+
+// UpdateIsProvider sets the "is_provider" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateIsProvider() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateIsProvider()
 	})
 }
 
@@ -2216,6 +2267,20 @@ func (u *UserUpsertBulk) SetRole(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRole() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRole()
+	})
+}
+
+// SetIsProvider sets the "is_provider" field.
+func (u *UserUpsertBulk) SetIsProvider(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetIsProvider(v)
+	})
+}
+
+// UpdateIsProvider sets the "is_provider" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateIsProvider() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateIsProvider()
 	})
 }
 

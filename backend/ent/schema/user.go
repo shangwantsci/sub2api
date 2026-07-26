@@ -46,6 +46,10 @@ func (User) Fields() []ent.Field {
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),
+		// is_provider: 供号商能力位。role 仍为 user，但只能访问 /provider 站点，
+		// 不能使用消费侧接口（API Key、网关调用、余额）。
+		field.Bool("is_provider").
+			Default(false),
 		field.Float("balance").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
 			Default(0),
