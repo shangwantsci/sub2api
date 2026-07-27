@@ -7,6 +7,27 @@ export default {
     settlementTimezone: 'Settlement timezone',
     loadFailed: 'Failed to load providers',
     empty: 'No providers yet',
+
+    tabSettlement: 'Settlement',
+    tabManage: 'Providers',
+    colRegisteredAt: 'Registered',
+    colAccountsDetail: 'Accounts',
+    accountsBreakdown: '{active} live / {paused} paused',
+    userStatus: {
+      active: 'Active',
+      disabled: 'Disabled',
+      banned: 'Banned',
+    },
+    resetPassword: 'Reset password',
+    resetPasswordTitle: 'Reset provider password',
+    resetPasswordMessage:
+      'Set a new password for {provider}. Providers cannot change their own password, so you will need to pass it on to them.',
+    newPassword: 'New password',
+    newPasswordHint: 'At least 6 characters. Takes effect immediately and signs the provider out.',
+    resetPasswordDone: 'Password reset. Remember to pass it on to the provider.',
+    generate: 'Generate',
+    disable: 'Disable',
+    enable: 'Enable',
     batchPartialFailure:
       'Settled {settled}, {failed} failed: {detail}. The failed providers were not closed for this period; resolve the issue and retry.',
     voidReasonRequired: 'A reason is required to void a settlement',

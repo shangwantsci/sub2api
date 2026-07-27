@@ -54,7 +54,27 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-3">
+      <!-- 对账与供号商管理是两件事：一个看钱，一个管人。放同一页两个 tab。 -->
+      <div class="border-b border-gray-200 dark:border-dark-700">
+        <nav class="-mb-px flex gap-6">
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            type="button"
+            class="border-b-2 px-1 pb-3 text-sm font-medium transition-colors"
+            :class="
+              activeTab === tab.key
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200'
+            "
+            @click="activeTab = tab.key"
+          >
+            {{ tab.label }}
+          </button>
+        </nav>
+      </div>
+
+      <div v-if="activeTab === 'settlement'" class="flex items-center gap-3">
         <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-300">
           <input v-model="onlyPending" type="checkbox" />
           {{ t('admin.providers.onlyPending') }}
@@ -64,6 +84,99 @@
       <div v-if="loading" class="py-12 text-center text-gray-500 dark:text-dark-400">
         {{ t('common.loading') }}
       </div>
+
+      <!-- ========== 供号商管理 ========== -->
+      <template v-else-if="activeTab === 'manage'">
+        <div v-if="allProviders.length === 0" class="card py-12 text-center">
+          <p class="text-gray-500 dark:text-dark-400">{{ t('admin.providers.empty') }}</p>
+        </div>
+        <div v-else class="card overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
+            <thead class="bg-gray-50 dark:bg-dark-800">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.providers.colProvider') }}
+                </th>
+                <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.providers.colRegisteredAt') }}
+                </th>
+                <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.providers.colStatus') }}
+                </th>
+                <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.providers.colAccountsDetail') }}
+                </th>
+                <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.providers.colPending') }}
+                </th>
+                <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.providers.colActions') }}
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
+              <tr v-for="row in allProviders" :key="row.user_id">
+                <td class="px-4 py-3">
+                  <div class="text-sm font-medium text-gray-900 dark:text-dark-100">{{ row.email }}</div>
+                  <div v-if="row.username" class="text-xs text-gray-400">{{ row.username }}</div>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-600 dark:text-dark-300">
+                  {{ formatDate(row.created_at) }}
+                </td>
+                <td class="px-4 py-3">
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="
+                      row.status === 'active'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                        : 'bg-gray-200 text-gray-600 dark:bg-dark-700 dark:text-dark-300'
+                    "
+                  >
+                    {{ t(`admin.providers.userStatus.${row.status}`) }}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-dark-300">
+                  {{ row.accounts_total }}
+                  <span class="text-xs text-gray-400">
+                    ({{ t('admin.providers.accountsBreakdown', {
+                      active: row.accounts_active,
+                      paused: row.accounts_paused,
+                    }) }})
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-right text-sm font-medium">
+                  {{ formatUSD(row.pending_cost) }}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex justify-end gap-2">
+                    <RouterLink
+                      :to="`/admin/accounts?provider_user_id=${row.user_id}`"
+                      class="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      {{ t('admin.providers.viewAccounts') }}
+                    </RouterLink>
+                    <button
+                      type="button"
+                      class="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+                      @click="openResetPassword(row)"
+                    >
+                      {{ t('admin.providers.resetPassword') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="text-xs hover:underline"
+                      :class="row.status === 'active' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'"
+                      @click="toggleProviderStatus(row)"
+                    >
+                      {{ row.status === 'active' ? t('admin.providers.disable') : t('admin.providers.enable') }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
 
       <div v-else-if="visibleProviders.length === 0" class="card py-12 text-center">
         <p class="text-gray-500 dark:text-dark-400">{{ t('admin.providers.empty') }}</p>
@@ -443,6 +556,63 @@
       </div>
     </BaseDialog>
 
+    <!-- 重置密码。供号商自己没有改密入口（消费侧路由被隔离），由管理员代改。 -->
+    <BaseDialog
+      :show="resetPwOpen"
+      :title="t('admin.providers.resetPasswordTitle')"
+      width="narrow"
+      @close="resetPwOpen = false"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-dark-300">
+          {{ t('admin.providers.resetPasswordMessage', { provider: resetPwTarget?.email ?? '' }) }}
+        </p>
+        <div>
+          <label class="input-label" for="reset-pw">{{ t('admin.providers.newPassword') }}</label>
+          <div class="flex gap-2">
+            <input
+              id="reset-pw"
+              v-model.trim="resetPwValue"
+              type="text"
+              class="input font-mono"
+              autocomplete="new-password"
+            />
+            <button type="button" class="btn-secondary whitespace-nowrap" @click="generatePassword">
+              {{ t('admin.providers.generate') }}
+            </button>
+          </div>
+          <p class="mt-1 text-xs text-gray-400">{{ t('admin.providers.newPasswordHint') }}</p>
+        </div>
+        <div
+          v-if="resetPwError"
+          class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+        >
+          {{ resetPwError }}
+        </div>
+        <div
+          v-if="resetPwDone"
+          class="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+        >
+          {{ t('admin.providers.resetPasswordDone') }}
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn-secondary" @click="resetPwOpen = false">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="resetPwValue.length < 6 || resettingPw"
+            @click="handleResetPassword"
+          >
+            {{ resettingPw ? t('common.loading') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
     <!-- 作废确认 -->
     <BaseDialog
       :show="voidOpen"
@@ -541,11 +711,74 @@ const voidTarget = ref<ProviderSettlement | null>(null)
 const voidReason = ref('')
 const voiding = ref(false)
 
+type ProviderTab = 'settlement' | 'manage'
+const activeTab = ref<ProviderTab>('settlement')
+const tabs = computed<{ key: ProviderTab; label: string }[]>(() => [
+  { key: 'settlement', label: t('admin.providers.tabSettlement') },
+  { key: 'manage', label: t('admin.providers.tabManage') },
+])
+
+// 管理 tab 展示全部供号商，不受「仅看待结算」筛选影响。
+const allProviders = computed(() => summary.value?.providers ?? [])
+
+const resetPwOpen = ref(false)
+const resetPwTarget = ref<ProviderSummary | null>(null)
+const resetPwValue = ref('')
+const resetPwError = ref('')
+const resetPwDone = ref(false)
+const resettingPw = ref(false)
+
 // 弹窗内的错误单独存：页面级 errorMessage 渲染在主内容底部，
 // 弹窗打开时会被遮住，结算失败等于没有任何反馈。
 const batchError = ref('')
 const settleError = ref('')
 const voidError = ref('')
+
+function openResetPassword(row: ProviderSummary) {
+  resetPwTarget.value = row
+  resetPwValue.value = ''
+  resetPwError.value = ''
+  resetPwDone.value = false
+  resetPwOpen.value = true
+  generatePassword()
+}
+
+function generatePassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const bytes = new Uint32Array(16)
+  crypto.getRandomValues(bytes)
+  resetPwValue.value = Array.from(bytes, (b) => chars[b % chars.length]).join('')
+}
+
+// 复用管理端用户更新接口：PUT /admin/users/:id 支持可选 password，
+// 对 is_provider 没有任何限制，留空则不改密。
+async function handleResetPassword() {
+  if (!resetPwTarget.value) return
+  resettingPw.value = true
+  resetPwError.value = ''
+  resetPwDone.value = false
+  try {
+    await adminAPI.users.update(resetPwTarget.value.user_id, { password: resetPwValue.value })
+    resetPwDone.value = true
+  } catch (error) {
+    resetPwError.value = (error as { message?: string })?.message || ''
+  } finally {
+    resettingPw.value = false
+  }
+}
+
+// 停用后该供号商无法登录，其账号也不再产生新用量；
+// 已产生的待结算金额不受影响，仍可正常结算。
+async function toggleProviderStatus(row: ProviderSummary) {
+  const next = row.status === 'active' ? 'disabled' : 'active'
+  errorMessage.value = ''
+  try {
+    await adminAPI.users.update(row.user_id, { status: next })
+    await load()
+  } catch (error) {
+    errorMessage.value = (error as { message?: string })?.message || ''
+  }
+}
 
 function providerLabel(userID: number): string {
   const row = summary.value?.providers.find((p) => p.user_id === userID)
