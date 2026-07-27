@@ -14,10 +14,10 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-27 已按本流程部署 `0.1.156-2e4495d9`，GitHub Actions
-> run `30230866070`；供号商站点上线（迁移 180+181），站点默认关闭，号池流量与
-> 账号状态无变化。上一轮为 2026-07-25 的 `0.1.156-8782b30f`
-> （run `30137006332`，`claude-opus-5` 上线与 Opus 档定价确定性修复）。
+> 最近验证：2026-07-27 已按本流程部署 `0.1.156-08e222ed`，GitHub Actions
+> run `30240480199`；system→messages 迁移不再携带 `[System Instructions]` 标签，
+> billing fp 与 metadata session 显式保持真实首轮语义。上一轮为同日供号商站点版本
+> `0.1.156-2e4495d9`（run `30230866070`）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -156,7 +156,23 @@ docker exec sub2api /app/sub2api --version
 
 这样镜像构建完全在 GitHub runner 上完成，不占用生产机 CPU/内存。
 
-2026-07-25 最近一次验证：
+2026-07-27 最近一次验证：
+
+```text
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-08e222ed
+digest:          sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01
+Actions run:     30240480199 (custom-image success, 4m55s)
+env backup:      backups/.env.20260727-071111.before-08e222ed
+rollback tag:    sub2api-rollback:pre-08e222ed
+```
+
+部署后容器约 6 秒转 healthy，二进制版本为 `0.1.156 / 08e222ed`，本机与公网
+`/health` 均为 200，两个管理接口无凭证均保持 401；启动窗口 panic/fatal 为 0。
+首轮 token refresh 为 `total=72, needs_refresh=1, refreshed=0, failed=1`。
+Guard 未出现 billing、Agent SDK 身份或 system block 数量 finding；仅出现与 Chrome OAuth
+必需 beta 有关的 `unexpected_oauth_beta`，不涉及本次 messages 文本改动。
+
+上一轮 2026-07-25：
 
 ```text
 immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-8782b30f
@@ -165,7 +181,7 @@ env backup:      backups/.env.20260725-010617.before-8782b30f
 rollback tag:    sub2api-rollback:pre-8782b30f
 ```
 
-上一轮 2026-07-23：
+更早一轮 2026-07-23：
 
 ```text
 immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-a16045ee

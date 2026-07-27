@@ -100,14 +100,14 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 
 ## 3. 当前生产状态
 
-截至 2026-07-25 `claude-opus-5` 上线：
+截至 2026-07-27 system→messages 迁移标签移除上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-8782b30f`
-- 镜像 digest：`sha256:8ec3a0244e68a12182681abd395765773500f7a18ecbd7f2371eda3e565fdb13`
-- 应用 commit：`8782b30f`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-08e222ed`
+- 镜像 digest：`sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01`
+- 应用 commit：`08e222ed`
 - 应用版本：`0.1.156`
-- GitHub Actions run：`30137006332`（`custom-image` success，4m54s）
+- GitHub Actions run：`30240480199`（`custom-image` success，4m55s）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -128,7 +128,7 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
   没有自动切换客户配置。随后该分组于 13:36:12 经管理操作启用
   `identity_only`，当前使用该模式的分组数为 1
 - 生产二进制已确认包含 `identity_only` 与“仅必要身份”前端标签
-- 两块提示词及 system 迁移辅助文本由测试实测增量约 53 tokens；主 messages、
+- 两块提示词及 system 迁移辅助文本由测试实测增量约 50 tokens；主 messages、
   count_tokens 与 Mimicry Guard block 模式均通过端到端 wire 测试
 - 分组 14 启用后的首个观察窗口有 13 条成功 usage、7 个账号、覆盖
   Fable/Haiku/Opus/Sonnet；Mimicry Guard 的 `missing_billing_block`、
@@ -141,20 +141,19 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 - `claude-opus-5` 已进入 `claude.DefaultModels`、Bedrock 默认映射与前端模型列表；
   容器内定价兜底表含该 key（远程 LiteLLM 表尚未收录，由 `mergeFallbackPricingData`
   补齐）；Antigravity 侧未加入，待 sync-upstream 探测后再定
-- 本轮启动窗口 panic / error 级日志为 0；容器 8 秒转 healthy
-- 部署后首轮 token refresh：`total=67, needs_refresh=1, refreshed=0, failed=1`；
-  唯一 failed 为账号 `2512` 的 SOCKS 代理
-  `username/password authentication failed`，属存量代理凭证问题
-- 部署时 `.env` 备份：`backups/.env.20260725-010617.before-8782b30f`
-- 上一轮 `a16045ee`（2026-07-23）：digest
-  `sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c`，
-  run `29982187637`，`.env` 备份 `backups/.env.20260723-053306.before-a16045ee`，
-  首轮 token refresh `total=87, needs_refresh=3, refreshed=3, failed=0`
+- 本轮启动窗口 panic / fatal 为 0；容器约 6 秒转 healthy，本机与公网 health 均为 200
+- 部署后首轮 token refresh：`total=72, needs_refresh=1, refreshed=0, failed=1`
+- 新版真实流量 Guard 未出现 `missing_billing_block`、`missing_agent_sdk_identity` 或
+  `system_block_count`；观察到的 finding 只有 `unexpected_oauth_beta`，其中账号 2833
+  已确认是必须携带该 beta 的 `claude_chrome`，与本次 messages 文本改动无关
+- 部署时 `.env` 备份：`backups/.env.20260727-071111.before-08e222ed`
+- 部署前运行镜像 commit `69c58ea5`，image ID
+  `sha256:7609181ded6ca8fb5909993a8732b7c580d3c034f048931a556792e3232398d1`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-8782b30f
+sub2api-rollback:pre-08e222ed
 ```
 
 ## 4. 已实现功能
