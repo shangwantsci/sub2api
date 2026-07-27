@@ -170,6 +170,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
 
 	if shouldMimicClaudeCode {
+		firstUserText := extractFirstUserText(body)
+		rememberClaudeMimicFirstUserText(c, firstUserText)
+
 		// 与 Parrot 对齐：OAuth 账号无条件重写 system（即使客户端已发了 Claude Code
 		// 风格的 system prompt）。原因：第三方工具（opencode 等）会发 "You are Claude
 		// Code..." system prompt 但缺少 billing attribution block，导致 Anthropic
@@ -179,7 +182,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		systemRaw, _ := parsed.SystemValue()
 		systemPromptMode, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 		if systemPromptMode.enabled() {
-			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
+			nextBody := rewriteSystemForNonClaudeCodeWithPromptBlocksModeAndFirstUserText(
+				body, systemRaw, systemPrompt, systemPromptBlocks, true, firstUserText,
+			)
+			if err := replaceBody(nextBody); err != nil {
 				return nil, err
 			}
 			systemRewritten = true
@@ -199,7 +205,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				// metadata 透传开启时跳过 metadata 注入
 				_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)
 				if !mimicMPT {
-					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, metadataFP); metadataUserID != "" {
+					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, metadataFP, firstUserText); metadataUserID != "" {
 						normalizeOpts.injectMetadata = true
 						normalizeOpts.metadataUserID = metadataUserID
 					}

@@ -26,6 +26,13 @@ var ccVersionInBillingRe = regexp.MustCompile(`cc_version=\d+\.\d+\.\d+`)
 // follows the emitted UA version and stays internally consistent (cc_version + fp).
 // Only touches system array blocks whose text starts with "x-anthropic-billing-header".
 func syncBillingHeaderVersion(body []byte, userAgent string) []byte {
+	return syncBillingHeaderVersionWithFirstUserText(body, userAgent, extractFirstUserText(body))
+}
+
+// syncBillingHeaderVersionWithFirstUserText 使用调用方在 system→messages 改写前保存的
+// 真实首轮文本重算 fp。新 wire 格式没有内部 marker，禁止从固定 ack 结构反推 synthetic
+// 消息，否则合法对话撞上该文本时会静默得到错误的 cc_version 后缀。
+func syncBillingHeaderVersionWithFirstUserText(body []byte, userAgent, firstUserText string) []byte {
 	version := ExtractCLIVersion(userAgent)
 	if version == "" {
 		return body
@@ -44,7 +51,7 @@ func syncBillingHeaderVersion(body []byte, userAgent string) []byte {
 			original := text.String()
 			var newText string
 			if ccVersionWithFpRe.MatchString(original) {
-				fp := computeClaudeCodeFingerprint(body, version)
+				fp := computeClaudeCodeFingerprintFromText(firstUserText, version)
 				newText = ccVersionWithFpRe.ReplaceAllString(original, "cc_version="+version+"."+fp)
 			} else {
 				newText = ccVersionInBillingRe.ReplaceAllString(original, "cc_version="+version)

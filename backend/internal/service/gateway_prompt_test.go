@@ -339,8 +339,8 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			wantSystemText:   claudeCodeSystemPrompt,
 			wantMessagesLen:  3, // instruction + ack + original
 			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nYou are a personal assistant running inside OpenClaw.",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantFirstMsgText: "You are a personal assistant running inside OpenClaw.",
+			wantAckMsgText:   migratedSystemPromptAckText,
 		},
 		{
 			name:            "system equals Claude Code prompt - no messages injected",
@@ -359,8 +359,8 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			wantSystemText:   claudeCodeSystemPrompt,
 			wantMessagesLen:  3,
 			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nFirst instruction\n\nSecond instruction",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantFirstMsgText: "First instruction\n\nSecond instruction",
+			wantAckMsgText:   migratedSystemPromptAckText,
 		},
 		{
 			name:            "empty array system - no messages injected",
@@ -376,8 +376,8 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			wantSystemText:   claudeCodeSystemPrompt,
 			wantMessagesLen:  3,
 			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nCustom prompt",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantFirstMsgText: "Custom prompt",
+			wantAckMsgText:   migratedSystemPromptAckText,
 		},
 		{
 			name:            "json.RawMessage nil system",
@@ -393,8 +393,8 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			wantSystemText:   claudeCodeSystemPrompt,
 			wantMessagesLen:  5, // 2 injected + 3 original
 			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nBe helpful",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantFirstMsgText: "Be helpful",
+			wantAckMsgText:   migratedSystemPromptAckText,
 		},
 	}
 
@@ -500,7 +500,7 @@ func TestRewriteSystemForNonClaudeCode_PreservesOriginalSystemCacheControlTTL(t 
 			result := rewriteSystemForNonClaudeCode(body, system)
 
 			firstInstructionBlock := gjson.GetBytes(result, "messages.0.content.0")
-			require.Equal(t, "[System Instructions]\nProject instructions", firstInstructionBlock.Get("text").String())
+			require.Equal(t, "Project instructions", firstInstructionBlock.Get("text").String())
 			require.Equal(t, "ephemeral", firstInstructionBlock.Get("cache_control.type").String())
 			require.Equal(t, tt.wantTTL, firstInstructionBlock.Get("cache_control.ttl").String())
 
@@ -617,8 +617,7 @@ func TestClaudeOAuthIdentityOnlyPromptIsAppliedAndUnderTwoHundredTokens(t *testi
 	incrementalText := strings.Join([]string{
 		system.Array()[0].Get("text").String(),
 		system.Array()[1].Get("text").String(),
-		"[System Instructions]",
-		"Understood. I will follow these instructions.",
+		migratedSystemPromptAckText,
 	}, "\n")
 	count, err := codec.Count(incrementalText)
 	require.NoError(t, err)
@@ -633,4 +632,12 @@ func TestClaudeOAuthIdentityOnlyPromptIsAppliedAndUnderTwoHundredTokens(t *testi
 	trimmedCountTokensBody := svc.ensureClaudeOAuthMimicCountTokensSystemBody(ctx, fullBody)
 	require.Len(t, gjson.GetBytes(trimmedCountTokensBody, "system").Array(), 2)
 	require.NotContains(t, string(trimmedCountTokensBody), strings.TrimSpace(claudeCodeFableSystemPromptExpansion))
+	require.Len(t, gjson.GetBytes(trimmedCountTokensBody, "messages").Array(), 3,
+		"full→identity_only 只能重建 system blocks，不能重复迁移成嵌套消息对")
+	require.Equal(t, "Customer instructions", gjson.GetBytes(trimmedCountTokensBody, "messages.0.content.0.text").String())
+	require.Equal(t, migratedSystemPromptAckText, gjson.GetBytes(trimmedCountTokensBody, "messages.1.content.0.text").String())
+	require.Equal(t, "hello", gjson.GetBytes(trimmedCountTokensBody, "messages.2.content").String())
+	wantFP := computeClaudeCodeFingerprintFromText("hello", claude.CLICurrentVersion)
+	require.Contains(t, gjson.GetBytes(trimmedCountTokensBody, "system.0.text").String(),
+		"cc_version="+claude.CLICurrentVersion+"."+wantFP)
 }

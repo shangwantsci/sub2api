@@ -107,7 +107,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestUsesCaptured
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Len(t, recorder.requests, 1)
-			assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+			assertClaudeCodeWireRequest(t, recorder.requests[0], "hello", "/v1/messages?beta=true", false, "", true, true)
 			require.Equal(t, tt.wantHeader, getHeaderRaw(recorder.requests[0].req.Header, "anthropic-beta"))
 			billingText := findClaudeWireBillingText(gjson.GetBytes(recorder.requests[0].body, "system"))
 			require.Contains(t, billingText, "cc_version=2.1.211.")
@@ -171,9 +171,48 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicMessagesWireRequestWithoutSyste
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, recorder.requests, 1)
-	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+	assertClaudeCodeWireRequest(t, recorder.requests[0], "hello without system", "/v1/messages?beta=true", false, "", true, true)
 	assertClaudeWireUnmigratedFirstUser(t, recorder.requests[0].body, "hello without system")
 	require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
+}
+
+func TestGatewayService_ClaudeOAuthNaturalAckConversationKeepsFirstTurnFingerprintAndSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := &sequentialClaudeWireRecorder{
+		responses: []*http.Response{claudeWireMessageOKResponse(), claudeWireMessageOKResponse()},
+	}
+	svc := newClaudeWireGatewayService(t, recorder)
+	account := claudeWireOAuthAccount()
+	const firstTurn = "first turn must remain the session and billing anchor"
+
+	withAck := []byte(`{"model":"claude-sonnet-4-6","messages":[
+	  {"role":"user","content":[{"type":"text","text":"` + firstTurn + `"}]},
+	  {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]},
+	  {"role":"user","content":"second turn"}
+	],"stream":false}`)
+	withoutAck := []byte(`{"model":"claude-sonnet-4-6","messages":[
+	  {"role":"user","content":[{"type":"text","text":"` + firstTurn + `"}]}
+	],"stream":false}`)
+
+	for _, body := range [][]byte{withAck, withoutAck} {
+		c := ginContextForOAuthMetadataTest(t, http.MethodPost, "/v1/messages?beta=true")
+		result, err := svc.Forward(context.Background(), c, account, mustParseClaudeWireRequest(t, body))
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	}
+
+	require.Len(t, recorder.requests, 2)
+	wantFP := computeClaudeCodeFingerprintFromText(firstTurn, claude.CLICurrentVersion)
+	for _, request := range recorder.requests {
+		require.Contains(t, findClaudeWireBillingText(gjson.GetBytes(request.body, "system")),
+			"cc_version="+claude.CLICurrentVersion+"."+wantFP)
+	}
+	firstMetadata := ParseMetadataUserID(gjson.GetBytes(recorder.requests[0].body, "metadata.user_id").String())
+	secondMetadata := ParseMetadataUserID(gjson.GetBytes(recorder.requests[1].body, "metadata.user_id").String())
+	require.NotNil(t, firstMetadata)
+	require.NotNil(t, secondMetadata)
+	require.Equal(t, secondMetadata.SessionID, firstMetadata.SessionID,
+		"逐字命中 migration ack 的真实对话不能改变 metadata session 锚点")
 }
 
 func TestGatewayService_ClaudeOAuthSyntheticMimicMigratesSystemCacheControlToInstructionMessage(t *testing.T) {
@@ -192,7 +231,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicMigratesSystemCacheControlToIns
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, recorder.requests, 1)
-	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, "", true, true)
+	assertClaudeCodeWireRequest(t, recorder.requests[0], "hello", "/v1/messages?beta=true", false, "", true, true)
 	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "cached project rules", "hello")
 	require.Equal(t, "ephemeral", gjson.GetBytes(recorder.requests[0].body, "messages.0.content.0.cache_control.type").String())
 	require.Equal(t, "5m", gjson.GetBytes(recorder.requests[0].body, "messages.0.content.0.cache_control.ttl").String())
@@ -213,7 +252,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicCountTokensWireRequest(t *testi
 
 	require.NoError(t, err)
 	require.Len(t, recorder.requests, 1)
-	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages/count_tokens?beta=true", true, "", true, false)
+	assertClaudeCodeWireRequest(t, recorder.requests[0], "count me", "/v1/messages/count_tokens?beta=true", true, "", true, false)
 	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "project rules", "count me")
 	require.False(t, gjson.GetBytes(recorder.requests[0].body, "temperature").Exists())
 }
@@ -239,7 +278,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicOrdinaryRetryPreservesBodyDefau
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, recorder.requests, 2)
-	assertClaudeCodeWireRequest(t, recorder.requests[1], "/v1/messages?beta=true", false, "", true, true)
+	assertClaudeCodeWireRequest(t, recorder.requests[1], "hello", "/v1/messages?beta=true", false, "", true, true)
 }
 
 func TestGatewayService_ClaudeOAuthSyntheticMimicRetryRebuildPreservesWireRequest(t *testing.T) {
@@ -261,7 +300,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicRetryRebuildPreservesWireReques
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, recorder.requests, 2)
-	assertClaudeCodeWireRequest(t, recorder.requests[1], "/v1/messages?beta=true", false, "", false, false)
+	assertClaudeCodeWireRequest(t, recorder.requests[1], "hello", "/v1/messages?beta=true", false, "", false, false)
 	require.False(t, gjson.GetBytes(recorder.requests[1].body, "thinking").Exists(), "retry body should remove top-level thinking after signature rectification")
 	require.Equal(t, "high", gjson.GetBytes(recorder.requests[1].body, "output_config.effort").String())
 }
@@ -284,7 +323,7 @@ func TestGatewayService_ClaudeOAuthSyntheticMimicCountTokensSignatureRetryPreser
 
 	require.NoError(t, err)
 	require.Len(t, recorder.requests, 2)
-	assertClaudeCodeWireRequest(t, recorder.requests[1], "/v1/messages/count_tokens?beta=true", true, "", false, false)
+	assertClaudeCodeWireRequest(t, recorder.requests[1], "hello", "/v1/messages/count_tokens?beta=true", true, "", false, false)
 	require.False(t, gjson.GetBytes(recorder.requests[1].body, "thinking").Exists(), "count_tokens signature retry should remove top-level thinking after signature rectification")
 	require.Equal(t, "high", gjson.GetBytes(recorder.requests[1].body, "output_config.effort").String())
 }
@@ -312,7 +351,7 @@ func TestGatewayService_ClaudeOAuthFakeClaudeCLIUserAgentStillUsesSyntheticMimic
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, recorder.requests, 1)
-	assertClaudeCodeWireRequest(t, recorder.requests[0], "/v1/messages?beta=true", false, fakeUserID, true, true)
+	assertClaudeCodeWireRequest(t, recorder.requests[0], "hello", "/v1/messages?beta=true", false, fakeUserID, true, true)
 	assertClaudeWireMigratedSystemMessages(t, recorder.requests[0].body, "fake claude code system", "hello")
 }
 
@@ -384,7 +423,7 @@ func claudeWireErrorResponse(status int, message string) *http.Response {
 	}
 }
 
-func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wantPathQuery string, wantTokenCounting bool, forbiddenMetadataUserID string, wantThinkingDefaults bool, wantStreamFalse bool) {
+func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wantFirstUserText string, wantPathQuery string, wantTokenCounting bool, forbiddenMetadataUserID string, wantThinkingDefaults bool, wantStreamFalse bool) {
 	t.Helper()
 	require.NotNil(t, got.req)
 	require.NotNil(t, got.req.URL)
@@ -417,7 +456,7 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 	require.NotEmpty(t, strings.TrimSpace(systemBlocks[2].Get("text").String()))
 	require.Equal(t, "ephemeral", systemBlocks[2].Get("cache_control.type").String())
 	billingText := findClaudeWireBillingText(system)
-	require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+"."+computeClaudeCodeFingerprint(got.body, claude.CLICurrentVersion))
+	require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+"."+computeClaudeCodeFingerprintFromText(wantFirstUserText, claude.CLICurrentVersion))
 	require.Contains(t, billingText, "cc_entrypoint=sdk-cli")
 	require.NotContains(t, billingText, "cch=")
 
@@ -469,9 +508,10 @@ func assertClaudeCodeWireRequest(t *testing.T, got claudeWireRecordedRequest, wa
 func assertClaudeWireMigratedSystemMessages(t *testing.T, body []byte, originalSystem string, originalUser string) {
 	t.Helper()
 	require.Equal(t, "user", gjson.GetBytes(body, "messages.0.role").String())
-	require.Equal(t, "[System Instructions]\n"+originalSystem, claudeWireMessageFirstText(body, 0))
+	require.Equal(t, originalSystem, claudeWireMessageFirstText(body, 0))
+	require.NotContains(t, string(body), legacyMigratedSystemPromptLabel)
 	require.Equal(t, "assistant", gjson.GetBytes(body, "messages.1.role").String())
-	require.Equal(t, "Understood. I will follow these instructions.", claudeWireMessageFirstText(body, 1))
+	require.Equal(t, migratedSystemPromptAckText, claudeWireMessageFirstText(body, 1))
 	require.Equal(t, "user", gjson.GetBytes(body, "messages.2.role").String())
 	require.Equal(t, originalUser, claudeWireMessageFirstText(body, 2))
 }

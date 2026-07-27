@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestComputeClaudeCodeFingerprint_Official211Vectors(t *testing.T) {
@@ -43,16 +45,89 @@ func TestComputeClaudeCodeFingerprint_Official211Vectors(t *testing.T) {
 	}
 }
 
-func TestComputeClaudeCodeFingerprint_SkipsMigratedSystemInstruction(t *testing.T) {
-	body := []byte(`{
-	  "messages": [
-	    {"role":"user","content":[{"type":"text","text":"[System Instructions]\nproject rules"}]},
-	    {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]},
-	    {"role":"user","content":"Read the file /etc/hostname and tell me its exact contents"}
-	  ]
-	}`)
-	require.Equal(t, "Read the file /etc/hostname and tell me its exact contents", extractFirstUserText(body))
-	require.Equal(t, "882", computeClaudeCodeFingerprint(body, "2.1.211"))
+// 无 wire marker 时绝不能靠固定 ack 猜 synthetic pair。合法真实对话可能逐字命中该
+// 文本，任何结构识别都会让 fp 与 metadata session 静默改用第二轮。
+func TestExtractFirstUserText_NeverGuessesSyntheticPairFromAck(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "assistant reply is ordinary conversation",
+			body: `{"messages":[
+			  {"role":"user","content":[{"type":"text","text":"first turn"}]},
+			  {"role":"assistant","content":[{"type":"text","text":"Sure, here you go."}]},
+			  {"role":"user","content":"second turn"}
+			]}`,
+			want: "first turn",
+		},
+		{
+			name: "assistant reply exactly equals migration ack",
+			body: `{"messages":[
+			  {"role":"user","content":[{"type":"text","text":"first turn"}]},
+			  {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]},
+			  {"role":"user","content":"second turn"}
+			]}`,
+			want: "first turn",
+		},
+		{
+			name: "ack without a preceding user message",
+			body: `{"messages":[
+			  {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]},
+			  {"role":"user","content":"first turn"}
+			]}`,
+			want: "first turn",
+		},
+		{
+			name: "unlabeled pair is not inferred without explicit context",
+			body: `{"messages":[
+			  {"role":"user","content":[{"type":"text","text":"project rules"}]},
+			  {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]}
+			]}`,
+			want: "project rules",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, extractFirstUserText([]byte(tt.body)))
+		})
+	}
+}
+
+// 端到端锁定：rewrite 在注入 synthetic pair 前保存真实首轮，billing block 必须继续
+// 使用它；事后兼容推断也应能用已经写入的 fp 找回同一文本。
+func TestRewriteSystemForNonClaudeCode_MigrationKeepsFingerprintAndDropsLabel(t *testing.T) {
+	const userTurn = "Read the file /etc/hostname and tell me its exact contents"
+	original := []byte(`{"model":"claude-sonnet-4-6","system":"Customer instructions","messages":[{"role":"user","content":"` + userTurn + `"}]}`)
+
+	migrated := rewriteSystemForNonClaudeCode(original, "Customer instructions")
+
+	require.NotContains(t, string(migrated), legacyMigratedSystemPromptLabel)
+	require.Equal(t, "Customer instructions", gjson.GetBytes(migrated, "messages.0.content.0.text").String())
+	require.Equal(t, "Customer instructions", extractFirstUserText(migrated),
+		"无 marker body 不允许靠 ack 猜 synthetic pair")
+	inferred, ok := inferBillingFingerprintSourceText(migrated)
+	require.True(t, ok)
+	require.Equal(t, userTurn, inferred)
+	require.Contains(t,
+		gjson.GetBytes(migrated, "system.0.text").String(),
+		"cc_version="+claude.CLICurrentVersion+"."+computeClaudeCodeFingerprint(original, claude.CLICurrentVersion),
+	)
+}
+
+func TestRewriteSystemForNonClaudeCode_NaturalAckConversationUsesFirstTurn(t *testing.T) {
+	const firstTurn = "first turn must drive billing fingerprint"
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[
+	  {"role":"user","content":[{"type":"text","text":"` + firstTurn + `"}]},
+	  {"role":"assistant","content":[{"type":"text","text":"Understood. I will follow these instructions."}]},
+	  {"role":"user","content":"second turn"}
+	]}`)
+
+	rewritten := rewriteSystemForNonClaudeCode(body, nil)
+	wantFP := computeClaudeCodeFingerprintFromText(firstTurn, claude.CLICurrentVersion)
+	require.Contains(t, gjson.GetBytes(rewritten, "system.0.text").String(),
+		"cc_version="+claude.CLICurrentVersion+"."+wantFP)
 }
 
 func mustJSONMarshalString(t *testing.T, value string) string {
@@ -123,4 +198,23 @@ func TestSyncBillingHeaderVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSyncBillingHeaderVersion_MigratedBodyUsesExplicitOriginalFirstTurn(t *testing.T) {
+	const userTurn = "Read the file /etc/hostname and tell me its exact contents"
+	original := []byte(`{"model":"claude-sonnet-4-6","system":"Customer instructions","messages":[{"role":"user","content":"` + userTurn + `"}]}`)
+	migrated := rewriteSystemForNonClaudeCode(original, "Customer instructions")
+	const nextVersion = "9.9.9"
+
+	got := syncBillingHeaderVersionWithFirstUserText(
+		migrated,
+		"claude-cli/"+nextVersion+" (external, sdk-cli)",
+		userTurn,
+	)
+
+	wantFP := computeClaudeCodeFingerprintFromText(userTurn, nextVersion)
+	require.Contains(t, gjson.GetBytes(got, "system.0.text").String(),
+		"cc_version="+nextVersion+"."+wantFP)
+	require.NotContains(t, gjson.GetBytes(got, "system.0.text").String(),
+		"cc_version="+nextVersion+"."+computeClaudeCodeFingerprintFromText("Customer instructions", nextVersion))
 }

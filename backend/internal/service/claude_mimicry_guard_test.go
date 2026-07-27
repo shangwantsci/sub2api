@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -124,4 +125,56 @@ func TestBuildCountTokensRequest_ClaudeMimicryGuardBlockModeAllowsIdentityOnly(t
 	require.Contains(t, system[0].Get("text").String(), "x-anthropic-billing-header:")
 	require.Equal(t, claudeCodeSystemPrompt, system[1].Get("text").String())
 	require.NotContains(t, string(wireBody), strings.TrimSpace(claudeCodeFableSystemPromptExpansion))
+}
+
+func TestBuildCountTokensRequest_IdentityOnlyFromFullMimicPreservesFingerprintAndSession(t *testing.T) {
+	resetGatewayForwardingSettingsCacheForTest(t)
+	svc := &GatewayService{
+		cfg: &config.Config{},
+		settingService: NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+			SettingKeyClaudeMimicryGuardMode: "block",
+		}}, &config.Config{}),
+		identityService: NewIdentityService(&identityCacheStub{}),
+	}
+	account := &Account{
+		ID:       125,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeSetupToken,
+		Extra:    map[string]any{"account_uuid": "acc-uuid"},
+	}
+	group := &Group{
+		ID:                            14,
+		Platform:                      PlatformAnthropic,
+		Status:                        StatusActive,
+		Hydrated:                      true,
+		ClaudeOAuthSystemPromptPolicy: GroupPolicyIdentityOnly,
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	raw := []byte(`{"model":"claude-fable-5","system":"project rules","messages":[{"role":"user","content":"count me"}]}`)
+	fullMimic := rewriteSystemForNonClaudeCodeWithPromptBlocks(raw, "project rules", "", "")
+
+	_, rawWire, err := svc.buildCountTokensRequest(
+		ctx, nil, account, raw, "oauth-token", "oauth", "claude-fable-5", true,
+	)
+	require.NoError(t, err)
+	_, rebuiltWire, err := svc.buildCountTokensRequest(
+		ctx, nil, account, fullMimic, "oauth-token", "oauth", "claude-fable-5", true,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, gjson.GetBytes(rebuiltWire, "messages").Array(), 3,
+		"full→identity_only production path must not nest another synthetic pair")
+	wantFP := computeClaudeCodeFingerprintFromText("count me", claude.CLICurrentVersion)
+	require.Contains(t, gjson.GetBytes(rebuiltWire, "system.0.text").String(),
+		"cc_version="+claude.CLICurrentVersion+"."+wantFP)
+	rawMetadata := ParseMetadataUserID(gjson.GetBytes(rawWire, "metadata.user_id").String())
+	rebuiltMetadata := ParseMetadataUserID(gjson.GetBytes(rebuiltWire, "metadata.user_id").String())
+	require.NotNil(t, rawMetadata)
+	require.NotNil(t, rebuiltMetadata)
+	for _, metadata := range []*ParsedUserID{rawMetadata, rebuiltMetadata} {
+		baseSession := generateSessionUUID(buildStableSessionSeed(account.ID, metadata.DeviceID, "count me"))
+		wantSession := generateUUIDFromSeed(fmt.Sprintf("%d::%s", account.ID, baseSession))
+		require.Equal(t, wantSession, metadata.SessionID,
+			"c=nil build must keep metadata anchored to the real first user turn")
+	}
 }

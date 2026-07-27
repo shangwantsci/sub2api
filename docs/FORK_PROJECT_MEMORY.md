@@ -261,7 +261,7 @@ fp = sha256("59cf53e54c78" + chars + cliVersion).slice(0, 3)
 - JavaScript 字符串索引是 UTF-16 code unit，不是 UTF-8 bytes；
 - 主请求输入是 normalize 前第一条非 meta 用户消息；
 - side query 输入是 side-query body 第一条 user text；
-- 网关必须跳过迁移 system prompt 产生的 `[System Instructions]` synthetic user。
+- 网关必须跳过迁移 system prompt 产生的 synthetic user，见 4.13。
 
 标定 harness 会在每次 CLI invocation 前写 canary marker，同时尝试 marker 与 wire user 候选。任何请求匹配失败都会阻止 profile 发布。
 
@@ -568,6 +568,45 @@ denial 后账号 2069 的 Fable 再次选中数 -> 0
 `8782b30f` 补齐了 `opus-5`、`opus-4.8` 两档家族条目与硬编码兜底价，并加了 50 次
 循环的确定性回归测试，同时覆盖 `anthropic.claude-opus-5` 这类 Bedrock 形态 ID。
 旧代 Opus 3 / 4 / 4.1 仍保留 `$15/$75`。
+
+### 4.13 system→messages 迁移不再带 `[System Instructions]` 标签
+
+OAuth/SetupToken + 非真实 Claude Code 客户端时，客户端 `system` 必须让位给 Claude Code
+的 system blocks，因此被迁移成 messages 开头的一对合成消息。上游 sub2api 会给这条
+user 消息加 `[System Instructions]\n` 前缀，本 fork 已去掉：
+
+- 该字符串是上游自带的可读性标签，**不是伪装要素**——真实 Claude Code CLI 从不发送
+  它，留着反而是一个稳定的第三方特征；客户侧也能感知到自己的提示词被改写；
+- 语义不丢：紧随其后的 assistant 应答 `Understood. I will follow these instructions.`
+  才是让模型把前一条当指令的支点，**保留不动**；
+- assistant ack 未一并删除是有依据的：删掉会让 body 出现两条连续 user 消息，而真实
+  CLI 在 normalize 阶段就把同角色相邻消息合并掉了，wire 上不会出现该形态。用一个
+  已知特征换一个结构特征不是净收益。若要进一步贴近真身，正确方向是把客户 system
+  作为**首条真实 user 消息里的附加 text block**（CLI 处理 CLAUDE.md 的方式），
+  那会同时改变 fp 输入与 cache 断点，属于独立项目。
+
+**关键约束**：去掉 wire marker 后，绝不能靠固定 ack 或消息结构猜哪一条是 synthetic。
+合法真实对话完全可能恰好出现相同的 user/assistant 形态，误判会让
+`cc_version=X.Y.Z.{fp}` 与 `metadata.session_id` 一起静默改用第二轮文本。
+
+当前实现是在改写前读取真实首轮，并通过请求本地上下文显式贯穿：
+
+- system blocks 初建直接使用改写前文本计算 billing fp；
+- calibrated profile 改变 CLI 版本时，`syncBillingHeaderVersionWithFirstUserText` 用同一
+  文本重算 fp；
+- metadata session seed 使用同一文本；普通 retry、signature retry 与 failover 保留该值；
+- `extractFirstUserText` 不按 ack 猜测，只取当前 body 第一条 user；旧标签仍作为历史格式
+  的显式兼容信号；
+- `count_tokens` 从 full 转成 `identity_only` 时只重建 system blocks，不重复迁移 messages；
+  该兼容路径缺少进程内上下文时才用 body 内已有的 12-bit fp 反证候选文本，正常生产
+  原始请求不依赖推断。
+
+Mimicry Guard、system blocks、metadata 格式、headers、betas 都未改变。回归测试锁定：
+迁移前后 fp 相同、真实对话逐字命中 ack 时不误跳过、calibrated UA 重算仍取真实首轮、
+full→identity-only 不产生嵌套消息对，且 `c=nil` 不改错 fp。
+
+部署时会有一次性影响：所有走 OAuth 伪装的客户第一条 user 消息内容变化，prompt cache
+前缀失效，之后恢复正常。
 
 ### 4.8 供号商站点（Provider Portal）
 

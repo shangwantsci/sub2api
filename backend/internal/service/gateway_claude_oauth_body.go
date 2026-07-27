@@ -429,7 +429,7 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	return out, modelID
 }
 
-func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account *Account, fp *Fingerprint) string {
+func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account *Account, fp *Fingerprint, firstUserTextOverride ...string) string {
 	if parsed == nil || account == nil {
 		return ""
 	}
@@ -451,7 +451,9 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	// 随对话在尾部追加 messages 时保持不变，贴近真实 CC 进程级稳定的 session_id。
 	// 不复用 GenerateSessionHash —— 后者是粘性路由键、按设计逐轮变化（见其测试）。
 	var firstUserText string
-	if parsed.Body != nil {
+	if len(firstUserTextOverride) > 0 {
+		firstUserText = firstUserTextOverride[0]
+	} else if parsed.Body != nil {
 		firstUserText = extractFirstUserText(parsed.Body.Bytes())
 	}
 	seed := buildStableSessionSeed(account.ID, sessionContextDiscriminator(parsed.SessionContext), firstUserText)
@@ -517,6 +519,28 @@ func syncClaudeCodeSessionHeaderFromBody(req *http.Request, body []byte) {
 	setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", parsed.SessionID)
 }
 
+const claudeMimicFirstUserTextGinKey = "claude_mimic_first_user_text"
+
+// rememberClaudeMimicFirstUserText 把 system→messages 改写前的真实首轮保存在请求本地
+// 上下文中。该值不进入 wire，仅供后续 metadata session 与 billing fp 重算使用。
+func rememberClaudeMimicFirstUserText(c *gin.Context, text string) {
+	if c != nil {
+		c.Set(claudeMimicFirstUserTextGinKey, text)
+	}
+}
+
+func recalledClaudeMimicFirstUserText(c *gin.Context) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	value, ok := c.Get(claudeMimicFirstUserTextGinKey)
+	if !ok {
+		return "", false
+	}
+	text, ok := value.(string)
+	return text, ok
+}
+
 // applyClaudeCodeOAuthMimicryToBody 将"非 Claude Code 客户端 + Claude OAuth 账号"
 // 路径上原本只在 /v1/messages 里做的完整伪装应用到任意 body 上。
 //
@@ -548,10 +572,15 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		return body
 	}
 
+	firstUserText := extractFirstUserText(body)
+	rememberClaudeMimicFirstUserText(c, firstUserText)
+
 	systemPromptMode, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	systemRewritten := false
 	if systemPromptMode.enabled() {
-		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks)
+		body = rewriteSystemForNonClaudeCodeWithPromptBlocksModeAndFirstUserText(
+			body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks, true, firstUserText,
+		)
 		systemRewritten = true
 	}
 
@@ -567,7 +596,7 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 				_, mimicMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 			}
 			if !mimicMPT {
-				if uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body); uid != "" {
+				if uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body, firstUserText); uid != "" {
 					normalizeOpts.injectMetadata = true
 					normalizeOpts.metadataUserID = uid
 				}
@@ -602,6 +631,7 @@ func (s *GatewayService) ensureClaudeOAuthMimicMetadata(
 	account *Account,
 	body []byte,
 	fp *Fingerprint,
+	firstUserTextOverride ...string,
 ) []byte {
 	if account == nil || !account.IsOAuth() || len(body) == 0 {
 		return body
@@ -620,7 +650,14 @@ func (s *GatewayService) ensureClaudeOAuthMimicMetadata(
 	}
 	fp = claudeCodeMimicryFingerprint(fp, s.calibratedProfile(ctx))
 
-	uid := s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body)
+	var uid string
+	if len(firstUserTextOverride) > 0 {
+		uid = s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body, firstUserTextOverride[0])
+	} else if firstUserText, ok := recalledClaudeMimicFirstUserText(c); ok {
+		uid = s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body, firstUserText)
+	} else {
+		uid = s.buildOAuthMetadataUserIDFromBody(ctx, account, fp, body)
+	}
 	next, changed := ensureClaudeOAuthMetadataUserID(body, uid)
 	if !changed {
 		return body
@@ -647,6 +684,7 @@ func (s *GatewayService) buildOAuthMetadataUserIDFromBody(
 	account *Account,
 	fp *Fingerprint,
 	body []byte,
+	firstUserTextOverride ...string,
 ) string {
 	_ = ctx
 	if account == nil {
@@ -670,7 +708,11 @@ func (s *GatewayService) buildOAuthMetadataUserIDFromBody(
 	if fp != nil {
 		clientDiscriminator = fp.ClientID
 	}
-	seed := buildStableSessionSeed(account.ID, clientDiscriminator, extractFirstUserText(body))
+	firstUserText := extractFirstUserText(body)
+	if len(firstUserTextOverride) > 0 {
+		firstUserText = firstUserTextOverride[0]
+	}
+	seed := buildStableSessionSeed(account.ID, clientDiscriminator, firstUserText)
 	sessionID := generateSessionUUID(seed)
 
 	var uaVersion string
@@ -967,16 +1009,16 @@ func decodeClaudeOAuthSystemPromptCacheControl(raw json.RawMessage) (any, error)
 	return value, nil
 }
 
-func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansionPrompt string) (string, error) {
+func expandClaudeOAuthSystemPromptTextTemplate(firstUserText, text string, expansionPrompt string) (string, error) {
 	if text == "" {
 		return "", nil
 	}
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
-	billingText, err := buildBillingAttributionText(body, claude.CLICurrentVersion)
+	billingText, err := buildBillingAttributionTextFromText(firstUserText, claude.CLICurrentVersion)
 	if err != nil {
 		return "", err
 	}
-	fp := computeClaudeCodeFingerprint(body, claude.CLICurrentVersion)
+	fp := computeClaudeCodeFingerprintFromText(firstUserText, claude.CLICurrentVersion)
 	replacer := strings.NewReplacer(
 		"{billing_header}", billingText,
 		"{cc_version}", claude.CLICurrentVersion,
@@ -1027,7 +1069,7 @@ func alignEphemeralCacheControlTTL(raw []byte, ttl string) []byte {
 	return raw
 }
 
-func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string) ([][]byte, error) {
+func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, firstUserText, expansionPrompt string, blocksConfig string) ([][]byte, error) {
 	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
 	if err != nil {
 		return nil, err
@@ -1049,7 +1091,7 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 		if blockType != "text" {
 			return nil, fmt.Errorf("system block %d type %q is not supported", i, block.Type)
 		}
-		text, err := expandClaudeOAuthSystemPromptTextTemplate(body, block.Text, expansionPrompt)
+		text, err := expandClaudeOAuthSystemPromptTextTemplate(firstUserText, block.Text, expansionPrompt)
 		if err != nil {
 			return nil, err
 		}
@@ -1137,11 +1179,41 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 	return nil
 }
 
+const (
+	// migratedSystemPromptAckText 是 system→messages 迁移时注入的 assistant 应答。
+	// billing fingerprint 不再靠该文本识别 synthetic pair；真实首轮由调用方在改写前
+	// 显式保存，避免合法对话恰好命中相同 ack 时发生静默误判。
+	migratedSystemPromptAckText = "Understood. I will follow these instructions."
+
+	// legacyMigratedSystemPromptLabel 是旧版本给迁移消息加的前缀。真实 Claude Code CLI
+	// 从不发送该字符串，属于第三方特征，已停止注入；保留常量仅用于识别上游链路传进来的
+	// 旧格式 body，使其指纹输入与注入端保持同一语义。
+	legacyMigratedSystemPromptLabel = "[System Instructions]\n"
+)
+
 func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string) []byte {
 	return rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body, system, expansionPrompt, blocksConfig, true)
 }
 
 func rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body []byte, system any, expansionPrompt string, blocksConfig string, useModelSpecificDefault bool) []byte {
+	return rewriteSystemForNonClaudeCodeWithPromptBlocksModeAndFirstUserText(
+		body,
+		system,
+		expansionPrompt,
+		blocksConfig,
+		useModelSpecificDefault,
+		extractFirstUserText(body),
+	)
+}
+
+func rewriteSystemForNonClaudeCodeWithPromptBlocksModeAndFirstUserText(
+	body []byte,
+	system any,
+	expansionPrompt string,
+	blocksConfig string,
+	useModelSpecificDefault bool,
+	firstUserText string,
+) []byte {
 	system = normalizeSystemParam(system)
 	modelID := gjson.GetBytes(body, "model").String()
 	expansionPrompt = resolveClaudeOAuthExpansionPrompt(modelID, expansionPrompt, useModelSpecificDefault)
@@ -1151,14 +1223,14 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body []byte, system any, 
 
 	out := body
 
-	// 2. 先将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头。
-	//    billing attribution 的 fp 取决于最终 wire body 的第一条 user 文本，因此必须
-	//    先完成 messages 迁移，再构造 system blocks。
+	// 2. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头。
+	//    billing attribution 的 fp 必须使用改写前保存的真实首轮 firstUserText；
+	//    新 wire 格式没有内部 marker，禁止事后按 ack 结构猜测 synthetic 消息。
 	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
 	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
 		instructionBlock := anthropicSystemTextBlockRawCachePayload{
 			Type:         "text",
-			Text:         "[System Instructions]\n" + originalSystemText,
+			Text:         originalSystemText,
 			CacheControl: originalSystemCacheControl,
 		}
 		instrMsg, err1 := json.Marshal(anthropicMessagePayload{
@@ -1168,7 +1240,7 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body []byte, system any, 
 		ackMsg, err2 := json.Marshal(anthropicMessagePayload{
 			Role: "assistant",
 			Content: []anthropicSystemTextBlockRawCachePayload{
-				{Type: "text", Text: "Understood. I will follow these instructions."},
+				{Type: "text", Text: migratedSystemPromptAckText},
 			},
 		})
 		if err1 != nil || err2 != nil {
@@ -1206,10 +1278,10 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocksMode(body []byte, system any, 
 	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
 	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
 	//    cch（见 buildBillingAttributionText）。
-	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(out, expansionPrompt, blocksConfig)
+	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(out, firstUserText, expansionPrompt, blocksConfig)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
-		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(out, expansionPrompt, "")
+		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(out, firstUserText, expansionPrompt, "")
 	}
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
@@ -1241,7 +1313,14 @@ func hasClaudeOAuthMimicSystemBlocks(body []byte, mode claudeOAuthSystemPromptMo
 	if !system.IsArray() || !mode.validSystemBlockCount(len(system.Array())) {
 		return false
 	}
+	return hasClaudeOAuthMimicCoreSystemBlocks(body)
+}
 
+func hasClaudeOAuthMimicCoreSystemBlocks(body []byte) bool {
+	system := gjson.GetBytes(body, "system")
+	if !system.IsArray() {
+		return false
+	}
 	billingFound := false
 	identityFound := false
 	system.ForEach(func(_, item gjson.Result) bool {
@@ -1267,12 +1346,25 @@ func (s *GatewayService) ensureClaudeOAuthMimicCountTokensSystemBody(ctx context
 	if !mode.enabled() || hasClaudeOAuthMimicSystemBlocks(body, mode) {
 		return body
 	}
-	return rewriteSystemForNonClaudeCodeWithPromptBlocksMode(
+
+	// count_tokens 可能收到主 messages 路径已经生成的 full/identity_only body。
+	// 模式块数不匹配时只重建 system blocks，绝不能把现有 Claude Code system blocks
+	// 再迁移成一对 messages，否则会产生嵌套 synthetic pair 并改变 fp 输入。
+	systemForMigration := systemValueFromBody(body)
+	firstUserText := extractFirstUserText(body)
+	if hasClaudeOAuthMimicCoreSystemBlocks(body) {
+		systemForMigration = nil
+		if inferred, ok := inferBillingFingerprintSourceText(body); ok {
+			firstUserText = inferred
+		}
+	}
+	return rewriteSystemForNonClaudeCodeWithPromptBlocksModeAndFirstUserText(
 		body,
-		systemValueFromBody(body),
+		systemForMigration,
 		prompt,
 		blocks,
 		false,
+		firstUserText,
 	)
 }
 

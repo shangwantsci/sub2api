@@ -24,6 +24,16 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		return req, body, err
 	}
 
+	mimicFirstUserText := ""
+	hasMimicFirstUserText := account.IsOAuth() && mimicClaudeCode
+	if hasMimicFirstUserText {
+		mimicFirstUserText = extractFirstUserText(body)
+		if remembered, ok := recalledClaudeMimicFirstUserText(c); ok {
+			// 入口在迁移前保存的值优先级最高。
+			mimicFirstUserText = remembered
+		}
+	}
+
 	// 确定目标URL
 	targetURL := claudeAPIURL
 	if account.Type == AccountTypeAPIKey {
@@ -98,12 +108,16 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 	if account.IsOAuth() && mimicClaudeCode && !enableMPT {
-		body = s.ensureClaudeOAuthMimicMetadata(ctx, c, account, body, metadataFingerprint)
+		body = s.ensureClaudeOAuthMimicMetadata(ctx, c, account, body, metadataFingerprint, mimicFirstUserText)
 	}
 
 	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
 	if billingUserAgent != "" {
-		body = syncBillingHeaderVersion(body, billingUserAgent)
+		if hasMimicFirstUserText {
+			body = syncBillingHeaderVersionWithFirstUserText(body, billingUserAgent, mimicFirstUserText)
+		} else {
+			body = syncBillingHeaderVersion(body, billingUserAgent)
+		}
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

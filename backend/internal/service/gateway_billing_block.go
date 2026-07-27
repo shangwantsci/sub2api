@@ -32,7 +32,10 @@ const fingerprintSalt = "59cf53e54c78"
 // 不能按 UTF-8 byte 索引，否则中文/emoji 首轮会产生错误 fp。
 // 任何偏差都会导致 cc_version=X.Y.Z.{fp} 在上游侧与真实 CLI 不一致。
 func computeClaudeCodeFingerprint(body []byte, version string) string {
-	firstText := extractFirstUserText(body)
+	return computeClaudeCodeFingerprintFromText(extractFirstUserText(body), version)
+}
+
+func computeClaudeCodeFingerprintFromText(firstText, version string) string {
 	indices := []int{4, 7, 20}
 	units := utf16.Encode([]rune(firstText))
 	var chars strings.Builder
@@ -53,40 +56,89 @@ func computeClaudeCodeFingerprint(body []byte, version string) string {
 	return hex.EncodeToString(sum[:])[:3]
 }
 
-// extractFirstUserText 提取 messages 中第一条非 synthetic user 消息的首段 text。
-// rewriteSystemForNonClaudeCodeWithPromptBlocks 会把客户端 system 迁移为
-// "[System Instructions]\n..." user/assistant 对；官方 CLI 的主请求 fp 来自 normalize
-// 之前第一条 non-meta 用户消息，因此必须跳过该 synthetic user，取真实用户首轮。
+// extractFirstUserText 提取当前 body 中第一条 role=user 消息的首段 text。
+//
+// 新格式 system→messages 迁移不再携带 wire marker，因此绝不能在这里按固定 assistant
+// ack 猜测并跳过消息：真实对话可能恰好具有相同形态。迁移调用方必须在改写前保存真实
+// 首轮，并通过显式参数交给 billing / metadata 计算。旧标签仍仅作为历史格式兼容。
 func extractFirstUserText(body []byte) string {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
 		return ""
 	}
-	first := ""
-	messages.ForEach(func(_, msg gjson.Result) bool {
+	for _, msg := range messages.Array() {
 		if msg.Get("role").String() != "user" {
+			continue
+		}
+		text := firstTextBlockOfMessage(msg)
+		if strings.HasPrefix(text, legacyMigratedSystemPromptLabel) {
+			continue
+		}
+		return text
+	}
+	return ""
+}
+
+// inferBillingFingerprintSourceText 仅用于缺少显式迁移上下文的兼容路径：用 body 内已经
+// 存在的 cc_version 指纹反证哪条 user 文本曾被用于计算。生产 mimic 路径会显式传入
+// 改写前首轮，不依赖这个 12-bit 指纹推断。多个候选碰撞时保守返回第一条，避免把真实
+// 对话误判为 synthetic；迁移路径的碰撞由显式上下文彻底规避。
+func inferBillingFingerprintSourceText(body []byte) (string, bool) {
+	version, wantFP := "", ""
+	system := gjson.GetBytes(body, "system")
+	if system.IsArray() {
+		for _, block := range system.Array() {
+			text := block.Get("text").String()
+			if !strings.HasPrefix(strings.TrimSpace(text), "x-anthropic-billing-header:") {
+				continue
+			}
+			match := ccVersionWithFpRe.FindStringSubmatch(text)
+			if len(match) == 3 {
+				version, wantFP = match[1], match[2]
+				break
+			}
+		}
+	}
+	if version == "" || wantFP == "" {
+		return "", false
+	}
+
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.IsArray() {
+		return "", false
+	}
+	for _, msg := range messages.Array() {
+		if msg.Get("role").String() != "user" {
+			continue
+		}
+		text := firstTextBlockOfMessage(msg)
+		if strings.HasPrefix(text, legacyMigratedSystemPromptLabel) {
+			continue
+		}
+		if computeClaudeCodeFingerprintFromText(text, version) == wantFP {
+			return text, true
+		}
+	}
+	return "", false
+}
+
+func firstTextBlockOfMessage(msg gjson.Result) string {
+	content := msg.Get("content")
+	if content.Type == gjson.String {
+		return content.String()
+	}
+	if !content.IsArray() {
+		return ""
+	}
+	text := ""
+	content.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() != "text" {
 			return true
 		}
-		content := msg.Get("content")
-		text := ""
-		if content.Type == gjson.String {
-			text = content.String()
-		} else if content.IsArray() {
-			content.ForEach(func(_, block gjson.Result) bool {
-				if block.Get("type").String() == "text" {
-					text = block.Get("text").String()
-					return false
-				}
-				return true
-			})
-		}
-		if strings.HasPrefix(text, "[System Instructions]\n") {
-			return true
-		}
-		first = text
+		text = block.Get("text").String()
 		return false
 	})
-	return first
+	return text
 }
 
 // buildBillingAttributionText 构造 system 数组的 billing attribution 文本。
@@ -103,11 +155,15 @@ func extractFirstUserText(body []byte) string {
 // 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
 // Claude Code prompt block 承担）。
 func buildBillingAttributionText(body []byte, cliVersion string) (string, error) {
+	return buildBillingAttributionTextFromText(extractFirstUserText(body), cliVersion)
+}
+
+func buildBillingAttributionTextFromText(firstUserText, cliVersion string) (string, error) {
 	if cliVersion == "" {
 		return "", fmt.Errorf("cliVersion required")
 	}
 	profile := claude.DefaultClaudeCodeMimicryProfile()
-	fp := computeClaudeCodeFingerprint(body, cliVersion)
+	fp := computeClaudeCodeFingerprintFromText(firstUserText, cliVersion)
 	return fmt.Sprintf(
 		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;",
 		cliVersion, fp, profile.BillingEntrypoint,

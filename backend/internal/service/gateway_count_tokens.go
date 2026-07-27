@@ -433,6 +433,19 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 
 // buildCountTokensRequest 构建 count_tokens 上游请求
 func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, []byte, error) {
+	firstUserText := extractFirstUserText(body)
+	if hasClaudeOAuthMimicCoreSystemBlocks(body) {
+		mode, _, _ := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+		if mode.enabled() && !hasClaudeOAuthMimicSystemBlocks(body, mode) {
+			if inferred, ok := inferBillingFingerprintSourceText(body); ok {
+				firstUserText = inferred
+			}
+		}
+	}
+	if mimicClaudeCode {
+		rememberClaudeMimicFirstUserText(c, firstUserText)
+	}
+
 	// 确定目标 URL
 	targetURL := claudeAPICountTokensURL
 	if account.Type == AccountTypeAPIKey {
@@ -501,13 +514,17 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if account.IsOAuth() && mimicClaudeCode {
 		body = s.ensureClaudeOAuthMimicCountTokensSystemBody(ctx, body)
 		if !ctEnableMPT {
-			body = s.ensureClaudeOAuthMimicMetadata(ctx, c, account, body, ctMetadataFingerprint)
+			body = s.ensureClaudeOAuthMimicMetadata(ctx, c, account, body, ctMetadataFingerprint, firstUserText)
 		}
 	}
 
 	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
 	if ctBillingUserAgent != "" {
-		body = syncBillingHeaderVersion(body, ctBillingUserAgent)
+		if mimicClaudeCode {
+			body = syncBillingHeaderVersionWithFirstUserText(body, ctBillingUserAgent, firstUserText)
+		} else {
+			body = syncBillingHeaderVersion(body, ctBillingUserAgent)
+		}
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
