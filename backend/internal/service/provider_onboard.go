@@ -105,9 +105,19 @@ func ValidateProviderProxy(in ProviderProxyInput) (ProviderProxyInput, error) {
 	return out, nil
 }
 
-// resolveProviderAccountPriority 从设置取调度优先级，非法值回落种子值。
-// 绝不返回 0：0 是最高优先级，会让供号商账号独占整个分组的流量。
-func resolveProviderAccountPriority(settings ProviderSettings) int {
+// ResolveProviderAccountPriority 决定新供号商账号的调度优先级。
+//
+// 优先与目标托管分组内**当前最小的 priority** 对齐，而不是套用一个全局固定值。
+// 原因是调度里 priority 是硬门槛：filterByMinPriority 只保留分组内数值最小的那批
+// 账号，其余完全不参与选择。取分组最小值能让新号与该分组里真正在跑的账号平起平坐，
+// 既不会插队抢走自有账号的流量，也不会被静默饿死。
+//
+// groupMin 为该分组现有账号的最小 priority；分组为空（ok=false）时回落设置值。
+// 结果绝不为 0：0 是最高优先级，会让供号商账号独占整个分组。
+func ResolveProviderAccountPriority(settings ProviderSettings, groupMin int, ok bool) int {
+	if ok && groupMin > 0 && groupMin <= providerMaxAccountPriority {
+		return groupMin
+	}
 	if settings.AccountPriority <= 0 || settings.AccountPriority > providerMaxAccountPriority {
 		return DefaultProviderAccountPriority
 	}
@@ -118,10 +128,14 @@ func resolveProviderAccountPriority(settings ProviderSettings) int {
 //
 // 顺序很重要：先过滤 extra（丢掉 persona 等），再套档位，最后写强制伪装项，
 // 这样供号商无论怎么构造请求都覆盖不了强制项。
+// groupMinPriority 是目标托管分组内现有账号的最小 priority，ok=false 表示分组为空。
+// 由调用方查好传入，保持本函数无 IO、可单测。
 func BuildProviderAccountInput(
 	settings ProviderSettings,
 	in ProviderOnboardInput,
 	proxyID int64,
+	groupMinPriority int,
+	groupHasAccounts bool,
 ) (*CreateAccountInput, error) {
 	if in.AccountType != AccountTypeOAuth && in.AccountType != AccountTypeSetupToken {
 		return nil, infraerrors.BadRequest("INVALID_ACCOUNT_TYPE",
@@ -175,11 +189,11 @@ func BuildProviderAccountInput(
 		ProxyID:     &proxyID,
 		Concurrency: tier.Concurrency,
 		LoadFactor:  &loadFactor,
-		// Priority 由设置控制且必须显式给值：createAccountRecord 无条件
+		// Priority 与目标分组自动对齐，且必须显式给值：createAccountRecord 无条件
 		// SetPriority(account.Priority)，留零值不会回落 schema 默认值而是真的写 0；
 		// 调度里 priority 是硬门槛（filterByMinPriority 只保留最小值那批），
 		// 0 会让所有供号商账号把自有账号完全挤出候选。
-		Priority: resolveProviderAccountPriority(settings),
+		Priority: ResolveProviderAccountPriority(settings, groupMinPriority, groupHasAccounts),
 		GroupIDs: []int64{hostingID},
 		// 分组由托管类型唯一决定，绝不回落平台默认分组。
 		SkipDefaultGroupBind: true,

@@ -956,6 +956,40 @@ func (r *accountRepository) ListByProviderPaged(
 	return out, paginationResultFromTotal(int64(total), params), nil
 }
 
+// MinPriorityByGroup 返回每个分组内当前最小的 priority。
+//
+// 供号商上号时据此对齐：调度的 filterByMinPriority 只保留分组内 priority 数值
+// 最小的那批账号，其余一个请求都拿不到。新账号取该分组的最小值，就能与当前真正
+// 在跑的那批账号平起平坐，既不会插队也不会被饿死。
+//
+// 与 DistinctNonProviderPrioritiesByGroup 不同，这里**包含**供号商账号：
+// 我们要对齐的是分组里实际生效的调度门槛，不区分账号归属。
+func (r *accountRepository) MinPriorityByGroup(ctx context.Context) (map[int64]int, error) {
+	const query = `
+		SELECT ag.group_id, MIN(a.priority)
+		FROM account_groups ag
+		JOIN accounts a ON a.id = ag.account_id
+		WHERE a.deleted_at IS NULL
+		GROUP BY ag.group_id
+	`
+	rows, err := r.sql.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[int64]int)
+	for rows.Next() {
+		var groupID int64
+		var minPriority int
+		if err := rows.Scan(&groupID, &minPriority); err != nil {
+			return nil, err
+		}
+		out[groupID] = minPriority
+	}
+	return out, rows.Err()
+}
+
 // DistinctNonProviderPrioritiesByGroup 返回每个分组内非供号商账号已有的 priority 去重值。
 //
 // 只统计非供号商账号：供号商账号的 priority 由设置统一控制，

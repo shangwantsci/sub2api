@@ -93,15 +93,11 @@ export default {
     settlementCooldownHint:
       'Usage rows are written asynchronously. Closing a period stops this far short of the current moment so in-flight writes can land first. Defaults to 600 seconds.',
     cooldownRange: 'Cooldown must be between 60 and 86400 seconds',
-    accountPriority: 'Account scheduling priority',
+    accountPriority: 'Account scheduling priority (automatic)',
     accountPriorityHint:
-      'The priority written when a provider onboards an account. This is a hard gate, not a weight: only the accounts with the lowest priority value in a group are ever scheduled, and the rest receive no traffic at all. Defaults to 1, matching the admin account form.',
-    priorityRange: 'Priority must be between 0 and 100',
-    priorityConflictTitle: 'Priority conflict: some accounts in these groups will receive no traffic',
-    priorityConflictItem:
-      '{group}: your own accounts use priority {others}, which differs from the provider value {mine}',
-    priorityConflictHint:
-      'Scheduling keeps only the lowest priority value within a group; everything else is excluded silently. Align both sides to the same value, or move provider accounts into their own group.',
+      'Onboarding takes the lowest priority already present in the chosen hosting group, so new accounts line up with whatever is currently serving traffic there. Nothing to configure. Priority is a hard gate rather than a weight: only the lowest value in a group is ever scheduled, so a mismatch would leave one side with no traffic at all.',
+    priorityNoGroups: 'No hosting types enabled yet',
+    priorityFallbackTag: '(group empty, using default)',
 
     sectionHostingTypes: 'Hosting types',
     hostingTypesHint:

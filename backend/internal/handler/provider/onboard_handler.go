@@ -165,6 +165,19 @@ func (h *Handler) Onboard(c *gin.Context) {
 		return
 	}
 
+	// 调度优先级与目标托管分组对齐。priority 是硬门槛，取值与分组内在跑的账号
+	// 不一致会让其中一边永久拿不到流量，所以这里按分组现值自动决定，不让人配。
+	hostingGroupID := req.HostingTypeID
+	if hostingGroupID == 0 {
+		hostingGroupID = settings.DefaultGroupID
+	}
+	groupMin, groupHasAccounts, err := h.resolveGroupMinPriority(ctx, hostingGroupID)
+	if err != nil {
+		h.cleanupOrphanProxy(ctx, proxy.ID, "group priority lookup failed")
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	credentials := buildCredentials(tokenInfo)
 	input, err := service.BuildProviderAccountInput(settings, service.ProviderOnboardInput{
 		ProviderUserID: providerID,
@@ -175,7 +188,7 @@ func (h *Handler) Onboard(c *gin.Context) {
 		HostingType:    req.HostingTypeID,
 		Tier:           req.Tier,
 		CustomTier:     toServiceCustomTier(req.CustomTier),
-	}, proxy.ID)
+	}, proxy.ID, groupMin, groupHasAccounts)
 	if err != nil {
 		h.cleanupOrphanProxy(ctx, proxy.ID, "account input build failed")
 		response.ErrorFrom(c, err)
@@ -193,6 +206,20 @@ func (h *Handler) Onboard(c *gin.Context) {
 
 	// 只回脱敏视图，不回 tokenInfo。
 	response.Success(c, AccountViewFromService(account, settings, nil))
+}
+
+// resolveGroupMinPriority 返回目标分组内现有账号的最小 priority。
+// 分组为空时返回 (0, false, nil)，由调用方回落到设置里的默认值。
+func (h *Handler) resolveGroupMinPriority(ctx context.Context, groupID int64) (int, bool, error) {
+	if groupID <= 0 {
+		return 0, false, nil
+	}
+	minByGroup, err := h.accountRepo.MinPriorityByGroup(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	v, ok := minByGroup[groupID]
+	return v, ok, nil
 }
 
 // cleanupOrphanProxy 回收上号失败时残留的代理。

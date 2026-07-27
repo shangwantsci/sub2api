@@ -83,51 +83,38 @@
             </p>
           </div>
 
+          <!--
+            调度优先级不再手工配置：上号时自动取目标托管分组内现有账号的最小 priority。
+            priority 在调度里是硬门槛而非权重，只有分组内数值最小的那批账号会被选中，
+            手工填一个和分组不一致的值会让其中一边被静默饿死。这里只展示实际会用到的值。
+          -->
           <div>
-            <label class="input-label" for="ps-priority">
-              {{ t('admin.providerSettings.accountPriority') }}
-            </label>
-            <input
-              id="ps-priority"
-              v-model.number="settings.account_priority"
-              type="number"
-              min="0"
-              max="100"
-              class="input"
-            />
+            <span class="input-label">{{ t('admin.providerSettings.accountPriority') }}</span>
+            <div
+              class="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-700 dark:bg-dark-800"
+            >
+              <p v-if="resolvedPriorities.length === 0" class="text-sm text-gray-500 dark:text-dark-400">
+                {{ t('admin.providerSettings.priorityNoGroups') }}
+              </p>
+              <ul v-else class="space-y-1">
+                <li
+                  v-for="p in resolvedPriorities"
+                  :key="p.groupId"
+                  class="flex items-center justify-between text-sm"
+                >
+                  <span class="text-gray-700 dark:text-dark-200">{{ p.groupName }}</span>
+                  <span class="font-medium text-gray-900 dark:text-dark-100">
+                    {{ p.priority }}
+                    <span v-if="p.fallback" class="ml-1 text-xs font-normal text-gray-400">
+                      {{ t('admin.providerSettings.priorityFallbackTag') }}
+                    </span>
+                  </span>
+                </li>
+              </ul>
+            </div>
             <p class="mt-1 text-xs text-gray-400">
               {{ t('admin.providerSettings.accountPriorityHint') }}
             </p>
-            <p v-if="errors.account_priority" class="mt-1 text-xs text-red-500">
-              {{ errors.account_priority }}
-            </p>
-            <!--
-              priority 在调度里是硬门槛而非权重：只有分组内数值最小的那批账号会被选中。
-              分组里混有不同 priority 的账号时，数值大的一边会被完全饿死且没有任何报错，
-              所以这里必须显式告警而不是静默保存。
-            -->
-            <div
-              v-if="priorityConflicts.length > 0"
-              class="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/40"
-            >
-              <p class="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                {{ t('admin.providerSettings.priorityConflictTitle') }}
-              </p>
-              <ul class="mt-1 space-y-0.5 text-xs text-amber-700 dark:text-amber-400">
-                <li v-for="c in priorityConflicts" :key="c.groupId">
-                  {{
-                    t('admin.providerSettings.priorityConflictItem', {
-                      group: c.groupName,
-                      others: c.otherPriorities.join(', '),
-                      mine: settings.account_priority,
-                    })
-                  }}
-                </li>
-              </ul>
-              <p class="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                {{ t('admin.providerSettings.priorityConflictHint') }}
-              </p>
-            </div>
           </div>
         </div>
       </section>
@@ -494,26 +481,40 @@ const enabledHostingTypes = computed(
 )
 
 /**
- * 找出「已开放的托管分组里，自有账号 priority 与供号商配置值不一致」的分组。
+ * 展示每个已开放托管分组上号时实际会用的 priority。
  *
- * 这是本页最容易踩的坑：priority 在调度里是硬门槛而不是权重，
+ * 上号时自动取该分组现有账号的最小 priority，与分组内正在跑的账号对齐；
+ * 分组还是空的就回落到 account_priority（种子值 1）。
+ *
+ * 之所以不让人手填：priority 在调度里是硬门槛而不是权重，
  * filterByMinPriority 只保留分组内数值最小的那批账号，其余一个请求都拿不到。
- * 两边取值不同时，数值大的一方会被永久饿死，而且完全没有报错——
- * 供号商只会看到"账号正常但用量恒为 0"。所以必须显式提示。
+ * 填一个和分组不一致的值，数值大的一方会被永久饿死且完全没有报错——
+ * 供号商只会看到「账号正常但用量恒为 0」。
  */
-const priorityConflicts = computed(() => {
+const resolvedPriorities = computed(() => {
   const s = settings.value
   if (!s) return []
-  const mine = s.account_priority
-  const out: { groupId: number; groupName: string; otherPriorities: number[] }[] = []
+  const out: { groupId: number; groupName: string; priority: number; fallback: boolean }[] = []
 
   for (const h of s.hosting_types) {
     if (!h.enabled) continue
     const group = availableGroups.value.find((g) => g.id === h.group_id)
     if (!group) continue
-    const others = (group.existing_priorities ?? []).filter((p) => p !== mine)
-    if (others.length > 0) {
-      out.push({ groupId: group.id, groupName: group.name, otherPriorities: others })
+    const existing = group.existing_priorities ?? []
+    if (existing.length > 0) {
+      out.push({
+        groupId: group.id,
+        groupName: group.name,
+        priority: Math.min(...existing),
+        fallback: false,
+      })
+    } else {
+      out.push({
+        groupId: group.id,
+        groupName: group.name,
+        priority: s.account_priority,
+        fallback: true,
+      })
     }
   }
   return out
@@ -565,9 +566,6 @@ function validate(): boolean {
   // 与后端 provider_settings.go 的区间保持一致。
   if (s.settlement_cooldown_seconds < 60 || s.settlement_cooldown_seconds > 86400) {
     next.settlement_cooldown_seconds = t('admin.providerSettings.cooldownRange')
-  }
-  if (s.account_priority < 0 || s.account_priority > 100) {
-    next.account_priority = t('admin.providerSettings.priorityRange')
   }
 
   let anyTierEnabled = false

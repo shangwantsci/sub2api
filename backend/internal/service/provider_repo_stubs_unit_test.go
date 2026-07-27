@@ -138,3 +138,25 @@ func (m *batchAccountQueryRepo) ListByProviderPaged(context.Context, int64, pagi
 func (m *fullRebuildAccountRepo) ListByProviderPaged(context.Context, int64, pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error) {
 	return nil, &pagination.PaginationResult{}, nil
 }
+
+// MinPriorityByGroup 的空实现。返回空 map 表示「分组里还没有账号」，
+// 上号时会回落到设置里的默认优先级。
+
+func (m *accountRepoStub) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}
+func (m *publicBatchImageAccountRepo) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}
+func (m *mockAccountRepoForPlatform) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}
+func (m *mockAccountRepoForGemini) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}
+func (m *batchAccountQueryRepo) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}
+func (m *fullRebuildAccountRepo) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}

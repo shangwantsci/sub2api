@@ -609,19 +609,20 @@ denial 后账号 2069 的 Fable 再次选中数 -> 0
 
 调度优先级（**踩坑重灾区**）：
 
-供号商账号的 `priority` 取自设置 `provider_account_priority`，种子值 **1**。
-
-关键在于 `priority` 在调度里是**硬门槛而不是权重**：`filterByMinPriority`
+`priority` 在调度里是**硬门槛而不是权重**：`filterByMinPriority`
 （`gateway_scheduling.go`）只保留候选中数值最小的那批账号，其余**完全不参与**后续选择。
 不存在「优先级低就少分一点流量」这回事，只有「拿全部」或「一个都拿不到」。
-
-因此种子值必须与管理端新建账号表单的默认值对齐（`CreateAccountModal.vue` 是 `priority: 1`，
-Anthropic session 批量导入不传时也是 1）。取值不一致的后果是单向且静默的：
-若供号商账号是 50 而同分组自有账号是 1，供号商的号永远拿不到一个请求，
+取值不一致的后果是单向且静默的：数值大的一边永远拿不到一个请求，
 账号状态显示正常、用量恒为 0、结算金额恒为 0，没有任何报错。
 
-设置页会扫描已开放的托管分组，发现组内自有账号 priority 与配置值不同时显式告警
-（后端 `DistinctNonProviderPrioritiesByGroup` 提供数据）。
+因此**不让人手工配置**：上号时由 `ResolveProviderAccountPriority` 自动取目标托管分组内
+现有账号的最小 priority（`MinPriorityByGroup`，含供号商账号——要对齐的是分组里实际生效的
+调度门槛，不区分归属），与该分组里正在跑的账号平起平坐。分组还是空的时才回落设置
+`provider_account_priority`（种子值 1，与 `CreateAccountModal.vue` 的默认值一致）。
+
+分组最小值本身非法（0 或越界）时同样不采信——0 是最高优先级，会让供号商账号独占整个分组。
+
+设置页不再提供输入框，改为只读展示每个已开放托管分组上号时实际会用的值。
 
 同一 priority 内的选择顺序是：最低负载率 → 最久未用（LRU）→ 完全并列时随机
 （`selectByLRU` 的 `mathrand.Intn`）。所以所有供号商的账号是公平轮转的，谁也不优先。
@@ -764,6 +765,13 @@ CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开�
 - 上号失败回收代理时用 `context.WithoutCancel` + 独立超时：上号失败常常正是因为
   请求超时或客户端断开，此时请求 ctx 已取消，拿它做清理必然也失败。
 
+站点开关是双向的：关站后不仅 `/api/v1/provider/*` 全部 404
+（`ProviderOnly`），供号商**也无法登录**——`Login` 里的 `assertProviderPortalOpenFor`
+对 `IsProviderUser()` 返回 `PROVIDER_PORTAL_DISABLED`。
+不拦的话供号商仍能拿到 JWT 进入面板、每个接口都 404，对外表现成「系统坏了」。
+管理员即便带 `is_provider` 也不受影响（`IsProviderUser` 已排除管理员），
+否则关站后没人能进去把站点重新打开。
+
 邀请码：校验 → 建用户 → CAS 消费在同一事务内完成。与普通注册的「标记失败只记日志」
 刻意不同——普通邀请码只影响赠送，供号商邀请码是准入凭证，
 绝不能出现「码没消费掉但人已经进来了」。并发抢同一枚码时输的一方整体回滚。
@@ -773,10 +781,9 @@ CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开�
 以下问题在代码审查中被识别，**上线前必须评估**：
 
 - 备份导出结构不含 `provider_user_id` / `provider_tier`，恢复后账号会退回「管理员自有」。
-- **关站不阻断登录**：`/api/v1/auth/login` 不检查 `provider_portal_enabled`，
-  已存在的供号商在关站后仍能登录并进入前端面板（业务接口全 404）。
-  门户从未开启过时不存在供号商账号，该缺口不可达；开站之后若要再关站需先补校验。
-- 供号商没有改密入口（`ProviderDenyConsumerRoutes` 挡掉了 `/user/password`）。
+- 供号商自己没有改密入口（`ProviderDenyConsumerRoutes` 挡掉了 `/user/password`），
+  由管理员代改：用户管理 → 目标行「编辑」→ 填密码。`PUT /admin/users/:id` 对
+  `is_provider` 无任何限制，留空则不改密。
 - 若给托管分组配了**渠道自定义单价或分组图片单价**，这些加价会进 `total_cost`，
   等于按加价后的金额付给供号商。上线前确认托管分组是否配了自定义定价。
 - 删除供号商用户时不检查其名下账号与待结算金额。

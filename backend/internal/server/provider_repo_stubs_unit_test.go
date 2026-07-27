@@ -37,3 +37,10 @@ func (m *stubAccountRepo) DistinctNonProviderPrioritiesByGroup(context.Context) 
 func (m *stubAccountRepo) ListByProviderPaged(context.Context, int64, pagination.PaginationParams) ([]service.Account, *pagination.PaginationResult, error) {
 	return nil, &pagination.PaginationResult{}, nil
 }
+
+// MinPriorityByGroup 的空实现。返回空 map 表示「分组里还没有账号」，
+// 上号时会回落到设置里的默认优先级。
+
+func (m *stubAccountRepo) MinPriorityByGroup(context.Context) (map[int64]int, error) {
+	return nil, nil
+}

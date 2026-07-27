@@ -309,7 +309,8 @@ func TestBuildProviderAccountInput(t *testing.T) {
 		Extra:       map[string]any{"persona_enabled": true},
 		HostingType: 12,
 		Tier:        "2",
-	}, 77)
+		// 分组 12 里已有账号，最小 priority 是 4 —— 新号必须跟着落 4。
+	}, 77, 4, true)
 	require.NoError(t, err)
 
 	require.Equal(t, PlatformAnthropic, input.Platform)
@@ -339,7 +340,8 @@ func TestBuildProviderAccountInput(t *testing.T) {
 	// schema 的 default(50)，而是真写 0；调度里 priority 是硬门槛
 	// （filterByMinPriority 只保留数值最小的那批），0 会让供号商账号把自有账号
 	// 完全挤出候选。
-	require.Equal(t, DefaultProviderAccountPriority, input.Priority)
+	require.Equal(t, 4, input.Priority,
+		"必须对齐目标分组的最小 priority，而不是套用设置里的固定值")
 	require.NotZero(t, input.Priority, "zero priority would starve every in-house account")
 
 	// 种子值必须与管理端新建账号表单的默认值一致。两者不同的话，混合分组里
@@ -348,25 +350,39 @@ func TestBuildProviderAccountInput(t *testing.T) {
 	require.Equal(t, 1, DefaultProviderAccountPriority,
 		"must match the admin account form default (CreateAccountModal.vue priority: 1)")
 
-	// 设置里的非法值（含 0）必须回落种子值，绝不能原样写进账号。
+	// 分组已有账号时必须对齐分组最小值，而不是套用设置里的固定值。
+	// priority 是硬门槛，取值不同会让其中一边永久拿不到流量。
+	require.Equal(t, 3, ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 1}, 3, true),
+		"分组内最小 priority 是 3 时，新号也必须是 3，否则会被饿死")
+	require.Equal(t, 1, ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 50}, 1, true),
+		"分组内是 1 时不能因为设置写了 50 就落 50")
+
+	// 分组为空时回落设置值；设置里的非法值（含 0）再回落种子值。
+	require.Equal(t, 7, ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 7}, 0, false))
 	require.Equal(t, DefaultProviderAccountPriority,
-		resolveProviderAccountPriority(ProviderSettings{AccountPriority: 0}))
+		ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 0}, 0, false))
 	require.Equal(t, DefaultProviderAccountPriority,
-		resolveProviderAccountPriority(ProviderSettings{AccountPriority: -5}))
+		ResolveProviderAccountPriority(ProviderSettings{AccountPriority: -5}, 0, false))
 	require.Equal(t, DefaultProviderAccountPriority,
-		resolveProviderAccountPriority(ProviderSettings{AccountPriority: 9999}))
-	require.Equal(t, 7, resolveProviderAccountPriority(ProviderSettings{AccountPriority: 7}))
+		ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 9999}, 0, false))
+
+	// 分组最小值本身非法（0 或越界）时同样不能采信——0 是最高优先级，
+	// 会让供号商账号独占整个分组。
+	require.Equal(t, DefaultProviderAccountPriority,
+		ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 0}, 0, true))
+	require.Equal(t, DefaultProviderAccountPriority,
+		ResolveProviderAccountPriority(ProviderSettings{AccountPriority: 0}, 9999, true))
 
 	// 未启用的托管类型必须拒绝。
 	_, err = BuildProviderAccountInput(settings, ProviderOnboardInput{
 		ProviderUserID: 42, Name: "x", AccountType: AccountTypeOAuth, HostingType: 13, Tier: "1",
-	}, 77)
+	}, 77, 0, false)
 	require.Error(t, err)
 
 	// 只允许 oauth / setup-token。
 	_, err = BuildProviderAccountInput(settings, ProviderOnboardInput{
 		ProviderUserID: 42, Name: "x", AccountType: AccountTypeAPIKey, HostingType: 11, Tier: "1",
-	}, 77)
+	}, 77, 0, false)
 	require.Error(t, err)
 }
 

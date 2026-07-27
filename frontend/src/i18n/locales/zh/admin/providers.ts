@@ -91,14 +91,11 @@ export default {
     settlementCooldownHint:
       '用量是异步落库的，封账终点会从当前时刻往回退这段时间，让还没提交完的记录先落定。默认 600 秒。',
     cooldownRange: '冷却期需在 60 到 86400 秒之间',
-    accountPriority: '账号调度优先级',
+    accountPriority: '账号调度优先级（自动）',
     accountPriorityHint:
-      '供号商上号时写入的 priority。注意这是硬门槛不是权重：调度只会使用分组内数值最小的那批账号，数值大的一批完全拿不到流量。默认 1，与管理端新建账号的默认值一致。',
-    priorityRange: '优先级需在 0 到 100 之间',
-    priorityConflictTitle: '优先级冲突：以下分组内会有一批账号完全拿不到流量',
-    priorityConflictItem: '{group}：组内自有账号的优先级为 {others}，与供号商的 {mine} 不一致',
-    priorityConflictHint:
-      '调度只保留分组内优先级数值最小的那批账号，其余不参与选择且不会有任何报错。请把两边调成同一个值，或把供号商账号放到独立分组。',
+      '上号时自动取该托管分组内现有账号的最小优先级，与组内正在跑的账号保持一致，无需手工设置。调度里优先级是硬门槛不是权重：只有数值最小的那批账号会被选中，取值不一致会让另一批完全拿不到流量。',
+    priorityNoGroups: '尚未开放任何托管类型',
+    priorityFallbackTag: '（分组为空，用默认值）',
 
     sectionHostingTypes: '托管类型',
     hostingTypesHint:

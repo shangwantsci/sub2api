@@ -405,29 +405,28 @@ docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
   能正常登录、用量清理日志无异常。
 
 开启站点前还需要在设置页完成：勾选至少一个 Anthropic 分组作为托管类型并填写对外文案、
-设好默认托管类型与默认档位、确认结算时区与结算冷却期、**核对调度优先级**，
-然后才把 `provider_portal_enabled` 打开。
+设好默认托管类型与默认档位、确认结算时区与结算冷却期，然后才把
+`provider_portal_enabled` 打开。调度优先级不需要配，上号时自动对齐所选分组；
+设置页会把每个分组实际会用的值列出来，扫一眼确认即可。
 邀请码在「兑换码」页选「供号商邀请码」类型生成。
 
-#### 打开 `provider_portal_enabled` 之前必须先处理
+#### 打开 `provider_portal_enabled` 之前需要知道的
 
-结算并发、封账水位、清理保护、邀请码事务、明细快照这几项**已经解决**
-（advisory lock + 事务、冷却期 + `last_usage_id`、`EarliestUnsettledStart` 夹紧、
-注册事务化、`provider_settlement_items`）。仍需在开站前确认的是：
+结算并发、封账水位、清理保护、邀请码事务、明细快照、优先级对齐、关站阻断登录
+这几项**都已解决**。开站前只剩一件事需要人工确认：
 
-- **调度优先级**：`provider_account_priority` 种子值为 1，必须与托管分组内自有账号
-  的 priority 一致。调度里 priority 是硬门槛而非权重，取值不同会让其中一边
-  **永久拿不到任何流量且没有报错**。设置页会扫描并告警，保存前务必看这条提示。
-- **托管分组的自定义定价**：结算按 `SUM(usage_logs.total_cost)` 计算，
-  渠道自定义单价与分组图片单价会计入其中，等于按加价后的金额付给供号商。
-  开站前核对选作托管类型的分组有没有配自定义定价。
-- **站点关闭并未阻断登录**：`/api/v1/auth/login` 不检查门户开关，
-  已存在的供号商账号在关站后仍能登录并进入前端面板（业务接口全 404）。
-  首次发布时门户关闭、不存在任何供号商账号，该缺口不可达；
-  但在开站并产生供号商账号之后若要再次关站，需先补上这道校验。
-- **供号商没有改密入口**：`ProviderDenyConsumerRoutes` 挡掉了 `/user/password`，
-  开站前需补入口或约定由管理员代改。
-- 其余见 `FORK_PROJECT_MEMORY.md` 的 4.8.1。
+- **客户 API Key 分组有没有配渠道自定义定价**。结算按
+  `SUM(usage_logs.total_cost)` 计算，而 `total_cost` 的 token 单价可能被渠道定价覆盖。
+  注意渠道定价挂在**调用方 API Key 所属分组**上（`resolveChannelPricing` 取的是
+  `apiKey.Group.ID`），不是挂在账号或托管分组上——所以决定因素是「谁拿 Key 打进来」，
+  不是「号本身怎么配的」。若某个客户 Key 分组配了渠道定价，落到供号商账号上的请求
+  就会按渠道价计入应付。没配过渠道定价的话，`total_cost` 就是标准价，无需处理。
+  （图片/视频单价只在图片计费路径生效，纯文本请求不会走到。）
+
+其余已知限制见 `FORK_PROJECT_MEMORY.md` 的 4.8.1，其中与运营相关的两条：
+
+- 供号商自己不能改密码，由管理员在「用户管理 → 编辑」代改；
+- 备份导出不含 `provider_user_id` / `provider_tier`，恢复后账号归属会丢。
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
 

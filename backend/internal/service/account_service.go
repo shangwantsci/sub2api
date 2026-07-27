@@ -128,6 +128,9 @@ type AccountRepository interface {
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
 	// ListByProviderPaged 分页返回某供号商名下的账号。
 	ListByProviderPaged(ctx context.Context, providerUserID int64, params pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error)
+	// MinPriorityByGroup 返回每个分组内当前最小的 priority（含供号商账号）。
+	// 供号商上号时用它对齐，避免新号与分组内在跑的账号处于不同门槛而被饿死。
+	MinPriorityByGroup(ctx context.Context) (map[int64]int, error)
 	// DistinctNonProviderPrioritiesByGroup 返回每个分组内「非供号商账号」已有的 priority 去重值。
 	//
 	// 供管理端设置页提示优先级冲突：调度里 priority 是硬门槛，

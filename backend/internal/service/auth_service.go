@@ -477,6 +477,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 		return "", nil, ErrUserNotActive
 	}
 
+	if err := s.assertProviderPortalOpenFor(ctx, user); err != nil {
+		return "", nil, err
+	}
+
 	// 生成JWT token
 	token, err := s.GenerateToken(user)
 	if err != nil {
@@ -484,6 +488,24 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	}
 
 	return token, user, nil
+}
+
+// assertProviderPortalOpenFor 在供号商站点关闭时拒绝供号商登录。
+//
+// 供号商的全部业务接口都挂在 /api/v1/provider/* 下，关站后由 ProviderOnly 返回 404。
+// 但登录本身复用普通用户的 /auth/login，不看这个开关：不拦的话供号商仍能拿到 JWT
+// 并进入前端面板，只是每个接口都 404 —— 对外表现成「系统坏了」而不是「站点已关闭」。
+//
+// 只影响供号商（IsProviderUser 已排除管理员），普通用户与管理员的登录不受影响。
+func (s *AuthService) assertProviderPortalOpenFor(ctx context.Context, user *User) error {
+	if user == nil || !user.IsProviderUser() {
+		return nil
+	}
+	// fail-closed：设置服务不可用时不放行，与注册端一致。
+	if s.settingService == nil || !s.settingService.IsProviderPortalEnabled(ctx) {
+		return ErrProviderPortalDisabled
+	}
+	return nil
 }
 
 // LoginOrRegisterOAuth 用于第三方 OAuth/SSO 登录：
