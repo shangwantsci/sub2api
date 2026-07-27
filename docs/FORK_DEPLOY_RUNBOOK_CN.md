@@ -14,10 +14,10 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-25 已按本流程部署 `0.1.156-8782b30f`，GitHub Actions
-> run `30137006332`；`claude-opus-5` 上线、Opus 档定价确定性修复、本机健康检查
-> 与容器版本均通过验证。上一轮为 2026-07-23 的 `0.1.156-a16045ee`
-> （run `29982187637`，迁移 179 与 `identity_only` 策略）。
+> 最近验证：2026-07-27 已按本流程部署 `0.1.156-2e4495d9`，GitHub Actions
+> run `30230866070`；供号商站点上线（迁移 180+181），站点默认关闭，号池流量与
+> 账号状态无变化。上一轮为 2026-07-25 的 `0.1.156-8782b30f`
+> （run `30137006332`，`claude-opus-5` 上线与 Opus 档定价确定性修复）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -427,6 +427,43 @@ docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
 
 - 供号商自己不能改密码，由管理员在「用户管理 → 编辑」代改；
 - 备份导出不含 `provider_user_id` / `provider_tier`，恢复后账号归属会丢。
+
+2026-07-27 `2e4495d9` 生产验证：
+
+```text
+GitHub Actions run: 30230866070 (custom-image success)
+image digest: sha256:7f2572c6e6a6ae60a67801506f8d002775e52264ad5d56d60985db70f50573c4
+env backup: backups/.env.20260727-020223.before-2e4495d9
+rollback tag: sub2api-rollback:pre-2e4495d9 (sha256:8ec3a024… = 8782b30f)
+
+容器: 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: 2e4495d9, built: 2026-07-27T01:55:37Z)
+镜像 mutable/immutable ID: 一致
+迁移: 180 与 181 均已记录，无报错
+新对象: provider_settlements / provider_settlement_items 建成，
+        last_usage_id + void_reason 列、period/amounts/voided CHECK 均就位
+users.is_provider、accounts.provider_user_id / provider_tier 就位
+
+号池未受影响（关键验证）：
+  账号状态部署前后一致 active/t=76, active/f=2, error/f=15
+  93 个账号中 provider_user_id 非空 = 0（全部仍为管理员自有）
+  部署后 4 分钟真实流量: 35 请求 / 7 账号 / $6.16（claude-opus-4-8 等）
+  启动窗口 panic / fatal: 0
+  登录路径冒烟: 错误凭据返回 401 INVALID_CREDENTIALS（非 500）
+  首绑 / grantee / PROVIDER_PORTAL 相关错误: 0
+  本机 /health 与公网 https://lumos7.cc/health: 均 200
+
+供号商站点默认关闭：
+  settings 表无任何 provider_* 键，is_provider 用户数 = 0
+  未认证访问 /api/v1/provider/* 返回 401（jwtAuth 在 ProviderOnly 之前，
+  比文档预期的 404 更早拦截；已认证的非供号商才会走到 404/403）
+
+首轮 token refresh: total=72, needs_refresh=1, refreshed=0, failed=1
+```
+
+该轮唯一 failed 是账号 `2523` 的 SOCKS 代理
+`username/password authentication failed`，与 2026-07-25 那轮账号 `2512` 同类，
+属存量代理凭证问题，与本次发布无关；该账号仍为 `active/schedulable`。
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
 
