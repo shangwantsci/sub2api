@@ -628,7 +628,12 @@ full→identity-only 不产生嵌套消息对，且 `c=nil` 不改错 fp。
 - 排除 chrome 是 service 层硬约束而非 UI 隐藏：provider 链路构造 `CookieAuthInput`
   时永不设置 `OAuthClient`（留空即 `claude_code`），且 `AssertProviderOAuthClientAllowed`
   拒绝任何显式传入的其它 profile；
-- 代理由供号商自带且必填，创建的代理记录名带 `provider-<id>-` 归属前缀；
+- 代理由供号商自带且**必填**（`binding:"required"` + `ValidateProviderProxy` 逐项校验
+  协议/host/端口），没有「平台随机分配」这条路。授权阶段走平台默认出口，
+  代理在提交那一步才创建，记录名带 `provider-<id>-` 归属前缀；
+- 界面上账号类型用 **OAuth / Setup Token** 这两个行业通用叫法，各配一句说明。
+  曾经写成「完整授权 / 仅推理授权」这类自造词，供号商反而看不出该选哪个——
+  凭据类型是供号商自己手里的东西，不属于需要隐藏的内部细节，别再改回去；
 - 三项伪装强制开启且不可见。**注意写入路径不同**：
   `credentials.intercept_warmup_requests`，而 `extra.enable_tls_fingerprint`
   与 `extra.session_id_masking_enabled`；
@@ -750,8 +755,20 @@ builder 里都没有这一列，只有创建时写入。
 - JSON **以十进制字符串传输**（`decimal.Decimal` 的 `MarshalJSON` 默认带引号）。
   这一点是刻意的：JSON 数字在 JS 侧被解析成 float64，`decimal(20,10)` 的精度当场丢失；
 - 前端 `frontend/src/utils/providerMoney.ts` 用 **BigInt 按 10^10 缩放**做精确解析与求和，
-  只在展示时收敛到 1 位小数。大于 0 小于 0.05 显示 `<$0.1` 避免被误读为无用量；
+  只在展示时收敛位数；
 - CSV 导出输出完整精度原值，不做展示层收敛。
+
+展示位数是**自适应**的，不能改回固定 1 位：
+
+- 默认 2 位（货币惯例）：`$29.31`、`$0.06`；
+- 非零但会被收敛成 `0.00` 时放宽到 6 位并去掉末尾零：`$0.0001`，
+  避免把有用量显示成零。
+
+曾经用过固定 1 位小数，线上真实用量 `total_cost=0.05944` 被显示成 `$0.1`，
+比实际虚高近 70%，而管理端用量统计同一笔显示 `$0.059`——两边对不上，
+在对账页面上直接被当成「给供号商多算钱」。底层从未算错（存储、快照、CSV
+一直是全精度），但对账界面上的数字虚高是不可接受的。
+`providerMoney.spec.ts` 用这个真实值钉住了回归。
 
 CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开头。
 后端 `handler/provider.CSVCell` 与前端 `csvCell` 在这些首字符前补单引号，
