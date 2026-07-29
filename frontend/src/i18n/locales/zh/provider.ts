@@ -79,11 +79,16 @@ export default {
     proxyPassword: '密码',
     sectionAuth: '授权',
     accountMethod: '账号类型',
-    methodOAuth: '完整授权',
-    methodSetupToken: '仅推理授权',
+    // 用行业通用叫法而不是自造词。供号商本来就清楚自己手里是哪种凭据，
+    // 换成「完整授权 / 仅推理授权」反而看不懂该选哪个。
+    methodOAuth: 'OAuth 授权',
+    methodSetupToken: 'Setup Token',
+    accountMethodHint:
+      'OAuth：用 Claude 账号登录授权，权限完整、令牌可自动续期，多数情况选这个。Setup Token：Claude Code 的推理专用令牌，权限范围更窄。按你手里实际有的凭据选。',
     authMode: '授权方式',
     authModeCookie: 'Session Key',
     authModeManual: '授权链接',
+    authModeHint: 'Session Key：粘贴 claude.ai 的 sessionKey，由平台代为完成授权。授权链接：自己打开链接授权后回填授权码。',
     sessionKey: 'Session Key',
     sessionKeyPlaceholder: '粘贴 claude.ai 的 sessionKey',
     generateAuthURL: '生成授权链接',

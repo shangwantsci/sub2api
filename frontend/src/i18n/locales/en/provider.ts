@@ -80,11 +80,15 @@ export default {
     proxyPassword: 'Password',
     sectionAuth: 'Authorization',
     accountMethod: 'Account type',
-    methodOAuth: 'Full authorization',
-    methodSetupToken: 'Inference only',
+    methodOAuth: 'OAuth',
+    methodSetupToken: 'Setup token',
+    accountMethodHint:
+      'OAuth: sign in with your Claude account. Full scope, tokens refresh automatically — pick this unless you have a reason not to. Setup token: the inference-only token from Claude Code, narrower scope. Choose whichever credential you actually have.',
     authMode: 'Authorization method',
     authModeCookie: 'Session key',
     authModeManual: 'Authorization link',
+    authModeHint:
+      'Session key: paste your claude.ai sessionKey and we complete the authorization for you. Authorization link: open the link yourself and paste back the code.',
     sessionKey: 'Session key',
     sessionKeyPlaceholder: 'Paste the claude.ai sessionKey',
     generateAuthURL: 'Generate authorization link',

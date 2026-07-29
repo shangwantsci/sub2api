@@ -64,35 +64,41 @@ describe('sumMoney', () => {
 })
 
 describe('formatUSD', () => {
-  it('收敛到 1 位小数', () => {
-    expect(formatUSD('12.34')).toBe('$12.3')
-    expect(formatUSD('12.35')).toBe('$12.4')
-    expect(formatUSD('0')).toBe('$0.0')
+  it('常规金额用 2 位小数', () => {
+    expect(formatUSD('12.34')).toBe('$12.34')
+    expect(formatUSD('12.345')).toBe('$12.35')
+    expect(formatUSD('29.3089292500')).toBe('$29.31')
+    expect(formatUSD('0')).toBe('$0.00')
   })
 
-  it('极小正数不显示成 $0.0', () => {
-    // 显示 $0.0 会让供号商以为账号完全没跑量。
-    expect(formatUSD('0.0001')).toBe('<$0.1')
-    expect(formatUSD('0.049')).toBe('<$0.1')
-    expect(formatUSD('0.05')).toBe('$0.1')
+  it('不把小额夸大：$0.0594 不能显示成 $0.1', () => {
+    // 线上真实案例：total_cost=0.05944，旧的 1 位小数实现显示成 $0.1，
+    // 比实际虚高近 70%，对账页面上会被当成多算钱。
+    expect(formatUSD('0.0594400000')).toBe('$0.06')
+    expect(formatUSD('0.049')).toBe('$0.05')
   })
 
-  it('极小负数同样特殊处理', () => {
-    expect(formatUSD('-0.0001')).toBe('>-$0.1')
+  it('非零但会被收敛成 0.00 时放宽位数，不显示成零', () => {
+    // 显示 $0.00 会让供号商以为账号完全没跑量。
+    expect(formatUSD('0.0001')).toBe('$0.0001')
+    expect(formatUSD('0.000001')).toBe('$0.000001')
+    expect(formatUSD('-0.0001')).toBe('$-0.0001')
   })
 
   it('接受 number 入参以兼容异常下发', () => {
-    expect(formatUSD(12.34)).toBe('$12.3')
+    expect(formatUSD(12.34)).toBe('$12.34')
   })
 })
 
 describe('formatUSDValue / formatUSDExact', () => {
   it('formatUSDValue 不带货币符号', () => {
-    expect(formatUSDValue('12.34')).toBe('12.3')
+    expect(formatUSDValue('12.34')).toBe('12.34')
   })
 
   it('formatUSDExact 输出完整精度，用于导出', () => {
     expect(formatUSDExact('1.2345678901')).toBe('1.2345678901')
+    // 导出永远是原值，不受展示位数影响。
+    expect(formatUSDExact('0.0594400000')).toBe('0.05944')
   })
 })
 

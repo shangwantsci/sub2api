@@ -15,8 +15,10 @@
 const SCALE = 10
 const SCALE_FACTOR = 10n ** BigInt(SCALE)
 
-/** 小于该值的正数显示为 `<$0.1`，避免被误读成完全没跑量。 */
-const SMALL_AMOUNT_SCALED = SCALE_FACTOR / 20n // 0.05
+/** 常规展示位数。金额惯例是 2 位小数。 */
+const DISPLAY_PLACES = 2
+/** 小额兜底位数：2 位会显示成 0.00 时，放宽到这么多位，保证不把有用量显示成零。 */
+const SMALL_AMOUNT_PLACES = 6
 
 /** 后端金额的传输类型。历史数据或异常情况下可能仍是 number。 */
 export type MoneyInput = string | number | null | undefined
@@ -61,36 +63,49 @@ export function scaledToString(scaled: bigint): string {
   return negative ? `-${body}` : body
 }
 
-/** 把缩放后的 BigInt 收敛成 1 位小数字符串，四舍五入（half-up）。 */
-function scaledToFixedOne(scaled: bigint): string {
+/** 把缩放后的 BigInt 收敛成指定位数的字符串，四舍五入（half-up）。 */
+function scaledToFixed(scaled: bigint, places: number): string {
   const negative = scaled < 0n
   const abs = negative ? -scaled : scaled
 
-  // 收敛到 1 位小数：先按 10^9 分组，再对余数做 half-up 进位。
-  const unit = SCALE_FACTOR / 10n
-  let tenths = abs / unit
-  if (abs % unit >= unit / 2n) tenths += 1n
+  const unit = SCALE_FACTOR / 10n ** BigInt(places)
+  let units = abs / unit
+  if (abs % unit >= unit / 2n) units += 1n
 
-  const body = `${tenths / 10n}.${tenths % 10n}`
+  const divisor = 10n ** BigInt(places)
+  const intPart = units / divisor
+  const body =
+    places > 0 ? `${intPart}.${(units % divisor).toString().padStart(places, '0')}` : `${intPart}`
   return negative ? `-${body}` : body
 }
 
 /**
- * 格式化为 1 位小数的美元字符串。
+ * 按金额大小自适应小数位。
  *
- * 大于 0 且小于 0.05 时返回 `<$0.1`：直接四舍五入会显示成 `$0.0`，
- * 供号商会以为该账号完全没有用量。
+ * 默认 2 位（货币惯例）。若金额非零却会被收敛成 0.00，则放宽到 6 位并去掉末尾零，
+ * 这样既不会把有用量显示成零，也不会像固定 1 位那样把 $0.0594 夸大成 $0.1
+ * —— 对账页面上虚高近 70% 会直接引发争议。
+ *
+ * 结算与导出始终用完整精度的原值，这里只影响展示。
  */
-export function formatUSD(value: MoneyInput): string {
-  const scaled = parseMoney(value)
-  if (scaled > 0n && scaled < SMALL_AMOUNT_SCALED) return '<$0.1'
-  if (scaled < 0n && -scaled < SMALL_AMOUNT_SCALED) return '>-$0.1'
-  return `$${scaledToFixedOne(scaled)}`
+function adaptiveFixed(scaled: bigint): string {
+  const normal = scaledToFixed(scaled, DISPLAY_PLACES)
+  if (scaled === 0n || Number(normal) !== 0) return normal
+
+  const precise = scaledToFixed(scaled, SMALL_AMOUNT_PLACES)
+  // 去掉末尾多余的 0，但至少保留 2 位小数，避免出现 "$0.1" 这种误导性的粗粒度。
+  const trimmed = precise.replace(/(\.\d{2}\d*?)0+$/, '$1')
+  return trimmed
 }
 
-/** 不带货币符号的 1 位小数，用于表格右对齐数字列。 */
+/** 格式化为美元字符串，小数位按金额大小自适应。 */
+export function formatUSD(value: MoneyInput): string {
+  return `$${adaptiveFixed(parseMoney(value))}`
+}
+
+/** 不带货币符号，用于表格右对齐数字列。 */
 export function formatUSDValue(value: MoneyInput): string {
-  return scaledToFixedOne(parseMoney(value))
+  return adaptiveFixed(parseMoney(value))
 }
 
 /** 完整精度原值，用于导出与悬浮提示。 */

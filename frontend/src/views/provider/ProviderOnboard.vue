@@ -247,6 +247,9 @@
                 <span class="text-sm">{{ t('provider.onboard.methodSetupToken') }}</span>
               </label>
             </div>
+            <p class="mt-1.5 text-xs leading-relaxed text-gray-400">
+              {{ t('provider.onboard.accountMethodHint') }}
+            </p>
           </div>
 
           <div>
@@ -261,6 +264,9 @@
                 <span class="text-sm">{{ t('provider.onboard.authModeManual') }}</span>
               </label>
             </div>
+            <p class="mt-1.5 text-xs leading-relaxed text-gray-400">
+              {{ t('provider.onboard.authModeHint') }}
+            </p>
           </div>
 
           <div v-if="authMode === 'cookie'">
