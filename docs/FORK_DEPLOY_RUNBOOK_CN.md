@@ -14,10 +14,11 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-27 已按本流程部署 `0.1.156-08e222ed`，GitHub Actions
-> run `30240480199`；system→messages 迁移不再携带 `[System Instructions]` 标签，
-> billing fp 与 metadata session 显式保持真实首轮语义。上一轮为同日供号商站点版本
-> `0.1.156-2e4495d9`（run `30230866070`）。
+> 最近验证：2026-07-29 已按本流程部署 `0.1.156-0832ab07`，GitHub Actions
+> run `30416049073`；供号商金额显示改自适应小数位（修 `$0.059` 被显示成 `$0.1`）、
+> 授权方式改回 OAuth / Setup Token 通用叫法，纯前端无迁移。上一轮为 2026-07-27 的
+> `0.1.156-08e222ed`（run `30240480199`，system→messages 迁移不再携带
+> `[System Instructions]` 标签）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -447,6 +448,34 @@ docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
 
 - 供号商自己不能改密码，由管理员在「用户管理 → 编辑」代改；
 - 备份导出不含 `provider_user_id` / `provider_tier`，恢复后账号归属会丢。
+
+2026-07-29 `0832ab07` 生产验证（金额显示自适应位数 + 授权方式改名，纯前端）：
+
+```text
+GitHub Actions run: 30416049073 (custom-image success, 4m26s)
+env backup: backups/.env.20260729-021451.before-0832ab07
+rollback tag: sub2api-rollback:pre-0832ab07
+
+容器: 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: 0832ab07, built: 2026-07-29T02:10:39Z)
+镜像 mutable/immutable ID: 一致
+无新迁移（本轮只改前端展示与文案）
+
+修复的问题：供号商页面把 total_cost=0.05944 显示成 $0.1（固定 1 位小数），
+而管理端用量统计同一笔显示 $0.059，被误判为「给供号商多算钱」。
+底层从未算错：数据库该笔仍是 0.0594400000，结算与 CSV 一直用全精度。
+改为自适应位数后显示 $0.06。
+
+号池未受影响：
+  部署后 10 分钟内被删账号: 0
+  近 3 分钟真实流量: 3 请求 / 3 账号
+  启动窗口 panic / fatal: 0
+  登录冒烟: 错误凭据返回 401
+  本机 /health 与公网 https://lumos7.cc/health: 均 200
+
+注：账号总数较 07-27 少 19 个（93 → 74），删除发生在 07-26 14:00 至
+07-28 11:00 之间的多个时段，与本次部署无关，属期间的运营操作。
+```
 
 2026-07-27 `2e4495d9` 生产验证：
 
