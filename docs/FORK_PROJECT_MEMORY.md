@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-29
+> 最后更新：2026-07-31
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -100,14 +100,14 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 
 ## 3. 当前生产状态
 
-截至 2026-07-29 供号商金额自适应位数与授权方式改名上线：
+截至 2026-07-31 供号商代理自动分配与结算缺陷修复上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-0832ab07`
-- 镜像 digest：本轮未记录；部署时只校验了 mutable 与 immutable 的 image ID 一致
-- 应用 commit：`0832ab07`
-- 应用版本：`0.1.156`，二进制 built `2026-07-29T02:10:39Z`
-- GitHub Actions run：`30416049073`（`custom-image` success，4m26s）
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-aba0a308`
+- 镜像 digest：`sha256:2eef1b6d78340aeb0231023faf2af0b5df8d1380f587a9cffc6cb2ad28a5eb0f`
+- 应用 commit：`aba0a308`（功能主体在 `4d3ff165`，`aba0a308` 是紧随其后的归属回填迁移）
+- 应用版本：`0.1.156`，二进制 built `2026-07-31T17:34:50Z`
+- GitHub Actions run：`30651632725`（`custom-image` success）；功能主体那轮为 `30650654467`
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -120,43 +120,51 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 - 本机与公网 `/health`：HTTP 200
 - 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
 - Persona 全局门控：`false`（尚未灰度启用）
-- 供号商站点 `provider_portal_enabled`：未开启
+- **供号商站点 `provider_portal_enabled`：已开启**。4 个 `is_provider` 用户
+  （id 44/45/46/47），1 个供号商账号在跑（账号 `2873`，归属 45，档位 3）。
+  截至本轮已产生 1 张结算单（供号商 44，$29.3089，38 请求，水位 873260）
 - 生产机不运行 `cc-calibrate` sidecar
 - 标定 profile：published + valid，CLI `2.1.218`
-- 已应用的最高数据库迁移：`181_provider_settlement_integrity.sql`；本轮只改前端
-  展示与文案，无新增迁移
+- 已应用的最高数据库迁移：`183_backfill_provider_proxy_owner.sql`
+- 代理归属分布：41 条平台自有 + 2 条供号商私有（74→44、76→45）；
+  `auto_assignable = true` 的为 0，即当前没有任何代理进入自动分配池
 - 使用 `identity_only` 的 Anthropic 分组数：1（分组 14）
-- 部署时 `.env` 备份：`backups/.env.20260729-021451.before-0832ab07`
-- 部署前运行镜像 commit：`08e222ed`
+- 账号总数：63（未软删）
+- 部署时 `.env` 备份：`backups/.env.20260731-173758.before-aba0a308`
+  （功能主体那轮为 `backups/.env.20260731-172623.before-4d3ff165`）
+- 部署前运行镜像 commit：`0832ab07`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-0832ab07
+sub2api-rollback:pre-aba0a308   # = 4d3ff165 的镜像
+sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像，回到本轮之前用这个
 ```
 
 本轮验证：
 
-- 修复供号商页面把 `total_cost=0.05944` 显示成 `$0.1`（固定 1 位小数），改自适应
-  位数后显示 `$0.06`；底层存储、结算快照与 CSV 导出一直是全精度，见 4.14 金额精度
-- 号池未受影响：部署后 10 分钟内被删账号 0，近 3 分钟真实流量 3 请求 / 3 账号
-- 启动窗口 panic / fatal 为 0；登录冒烟中错误凭据返回 401
-- 账号总数较 07-27 少 19 个（93 → 74）。删除发生在 07-26 14:00 至 07-28 11:00
-  之间的多个时段，属期间运营操作，与本次部署无关
+- 迁移 182（proxies 加 `provider_user_id` / `auto_assignable`）与 183（回填历史
+  供号商代理归属）均已记录；41 条平台代理未被误标
+- 回填前代理 74/76 的归属为空。它们不会被自动分配（`auto_assignable` 默认 FALSE），
+  但管理端开关按归属是否为空置灰，归属为空就能被勾上 —— 一勾就把这两家供号商
+  自费的出口分给别人。183 用事务在生产上先验证再提交
+- 新的分账号明细 SQL（含 `MAX(id)` 与迟到行计数）在真实数据上跑通：
+  账号 2871 → 38 请求 / $29.3089 / 水位 873260（与结算单 #1 完全吻合），
+  账号 2873 → 46 请求 / $23.2679，两者 `late_rows` 均为 0
+- 手工清理守卫生效：近 30 天 258003 行可清理、84 行因属于供号商账号受保护
+- 启动窗口 panic / fatal 为 0；两轮均 8 秒转 healthy
+- 本机 `/health` 与公网 `https://lumos7.cc/health` 均 200；部署后 5 分钟内
+  真实流量 6 条 usage / 4 个账号
 
-### 3.1 上一轮：2026-07-27 `08e222ed`
+### 3.1 上一轮：2026-07-29 `0832ab07`
 
-system→messages 迁移标签移除，见 4.13。该轮特有的生产结论：
+供号商金额改自适应小数位（修 `total_cost=0.05944` 被显示成 `$0.1`）、授权方式改回
+OAuth / Setup Token 通用叫法，纯前端无迁移。run `30416049073`，`.env` 备份
+`backups/.env.20260729-021451.before-0832ab07`。
 
-- 镜像 digest：`sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01`
-- GitHub Actions run：`30240480199`（`custom-image` success，4m55s）
-- `.env` 备份：`backups/.env.20260727-071111.before-08e222ed`；回滚 tag
-  `sub2api-rollback:pre-08e222ed`
-- 容器约 6 秒转 healthy，启动窗口 panic / fatal 为 0
-- 首轮 token refresh：`total=72, needs_refresh=1, refreshed=0, failed=1`
-- 新版真实流量 Guard 未出现 `missing_billing_block`、`missing_agent_sdk_identity` 或
-  `system_block_count`；观察到的 finding 只有 `unexpected_oauth_beta`，其中账号 2833
-  已确认是必须携带该 beta 的 `claude_chrome`，与该轮 messages 文本改动无关
+再往前一轮是 2026-07-27 的 `08e222ed`（system→messages 迁移标签移除，见 4.13，
+run `30240480199`，digest `sha256:f7e4e36f…`）。逐轮部署记录见
+`FORK_DEPLOY_RUNBOOK_CN.md`。
 
 更早轮次的生产验证结论按功能记录在各自小节：`identity_only` 与迁移 179 见 4.8，
 Fable `credits_required` 见 4.11，`claude-opus-5` 定价与模型清单见 4.12，
@@ -838,11 +846,53 @@ CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开�
 刻意不同——普通邀请码只影响赠送，供号商邀请码是准入凭证，
 绝不能出现「码没消费掉但人已经进来了」。并发抢同一枚码时输的一方整体回滚。
 
-### 4.14.1 已知未决问题
+### 4.14.1 代理来源：平台分配与自带
+
+上号时供号商二选一，实际开放哪些由设置 `provider_proxy_mode_policy` 决定
+（`both` / `auto_only` / `manual_only`）。策略是 service 层硬约束
+（`AssertProviderProxyModeAllowed`），不是 UI 隐藏 —— 供号商能直接构造请求。
+
+**归属必须是列，不能是命名约定。** `proxies` 新增 `provider_user_id`
+（NULL = 平台自有）与 `auto_assignable`（管理员显式开放），迁移 182。在此之前归属
+只靠记录名的 `provider-<id>-` 前缀，全仓库没有一行代码依赖它；自动分配一旦按
+「绑定账号最少」选号，就会把一家供号商自费的出口分给另一家，两家账号还共用同一个
+出口 IP。迁移 183 回填了 182 之前建的那批（生产上是代理 74→44、76→45）。
+
+选号规则（`SelectAutoAssignProxy`）：平台自有 + 管理员已开放 + active 且未过期 +
+当前绑定数 `< provider_auto_proxy_max_accounts`（种子 2），取绑定最少的，并列按 ID
+升序。**不做随机**：最少优先本身就会轮转。
+
+几条不能改回去的约束：
+
+- `auto_assignable` 默认 FALSE。升级后存量代理一条都不会被分配出去，必须管理员在
+  代理管理页逐条勾选。管理端开关对「归属非空」的代理置灰，service 层同样硬拒
+  （`ErrProxyProviderOwnedNotAssignable`）。
+- **失败回收只回收本次新建的私有代理。** `cleanupOrphanProxy` 原来无条件删，
+  而 auto 模式拿到的是共享的平台代理 —— `DeleteProxy` 仅在还有账号引用时才拒绝，
+  恰好选中一条当前零绑定的平台代理就会被真的删掉。
+- manual 模式按 `(provider_user_id, protocol, host, port, username, password)` 复用
+  已有代理，否则同一供号商反复用同一条代理会把代理池撑爆，绑定数统计也跟着失真。
+
+已知且被接受的竞态：两个供号商同时提交可能选中同一条代理，最终绑定数超出上限 1 个。
+选号必须发生在换票之前（换票就要走这个出口），而锁没法横跨 OAuth 换票这段外部慢 IO。
+后果只是某个出口多挂一个账号，下次分配会自动跳过它。
+
+自带代理接受一整行连接串，三种写法：`scheme://[user:pass@]host:port`、
+`host:port[:user:pass]`、`[user:pass@]host:port`。后两种补默认协议 `socks5h`
+（DNS 由代理端解析，不把目标域名从本机出口漏出去）。解析以后端
+`ParseProviderProxyURL` 为准，前端 `utils/proxyUrl.ts` 只做即时预览；IPv6 必须带方括号。
+
+### 4.14.2 已知未决问题
 
 以下问题在代码审查中被识别，**上线前必须评估**：
 
-- 备份导出结构不含 `provider_user_id` / `provider_tier`，恢复后账号会退回「管理员自有」。
+- ~~备份导出结构不含 `provider_user_id` / `provider_tier`~~ 已于 `4d3ff165` 修复：
+  账号备份补齐了归属、档位、`status`、`schedulable` 与 `group_ids`，导入时校验归属
+  指向的确实是本实例的供号商（不是就丢弃归属并报出来），分组按 id 匹配、对不上的
+  过滤掉并列在结果里。代理备份补齐了归属与 `auto_assignable`，`proxy_key` 叠加归属
+  后缀以免两家供号商的同参数代理被合并成一条。
+  **仍然只对同实例恢复有效**：`users` 表没有任何导出功能，换实例恢复时归属指向的
+  用户根本不存在。跨实例迁移只能用整库备份。
 - 供号商自己没有改密入口（`ProviderDenyConsumerRoutes` 挡掉了 `/user/password`），
   由管理员代改：用户管理 → 目标行「编辑」→ 填密码。`PUT /admin/users/:id` 对
   `is_provider` 无任何限制，留空则不改密。
@@ -854,6 +904,17 @@ CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开�
 - `usage_logs` 是否已在生产库转成分区表未确认；若已分区，保留清理走的是
   DROP 月分区路径，冷却期与未结算保护同样适用，但分区边界是日历月，
   粒度比行删除粗，需要确认最早未结算周期不会落在待 DROP 的分区内。
+- **迟到行水位是 `MAX(id)`，本身有结构性洞**：一行 id 低于本期最大 id、却在封账后
+  才提交，下期的补计条件 `id > 水位` 判不出来，这笔钱既不在已封金额里也进不了下一期。
+  冷却期只能压低概率，不构成证明。真正兜底需要一个由数据库赋值的提交时刻列
+  （或改成按 id 区间记账），属独立改造。手工清理已经不会碰供号商的行（见下条），
+  所以当前的风险面只剩这一个。
+- **手工用量清理不再删除供号商账号的任何 usage_logs**（`4d3ff165` 起，删除条件里
+  硬排除）。代价是这些行只能由定时保留策略清理，长期会持续增长。若要一个「清理已封账
+  的供号商历史数据」的入口，应当按结算单水位单独设计，而不是放宽这道守卫。
+- **结算的总额与明细已改为同源**（`4d3ff165`）。此前是两次独立查询，中间提交的行
+  让导出凭证高于结算单、且会在下期被重复计入。`GetProviderPeriodTotals` 仍保留给
+  批量结算的空判断与列表页用，但**不可再与 `GetProviderAccountBreakdown` 配对**。
 - **档位里的 RPM 目前不参与选号门控**（平台既有问题，非供号商特有）。
   生产走 Redis 调度快照，而 `filterSchedulerExtra`（`scheduler_cache.go`）的白名单
   收了 `window_cost_limit` / `max_sessions` 却**没收 `base_rpm`**，
@@ -878,6 +939,8 @@ provider_custom_tier_caps
 provider_settlement_timezone
 provider_settlement_cooldown_seconds   # 种子 600，区间 60..86400
 provider_account_priority              # 种子 1，区间 0..100，硬门槛语义见上文
+provider_auto_proxy_max_accounts       # 种子 2，区间 1..50，单个平台 IP 的账号上限
+provider_proxy_mode_policy             # 种子 both；both | auto_only | manual_only
 ```
 
 数据库迁移：
@@ -885,6 +948,8 @@ provider_account_priority              # 种子 1，区间 0..100，硬门槛语
 ```text
 backend/migrations/180_add_provider_portal.sql
 backend/migrations/181_provider_settlement_integrity.sql
+backend/migrations/182_add_proxy_auto_assign.sql
+backend/migrations/183_backfill_provider_proxy_owner.sql
 ```
 
 180 新增 `users.is_provider`、`accounts.provider_user_id`（partial index）、
