@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-25
+> 最后更新：2026-07-29
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -100,14 +100,14 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 
 ## 3. 当前生产状态
 
-截至 2026-07-27 system→messages 迁移标签移除上线：
+截至 2026-07-29 供号商金额自适应位数与授权方式改名上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-08e222ed`
-- 镜像 digest：`sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01`
-- 应用 commit：`08e222ed`
-- 应用版本：`0.1.156`
-- GitHub Actions run：`30240480199`（`custom-image` success，4m55s）
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-0832ab07`
+- 镜像 digest：本轮未记录；部署时只校验了 mutable 与 immutable 的 image ID 一致
+- 应用 commit：`0832ab07`
+- 应用版本：`0.1.156`，二进制 built `2026-07-29T02:10:39Z`
+- GitHub Actions run：`30416049073`（`custom-image` success，4m26s）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -116,45 +116,52 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 - 应用本地映射：`127.0.0.1:18080 -> 8080`
 - 公网入口：Caddy 反代
 - PostgreSQL、Redis、Caddy 与其它项目独立运行；部署只重建 `sub2api`
-- 健康状态：healthy
+- 健康状态：healthy（容器 8 秒转 healthy）
 - 本机与公网 `/health`：HTTP 200
 - 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
 - Persona 全局门控：`false`（尚未灰度启用）
+- 供号商站点 `provider_portal_enabled`：未开启
 - 生产机不运行 `cc-calibrate` sidecar
 - 标定 profile：published + valid，CLI `2.1.218`
-- 数据库迁移 `179_expand_claude_oauth_system_prompt_policy.sql` 已应用，CHECK
-  constraint 已包含 `identity_only`；PostgreSQL、Redis、Caddy 均未重建
-- 事务验证中分组 14 可写入 `identity_only` 并成功回滚到原值 `enabled`；部署脚本
-  没有自动切换客户配置。随后该分组于 13:36:12 经管理操作启用
-  `identity_only`，当前使用该模式的分组数为 1
-- 生产二进制已确认包含 `identity_only` 与“仅必要身份”前端标签
-- 两块提示词及 system 迁移辅助文本由测试实测增量约 50 tokens；主 messages、
-  count_tokens 与 Mimicry Guard block 模式均通过端到端 wire 测试
-- 分组 14 启用后的首个观察窗口有 13 条成功 usage、7 个账号、覆盖
-  Fable/Haiku/Opus/Sonnet；Mimicry Guard 的 `missing_billing_block`、
-  `missing_agent_sdk_identity`、`system_block_count` 合计为 0
-- 首个生产 `credits_required`：SetupToken 账号 `2069` 写入
-  `model_access_denials["claude-fable-5"]` 后保持 active/schedulable；同一请求清理
-  粘性并切换到 Max 账号 `2624`，最终 HTTP 200（4264ms）
-- denial 生效后账号 `2069` 的 Fable 再次选中数为 0；Opus/Haiku/Sonnet 不受该
-  模型拒绝影响
-- `claude-opus-5` 已进入 `claude.DefaultModels`、Bedrock 默认映射与前端模型列表；
-  容器内定价兜底表含该 key（远程 LiteLLM 表尚未收录，由 `mergeFallbackPricingData`
-  补齐）；Antigravity 侧未加入，待 sync-upstream 探测后再定
-- 本轮启动窗口 panic / fatal 为 0；容器约 6 秒转 healthy，本机与公网 health 均为 200
-- 部署后首轮 token refresh：`total=72, needs_refresh=1, refreshed=0, failed=1`
-- 新版真实流量 Guard 未出现 `missing_billing_block`、`missing_agent_sdk_identity` 或
-  `system_block_count`；观察到的 finding 只有 `unexpected_oauth_beta`，其中账号 2833
-  已确认是必须携带该 beta 的 `claude_chrome`，与本次 messages 文本改动无关
-- 部署时 `.env` 备份：`backups/.env.20260727-071111.before-08e222ed`
-- 部署前运行镜像 commit `69c58ea5`，image ID
-  `sha256:7609181ded6ca8fb5909993a8732b7c580d3c034f048931a556792e3232398d1`
+- 已应用的最高数据库迁移：`181_provider_settlement_integrity.sql`；本轮只改前端
+  展示与文案，无新增迁移
+- 使用 `identity_only` 的 Anthropic 分组数：1（分组 14）
+- 部署时 `.env` 备份：`backups/.env.20260729-021451.before-0832ab07`
+- 部署前运行镜像 commit：`08e222ed`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-08e222ed
+sub2api-rollback:pre-0832ab07
 ```
+
+本轮验证：
+
+- 修复供号商页面把 `total_cost=0.05944` 显示成 `$0.1`（固定 1 位小数），改自适应
+  位数后显示 `$0.06`；底层存储、结算快照与 CSV 导出一直是全精度，见 4.14 金额精度
+- 号池未受影响：部署后 10 分钟内被删账号 0，近 3 分钟真实流量 3 请求 / 3 账号
+- 启动窗口 panic / fatal 为 0；登录冒烟中错误凭据返回 401
+- 账号总数较 07-27 少 19 个（93 → 74）。删除发生在 07-26 14:00 至 07-28 11:00
+  之间的多个时段，属期间运营操作，与本次部署无关
+
+### 3.1 上一轮：2026-07-27 `08e222ed`
+
+system→messages 迁移标签移除，见 4.13。该轮特有的生产结论：
+
+- 镜像 digest：`sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01`
+- GitHub Actions run：`30240480199`（`custom-image` success，4m55s）
+- `.env` 备份：`backups/.env.20260727-071111.before-08e222ed`；回滚 tag
+  `sub2api-rollback:pre-08e222ed`
+- 容器约 6 秒转 healthy，启动窗口 panic / fatal 为 0
+- 首轮 token refresh：`total=72, needs_refresh=1, refreshed=0, failed=1`
+- 新版真实流量 Guard 未出现 `missing_billing_block`、`missing_agent_sdk_identity` 或
+  `system_block_count`；观察到的 finding 只有 `unexpected_oauth_beta`，其中账号 2833
+  已确认是必须携带该 beta 的 `claude_chrome`，与该轮 messages 文本改动无关
+
+更早轮次的生产验证结论按功能记录在各自小节：`identity_only` 与迁移 179 见 4.8，
+Fable `credits_required` 见 4.11，`claude-opus-5` 定价与模型清单见 4.12，
+供号商站点首发（迁移 180/181）见 4.14。逐轮部署记录见
+`FORK_DEPLOY_RUNBOOK_CN.md`。
 
 ## 4. 已实现功能
 
@@ -607,7 +614,7 @@ full→identity-only 不产生嵌套消息对，且 `c=nil` 不改错 fp。
 部署时会有一次性影响：所有走 OAuth 伪装的客户第一条 user 消息内容变化，prompt cache
 前缀失效，之后恢复正常。
 
-### 4.8 供号商站点（Provider Portal）
+### 4.14 供号商站点（Provider Portal）
 
 面向外部供号商的独立入口，与主站共用应用和数据库，但路由前缀、登录注册页与布局
 完全分开（`/provider/*`）。核心目标是让供号商能自助上号并核对结算金额，同时
@@ -831,7 +838,7 @@ CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开�
 刻意不同——普通邀请码只影响赠送，供号商邀请码是准入凭证，
 绝不能出现「码没消费掉但人已经进来了」。并发抢同一枚码时输的一方整体回滚。
 
-### 4.8.1 已知未决问题
+### 4.14.1 已知未决问题
 
 以下问题在代码审查中被识别，**上线前必须评估**：
 

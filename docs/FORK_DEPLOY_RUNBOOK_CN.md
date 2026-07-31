@@ -444,7 +444,7 @@ docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
   就会按渠道价计入应付。没配过渠道定价的话，`total_cost` 就是标准价，无需处理。
   （图片/视频单价只在图片计费路径生效，纯文本请求不会走到。）
 
-其余已知限制见 `FORK_PROJECT_MEMORY.md` 的 4.8.1，其中与运营相关的两条：
+其余已知限制见 `FORK_PROJECT_MEMORY.md` 的 4.14.1，其中与运营相关的两条：
 
 - 供号商自己不能改密码，由管理员在「用户管理 → 编辑」代改；
 - 备份导出不含 `provider_user_id` / `provider_tier`，恢复后账号归属会丢。
