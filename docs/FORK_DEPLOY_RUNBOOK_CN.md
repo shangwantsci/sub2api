@@ -14,10 +14,11 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-25 已按本流程部署 `0.1.156-8782b30f`，GitHub Actions
-> run `30137006332`；`claude-opus-5` 上线、Opus 档定价确定性修复、本机健康检查
-> 与容器版本均通过验证。上一轮为 2026-07-23 的 `0.1.156-a16045ee`
-> （run `29982187637`，迁移 179 与 `identity_only` 策略）。
+> 最近验证：2026-07-29 已按本流程部署 `0.1.156-0832ab07`，GitHub Actions
+> run `30416049073`；供号商金额显示改自适应小数位（修 `$0.059` 被显示成 `$0.1`）、
+> 授权方式改回 OAuth / Setup Token 通用叫法，纯前端无迁移。上一轮为 2026-07-27 的
+> `0.1.156-08e222ed`（run `30240480199`，system→messages 迁移不再携带
+> `[System Instructions]` 标签）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -156,7 +157,23 @@ docker exec sub2api /app/sub2api --version
 
 这样镜像构建完全在 GitHub runner 上完成，不占用生产机 CPU/内存。
 
-2026-07-25 最近一次验证：
+2026-07-27 最近一次验证：
+
+```text
+immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-08e222ed
+digest:          sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01
+Actions run:     30240480199 (custom-image success, 4m55s)
+env backup:      backups/.env.20260727-071111.before-08e222ed
+rollback tag:    sub2api-rollback:pre-08e222ed
+```
+
+部署后容器约 6 秒转 healthy，二进制版本为 `0.1.156 / 08e222ed`，本机与公网
+`/health` 均为 200，两个管理接口无凭证均保持 401；启动窗口 panic/fatal 为 0。
+首轮 token refresh 为 `total=72, needs_refresh=1, refreshed=0, failed=1`。
+Guard 未出现 billing、Agent SDK 身份或 system block 数量 finding；仅出现与 Chrome OAuth
+必需 beta 有关的 `unexpected_oauth_beta`，不涉及本次 messages 文本改动。
+
+上一轮 2026-07-25：
 
 ```text
 immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-8782b30f
@@ -165,7 +182,7 @@ env backup:      backups/.env.20260725-010617.before-8782b30f
 rollback tag:    sub2api-rollback:pre-8782b30f
 ```
 
-上一轮 2026-07-23：
+更早一轮 2026-07-23：
 
 ```text
 immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-a16045ee
@@ -358,6 +375,144 @@ constraint: inherit / enabled / identity_only / disabled
 本机/公网 health: HTTP 200
 首轮 token refresh: total=87, needs_refresh=3, refreshed=3, failed=0
 ```
+
+### 供号商站点发布检查（本次含两个 DB 迁移）
+
+与最近几次「无 schema 迁移」的部署不同，供号商站点带两个新迁移，**必须按序执行**：
+
+```text
+backend/migrations/180_add_provider_portal.sql
+backend/migrations/181_provider_settlement_integrity.sql
+```
+
+180 给 `users` 加 `is_provider`、给 `accounts` 加 `provider_user_id`（partial index）
+与 `provider_tier`、新建 `provider_settlements` 表。
+
+181 依赖 180 建出的表，补财务完整性：`provider_settlements` 加 `last_usage_id`
+（封账水位）与 `void_reason`、金额/周期 CHECK 约束、
+`(provider_user_id, period_end) WHERE status='settled'` 的 partial unique index，
+并新建明细快照表 `provider_settlement_items`。
+
+两者全部是 `ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS` /
+`DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT`，幂等可重跑，不改动既有数据。
+存量账号的 `provider_user_id` 为 NULL 即「管理员自有」。首次发布时
+`provider_settlements` 为空表，181 的约束与唯一索引不会与存量数据冲突。
+
+迁移由应用启动时自动执行，因此部署顺序不变；但**回滚需要注意**：旧镜像不认识
+这些列，读取时会忽略它们，不会报错，所以应用层可以直接回滚。真正不可逆的是
+`provider_settlements` 里已生成的结算单——回滚应用不会删除它们，重新上线后仍然有效。
+
+部署后确认：
+
+```bash
+docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
+  logs --since=5m sub2api | grep -i migration
+```
+
+检查：
+
+- 迁移 180 与 181 都已应用，无报错；
+- `/api/v1/auth/me` 返回体多出 `is_provider` 字段（值为 false）；
+- 供号商站点默认关闭：`provider_portal_enabled` 未配置时为 false，
+  此时 `/api/v1/provider/*` 全部返回 404，注册接口返回 403
+  `PROVIDER_PORTAL_DISABLED`；
+- 管理端「系统设置 → 供货商」tab 可打开，档位显示 1-5 档种子值；
+- 管理端「供号商对账」菜单可打开，含「对账结算」与「供号商管理」两个 tab，列表为空；
+- **金额显示与管理端用量统计对得上**：随便挑一笔用量，比较管理端统计里的
+  `total_cost` 与供号商页面显示的本期金额。两者应当只差在小数位数上，
+  不应出现「$0.059 显示成 $0.1」这类虚高（曾因固定 1 位小数出过，见
+  `FORK_PROJECT_MEMORY.md` 的金额精度小节）；
+- 既有功能冒烟：能正常新建账号（该路径改成了账号与绑组同事务）、
+  能正常登录、用量清理日志无异常。
+
+开启站点前还需要在设置页完成：勾选至少一个 Anthropic 分组作为托管类型并填写对外文案、
+设好默认托管类型与默认档位、确认结算时区与结算冷却期，然后才把
+`provider_portal_enabled` 打开。调度优先级不需要配，上号时自动对齐所选分组；
+设置页会把每个分组实际会用的值列出来，扫一眼确认即可。
+邀请码在「兑换码」页选「供号商邀请码」类型生成。
+
+#### 打开 `provider_portal_enabled` 之前需要知道的
+
+结算并发、封账水位、清理保护、邀请码事务、明细快照、优先级对齐、关站阻断登录
+这几项**都已解决**。开站前只剩一件事需要人工确认：
+
+- **客户 API Key 分组有没有配渠道自定义定价**。结算按
+  `SUM(usage_logs.total_cost)` 计算，而 `total_cost` 的 token 单价可能被渠道定价覆盖。
+  注意渠道定价挂在**调用方 API Key 所属分组**上（`resolveChannelPricing` 取的是
+  `apiKey.Group.ID`），不是挂在账号或托管分组上——所以决定因素是「谁拿 Key 打进来」，
+  不是「号本身怎么配的」。若某个客户 Key 分组配了渠道定价，落到供号商账号上的请求
+  就会按渠道价计入应付。没配过渠道定价的话，`total_cost` 就是标准价，无需处理。
+  （图片/视频单价只在图片计费路径生效，纯文本请求不会走到。）
+
+其余已知限制见 `FORK_PROJECT_MEMORY.md` 的 4.14.1，其中与运营相关的两条：
+
+- 供号商自己不能改密码，由管理员在「用户管理 → 编辑」代改；
+- 备份导出不含 `provider_user_id` / `provider_tier`，恢复后账号归属会丢。
+
+2026-07-29 `0832ab07` 生产验证（金额显示自适应位数 + 授权方式改名，纯前端）：
+
+```text
+GitHub Actions run: 30416049073 (custom-image success, 4m26s)
+env backup: backups/.env.20260729-021451.before-0832ab07
+rollback tag: sub2api-rollback:pre-0832ab07
+
+容器: 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: 0832ab07, built: 2026-07-29T02:10:39Z)
+镜像 mutable/immutable ID: 一致
+无新迁移（本轮只改前端展示与文案）
+
+修复的问题：供号商页面把 total_cost=0.05944 显示成 $0.1（固定 1 位小数），
+而管理端用量统计同一笔显示 $0.059，被误判为「给供号商多算钱」。
+底层从未算错：数据库该笔仍是 0.0594400000，结算与 CSV 一直用全精度。
+改为自适应位数后显示 $0.06。
+
+号池未受影响：
+  部署后 10 分钟内被删账号: 0
+  近 3 分钟真实流量: 3 请求 / 3 账号
+  启动窗口 panic / fatal: 0
+  登录冒烟: 错误凭据返回 401
+  本机 /health 与公网 https://lumos7.cc/health: 均 200
+
+注：账号总数较 07-27 少 19 个（93 → 74），删除发生在 07-26 14:00 至
+07-28 11:00 之间的多个时段，与本次部署无关，属期间的运营操作。
+```
+
+2026-07-27 `2e4495d9` 生产验证：
+
+```text
+GitHub Actions run: 30230866070 (custom-image success)
+image digest: sha256:7f2572c6e6a6ae60a67801506f8d002775e52264ad5d56d60985db70f50573c4
+env backup: backups/.env.20260727-020223.before-2e4495d9
+rollback tag: sub2api-rollback:pre-2e4495d9 (sha256:8ec3a024… = 8782b30f)
+
+容器: 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: 2e4495d9, built: 2026-07-27T01:55:37Z)
+镜像 mutable/immutable ID: 一致
+迁移: 180 与 181 均已记录，无报错
+新对象: provider_settlements / provider_settlement_items 建成，
+        last_usage_id + void_reason 列、period/amounts/voided CHECK 均就位
+users.is_provider、accounts.provider_user_id / provider_tier 就位
+
+号池未受影响（关键验证）：
+  账号状态部署前后一致 active/t=76, active/f=2, error/f=15
+  93 个账号中 provider_user_id 非空 = 0（全部仍为管理员自有）
+  部署后 4 分钟真实流量: 35 请求 / 7 账号 / $6.16（claude-opus-4-8 等）
+  启动窗口 panic / fatal: 0
+  登录路径冒烟: 错误凭据返回 401 INVALID_CREDENTIALS（非 500）
+  首绑 / grantee / PROVIDER_PORTAL 相关错误: 0
+  本机 /health 与公网 https://lumos7.cc/health: 均 200
+
+供号商站点默认关闭：
+  settings 表无任何 provider_* 键，is_provider 用户数 = 0
+  未认证访问 /api/v1/provider/* 返回 401（jwtAuth 在 ProviderOnly 之前，
+  比文档预期的 404 更早拦截；已认证的非供号商才会走到 404/403）
+
+首轮 token refresh: total=72, needs_refresh=1, refreshed=0, failed=1
+```
+
+该轮唯一 failed 是账号 `2523` 的 SOCKS 代理
+`username/password authentication failed`，与 2026-07-25 那轮账号 `2512` 同类，
+属存量代理凭证问题，与本次发布无关；该账号仍为 `active/schedulable`。
 
 ### Claude Chrome OAuth 401 自动恢复发布检查
 

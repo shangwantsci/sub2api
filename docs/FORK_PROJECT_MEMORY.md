@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-25
+> 最后更新：2026-07-29
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -100,14 +100,14 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 
 ## 3. 当前生产状态
 
-截至 2026-07-25 `claude-opus-5` 上线：
+截至 2026-07-29 供号商金额自适应位数与授权方式改名上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-8782b30f`
-- 镜像 digest：`sha256:8ec3a0244e68a12182681abd395765773500f7a18ecbd7f2371eda3e565fdb13`
-- 应用 commit：`8782b30f`
-- 应用版本：`0.1.156`
-- GitHub Actions run：`30137006332`（`custom-image` success，4m54s）
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-0832ab07`
+- 镜像 digest：本轮未记录；部署时只校验了 mutable 与 immutable 的 image ID 一致
+- 应用 commit：`0832ab07`
+- 应用版本：`0.1.156`，二进制 built `2026-07-29T02:10:39Z`
+- GitHub Actions run：`30416049073`（`custom-image` success，4m26s）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -116,46 +116,52 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 - 应用本地映射：`127.0.0.1:18080 -> 8080`
 - 公网入口：Caddy 反代
 - PostgreSQL、Redis、Caddy 与其它项目独立运行；部署只重建 `sub2api`
-- 健康状态：healthy
+- 健康状态：healthy（容器 8 秒转 healthy）
 - 本机与公网 `/health`：HTTP 200
 - 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
 - Persona 全局门控：`false`（尚未灰度启用）
+- 供号商站点 `provider_portal_enabled`：未开启
 - 生产机不运行 `cc-calibrate` sidecar
 - 标定 profile：published + valid，CLI `2.1.218`
-- 数据库迁移 `179_expand_claude_oauth_system_prompt_policy.sql` 已应用，CHECK
-  constraint 已包含 `identity_only`；PostgreSQL、Redis、Caddy 均未重建
-- 事务验证中分组 14 可写入 `identity_only` 并成功回滚到原值 `enabled`；部署脚本
-  没有自动切换客户配置。随后该分组于 13:36:12 经管理操作启用
-  `identity_only`，当前使用该模式的分组数为 1
-- 生产二进制已确认包含 `identity_only` 与“仅必要身份”前端标签
-- 两块提示词及 system 迁移辅助文本由测试实测增量约 53 tokens；主 messages、
-  count_tokens 与 Mimicry Guard block 模式均通过端到端 wire 测试
-- 分组 14 启用后的首个观察窗口有 13 条成功 usage、7 个账号、覆盖
-  Fable/Haiku/Opus/Sonnet；Mimicry Guard 的 `missing_billing_block`、
-  `missing_agent_sdk_identity`、`system_block_count` 合计为 0
-- 首个生产 `credits_required`：SetupToken 账号 `2069` 写入
-  `model_access_denials["claude-fable-5"]` 后保持 active/schedulable；同一请求清理
-  粘性并切换到 Max 账号 `2624`，最终 HTTP 200（4264ms）
-- denial 生效后账号 `2069` 的 Fable 再次选中数为 0；Opus/Haiku/Sonnet 不受该
-  模型拒绝影响
-- `claude-opus-5` 已进入 `claude.DefaultModels`、Bedrock 默认映射与前端模型列表；
-  容器内定价兜底表含该 key（远程 LiteLLM 表尚未收录，由 `mergeFallbackPricingData`
-  补齐）；Antigravity 侧未加入，待 sync-upstream 探测后再定
-- 本轮启动窗口 panic / error 级日志为 0；容器 8 秒转 healthy
-- 部署后首轮 token refresh：`total=67, needs_refresh=1, refreshed=0, failed=1`；
-  唯一 failed 为账号 `2512` 的 SOCKS 代理
-  `username/password authentication failed`，属存量代理凭证问题
-- 部署时 `.env` 备份：`backups/.env.20260725-010617.before-8782b30f`
-- 上一轮 `a16045ee`（2026-07-23）：digest
-  `sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3aba849094c`，
-  run `29982187637`，`.env` 备份 `backups/.env.20260723-053306.before-a16045ee`，
-  首轮 token refresh `total=87, needs_refresh=3, refreshed=3, failed=0`
+- 已应用的最高数据库迁移：`181_provider_settlement_integrity.sql`；本轮只改前端
+  展示与文案，无新增迁移
+- 使用 `identity_only` 的 Anthropic 分组数：1（分组 14）
+- 部署时 `.env` 备份：`backups/.env.20260729-021451.before-0832ab07`
+- 部署前运行镜像 commit：`08e222ed`
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-8782b30f
+sub2api-rollback:pre-0832ab07
 ```
+
+本轮验证：
+
+- 修复供号商页面把 `total_cost=0.05944` 显示成 `$0.1`（固定 1 位小数），改自适应
+  位数后显示 `$0.06`；底层存储、结算快照与 CSV 导出一直是全精度，见 4.14 金额精度
+- 号池未受影响：部署后 10 分钟内被删账号 0，近 3 分钟真实流量 3 请求 / 3 账号
+- 启动窗口 panic / fatal 为 0；登录冒烟中错误凭据返回 401
+- 账号总数较 07-27 少 19 个（93 → 74）。删除发生在 07-26 14:00 至 07-28 11:00
+  之间的多个时段，属期间运营操作，与本次部署无关
+
+### 3.1 上一轮：2026-07-27 `08e222ed`
+
+system→messages 迁移标签移除，见 4.13。该轮特有的生产结论：
+
+- 镜像 digest：`sha256:f7e4e36fc60601151ba60edb2623234e10b729b73844811be106bc686c469c01`
+- GitHub Actions run：`30240480199`（`custom-image` success，4m55s）
+- `.env` 备份：`backups/.env.20260727-071111.before-08e222ed`；回滚 tag
+  `sub2api-rollback:pre-08e222ed`
+- 容器约 6 秒转 healthy，启动窗口 panic / fatal 为 0
+- 首轮 token refresh：`total=72, needs_refresh=1, refreshed=0, failed=1`
+- 新版真实流量 Guard 未出现 `missing_billing_block`、`missing_agent_sdk_identity` 或
+  `system_block_count`；观察到的 finding 只有 `unexpected_oauth_beta`，其中账号 2833
+  已确认是必须携带该 beta 的 `claude_chrome`，与该轮 messages 文本改动无关
+
+更早轮次的生产验证结论按功能记录在各自小节：`identity_only` 与迁移 179 见 4.8，
+Fable `credits_required` 见 4.11，`claude-opus-5` 定价与模型清单见 4.12，
+供号商站点首发（迁移 180/181）见 4.14。逐轮部署记录见
+`FORK_DEPLOY_RUNBOOK_CN.md`。
 
 ## 4. 已实现功能
 
@@ -261,7 +267,7 @@ fp = sha256("59cf53e54c78" + chars + cliVersion).slice(0, 3)
 - JavaScript 字符串索引是 UTF-16 code unit，不是 UTF-8 bytes；
 - 主请求输入是 normalize 前第一条非 meta 用户消息；
 - side query 输入是 side-query body 第一条 user text；
-- 网关必须跳过迁移 system prompt 产生的 `[System Instructions]` synthetic user。
+- 网关必须跳过迁移 system prompt 产生的 synthetic user，见 4.13。
 
 标定 harness 会在每次 CLI invocation 前写 canary marker，同时尝试 marker 与 wire user 候选。任何请求匹配失败都会阻止 profile 发布。
 
@@ -568,6 +574,325 @@ denial 后账号 2069 的 Fable 再次选中数 -> 0
 `8782b30f` 补齐了 `opus-5`、`opus-4.8` 两档家族条目与硬编码兜底价，并加了 50 次
 循环的确定性回归测试，同时覆盖 `anthropic.claude-opus-5` 这类 Bedrock 形态 ID。
 旧代 Opus 3 / 4 / 4.1 仍保留 `$15/$75`。
+
+### 4.13 system→messages 迁移不再带 `[System Instructions]` 标签
+
+OAuth/SetupToken + 非真实 Claude Code 客户端时，客户端 `system` 必须让位给 Claude Code
+的 system blocks，因此被迁移成 messages 开头的一对合成消息。上游 sub2api 会给这条
+user 消息加 `[System Instructions]\n` 前缀，本 fork 已去掉：
+
+- 该字符串是上游自带的可读性标签，**不是伪装要素**——真实 Claude Code CLI 从不发送
+  它，留着反而是一个稳定的第三方特征；客户侧也能感知到自己的提示词被改写；
+- 语义不丢：紧随其后的 assistant 应答 `Understood. I will follow these instructions.`
+  才是让模型把前一条当指令的支点，**保留不动**；
+- assistant ack 未一并删除是有依据的：删掉会让 body 出现两条连续 user 消息，而真实
+  CLI 在 normalize 阶段就把同角色相邻消息合并掉了，wire 上不会出现该形态。用一个
+  已知特征换一个结构特征不是净收益。若要进一步贴近真身，正确方向是把客户 system
+  作为**首条真实 user 消息里的附加 text block**（CLI 处理 CLAUDE.md 的方式），
+  那会同时改变 fp 输入与 cache 断点，属于独立项目。
+
+**关键约束**：去掉 wire marker 后，绝不能靠固定 ack 或消息结构猜哪一条是 synthetic。
+合法真实对话完全可能恰好出现相同的 user/assistant 形态，误判会让
+`cc_version=X.Y.Z.{fp}` 与 `metadata.session_id` 一起静默改用第二轮文本。
+
+当前实现是在改写前读取真实首轮，并通过请求本地上下文显式贯穿：
+
+- system blocks 初建直接使用改写前文本计算 billing fp；
+- calibrated profile 改变 CLI 版本时，`syncBillingHeaderVersionWithFirstUserText` 用同一
+  文本重算 fp；
+- metadata session seed 使用同一文本；普通 retry、signature retry 与 failover 保留该值；
+- `extractFirstUserText` 不按 ack 猜测，只取当前 body 第一条 user；旧标签仍作为历史格式
+  的显式兼容信号；
+- `count_tokens` 从 full 转成 `identity_only` 时只重建 system blocks，不重复迁移 messages；
+  该兼容路径缺少进程内上下文时才用 body 内已有的 12-bit fp 反证候选文本，正常生产
+  原始请求不依赖推断。
+
+Mimicry Guard、system blocks、metadata 格式、headers、betas 都未改变。回归测试锁定：
+迁移前后 fp 相同、真实对话逐字命中 ack 时不误跳过、calibrated UA 重算仍取真实首轮、
+full→identity-only 不产生嵌套消息对，且 `c=nil` 不改错 fp。
+
+部署时会有一次性影响：所有走 OAuth 伪装的客户第一条 user 消息内容变化，prompt cache
+前缀失效，之后恢复正常。
+
+### 4.14 供号商站点（Provider Portal）
+
+面向外部供号商的独立入口，与主站共用应用和数据库，但路由前缀、登录注册页与布局
+完全分开（`/provider/*`）。核心目标是让供号商能自助上号并核对结算金额，同时
+**完全看不到平台对账号做了什么处理**。
+
+准入与身份：
+
+- `users.is_provider` 能力位，`role` 仍为 `user`；`User.IsProviderUser()` 排除管理员；
+- 注册强制 `provider_invite` 类型邀请码（新 redeem 类型，`redeem_codes.type` 无枚举约束，
+  无需改表），建号时 `balance=0`，不走赠送与订阅分配；
+- 双向隔离：`ProviderOnly` 守 `/provider/*`，`ProviderDenyConsumerRoutes` 让供号商
+  无法访问 `/user`、`/keys`、`/usage` 等消费侧接口；
+- 站点总开关 `provider_portal_enabled` 读取失败时 fail-closed。
+
+上号（彻底排除 Chrome OAuth）：
+
+- 四种方式：手动 OAuth、手动 Setup Token、Cookie 授权(oauth)、Cookie 授权(setup-token)；
+- 排除 chrome 是 service 层硬约束而非 UI 隐藏：provider 链路构造 `CookieAuthInput`
+  时永不设置 `OAuthClient`（留空即 `claude_code`），且 `AssertProviderOAuthClientAllowed`
+  拒绝任何显式传入的其它 profile；
+- 代理由供号商自带且**必填**（`binding:"required"` + `ValidateProviderProxy` 逐项校验
+  协议/host/端口），没有「平台随机分配」这条路。授权阶段走平台默认出口，
+  代理在提交那一步才创建，记录名带 `provider-<id>-` 归属前缀；
+- 界面上账号类型用 **OAuth / Setup Token** 这两个行业通用叫法，各配一句说明。
+  曾经写成「完整授权 / 仅推理授权」这类自造词，供号商反而看不出该选哪个——
+  凭据类型是供号商自己手里的东西，不属于需要隐藏的内部细节，别再改回去；
+- 三项伪装强制开启且不可见。**注意写入路径不同**：
+  `credentials.intercept_warmup_requests`，而 `extra.enable_tls_fingerprint`
+  与 `extra.session_id_masking_enabled`；
+- `extra` 走白名单过滤，任何 `persona_` 前缀键一律丢弃并记日志。人格由管理员事后单配。
+
+托管类型与速率档位（全部在管理端设置页可视化配置，代码只提供种子值）：
+
+- 托管类型来自现有 Anthropic 分组，靠 `content_review_policy` 与
+  `claude_oauth_system_prompt_policy` 组合区分；对外只呈现管理员填写的中性名与效果描述，
+  真实策略与倍率**绝不下发**；
+- 1-5 固定档 + 自定义档。种子值：并发 1/2/3/5/8，会话同数，RPM 10/20/30/50/80，
+  5 小时窗口上限 20/40/60/100/不限，默认 3 档；
+- 自定义档受 `provider_custom_tier_caps` 护栏约束；
+- 改档位默认只影响新上号账号，另有「应用到存量」按钮。回填**只增量合并档位相关的
+  extra 键**，绝不整体覆盖，否则会清掉 `persona_*`、`window_cost_sticky_reserve` 等持久设置。
+
+调度优先级（**踩坑重灾区**）：
+
+`priority` 在调度里是**硬门槛而不是权重**：`filterByMinPriority`
+（`gateway_scheduling.go`）只保留候选中数值最小的那批账号，其余**完全不参与**后续选择。
+不存在「优先级低就少分一点流量」这回事，只有「拿全部」或「一个都拿不到」。
+取值不一致的后果是单向且静默的：数值大的一边永远拿不到一个请求，
+账号状态显示正常、用量恒为 0、结算金额恒为 0，没有任何报错。
+
+因此**不让人手工配置**：上号时由 `ResolveProviderAccountPriority` 自动取目标托管分组内
+现有账号的最小 priority（`MinPriorityByGroup`，含供号商账号——要对齐的是分组里实际生效的
+调度门槛，不区分归属），与该分组里正在跑的账号平起平坐。分组还是空的时才回落设置
+`provider_account_priority`（种子值 1，与 `CreateAccountModal.vue` 的默认值一致）。
+
+分组最小值本身非法（0 或越界）时同样不采信——0 是最高优先级，会让供号商账号独占整个分组。
+
+设置页不再提供输入框，改为只读展示每个已开放托管分组上号时实际会用的值。
+
+同一 priority 内的选择顺序是：最低负载率 → 最久未用（LRU）→ 完全并列时随机
+（`selectByLRU` 的 `mathrand.Intn`）。所以所有供号商的账号是公平轮转的，谁也不优先。
+想让某些供号商多分流量的话 `priority` 做不到，需要另设机制。
+
+结算（封账，不物理清零）：
+
+- 新表 `provider_settlements`，每次结算插入一条不可变记录，`usage_logs` 一行不动；
+- 当前周期起点 = 最近一条 `status='settled'` 的 `period_end`，无记录则取供号商注册时间；
+  半开区间 `[period_start, period_end)`；
+- 作废只允许最近一期（周期是链式的，作废中间期会让后续起点错位）；作废后金额自动回到待结算；
+  作废必须填原因，写入独立的 `void_reason` 列而不覆盖结算时的 `notes`；
+- 批量结算共用同一个 `period_end`，无用量的供号商直接跳过（不再「先插入再作废」，
+  那会在账本里留下一串无意义的作废单并干扰「只能作废最近一期」的判定）。
+
+并发与封账水位（财务正确性的三道防线）：
+
+1. **串行化**：`Settle` 与 `Void` 全程持有 `pg_advisory_xact_lock("provider_settlement:user:{id}")`
+   并在同一事务内完成「取起点 → 聚合 → 插入」。起点必须在锁内重新读取，
+   锁外读到的可能已被并发结算推进。复用既有的 `lockRepositoryScopedKeys`。
+   DB 侧另有 partial unique index `(provider_user_id, period_end) WHERE status='settled'` 兜底。
+2. **冷却期**：`usage_logs` 由异步 worker 写入（worker 任务超时 5s、批处理窗口 20ms、
+   调用方 detached 超时 15s），`created_at` 是 worker 赋值而非 COMMIT 时刻，
+   存在「created_at 早、提交晚」的记录。封账终点取 `now - provider_settlement_cooldown_seconds`
+   （种子 600 秒），让这段窗口内的写入先落定。注意这只把漏网概率压到极低，**不是证明**。
+   待结算视图的终点仍取当前时刻，供号商能立刻看到刚产生的用量。
+3. **id 水位**：每张结算单记录本期计入的最大 `usage_logs.id`（`last_usage_id`）。
+   下一期的聚合条件是
+   `(created_at 落在本期区间) OR (created_at 早于本期起点 AND id > 上期水位)`，
+   于是冷却期没兜住的迟到行会在下一期被补计，而 `id > 水位` 保证不会重复计入。
+   捕获到迟到行时打 WARN 日志（说明冷却期可能设短了）。
+   空周期必须沿用上期水位而不能退回 0，否则已计入的旧行会被重复捕获。
+
+明细快照与清理保护：
+
+- 新表 `provider_settlement_items` 在封账时快照分账号明细，与结算单同事务写入；
+  导出与历史重算都读快照，**不再回查 `usage_logs`**。
+  原因：`usage_logs` 默认 90 天后被 dashboard 保留策略硬删
+  （`maybeCleanupRetention`，`usage_logs_days`），管理员也可手工发起清理任务。
+  靠活表重算会让历史凭证残缺，而结算单上的总额还在，两者对不上无法向供号商解释。
+- `CleanupUsageLogs` 的截止点会被夹到「最早未结算周期起点」之前
+  （`SetProviderSettlementGuard` + `EarliestUnsettledStart`），
+  避免未结算区间的行被删掉导致应付金额静默缩水。取不到该下界时**跳过本轮清理**
+  而不是按原截止点删——宁可多留一轮数据。
+
+对账口径（三条不可违反的约束，已写成代码注释；**尚无 DB 集成测试覆盖**，见下方待办）：
+
+1. 金额只用 `SUM(usage_logs.total_cost)`，即恒定 1 倍率标准价。禁止改用 `actual_cost`
+   或 `account_stats_cost`——那两者含分组/账号倍率，会把平台自设的分组倍率泄露给供号商。
+2. `JOIN accounts` 禁止追加 `AND a.deleted_at IS NULL`。供号商下线（软删除）账号后，
+   本期已产生的金额必须继续计入，加了过滤会凭空少付钱且无任何报错。
+   这些是 raw SQL，不走 Ent 软删除 interceptor，天然能查到已删账号，是有意为之。
+3. 按日聚合时区取自 `provider_settlement_timezone` 设置（种子值 `Asia/Shanghai`），
+   禁止沿用 `apiClient` 给所有 GET 自动注入的浏览器时区，否则管理员与供号商看到的
+   每日明细按各自时区切分，总额一致但逐日对不上。
+
+`total_cost` 的确切语义（核对过写入链路，别只看名字猜）：
+
+`CostBreakdown.TotalCost = 各分项之和`，`ActualCost = TotalCost × rateMultiplier`
+（`billing_service.go`）。所以 `total_cost` **不含**分组倍率、用户专属倍率、高峰倍率、
+账号倍率——这正是它能当「1 倍率标准价」的原因，有测试锁定
+（`billing_service_test.go`：倍率只改 ActualCost）。
+
+但它**不等于 Anthropic 官方目录价**，下列因素会进 `total_cost`：
+渠道自定义单价、分组图片/视频单价、service tier（priority ×2 / flex ×0.5）、
+OpenAI 长上下文加价。其中 **service tier 与长上下文加价的赋值点全部在 `openai_*`
+文件里，Anthropic 路径只读不写**，而供号商账号强制 `PlatformAnthropic`，
+所以这两项对供号商结算不生效。渠道单价与图片单价理论上仍可能影响，
+取决于托管分组是否配了自定义定价——配了就等于按加价后的钱付给供号商。
+
+哪些请求不会计费给供号商（已逐一核对）：后台测试账号、定时探测、count_tokens、
+被拦截的预热请求、Forward 失败/限流/重试中失败的那几次，都不写 usage_logs。
+会计费的：流式中途客户端断开（drain 完 usage 后正常计费，与向客户收费一致）、
+未被拦截的预热请求——后者不用担心，供号商账号强制开启了预热拦截。
+
+不会重复计费：一次请求只写一条 usage_log，影子账号（`parent_account_id` /
+`quota_dimension='spark'`）不会母子各写一条，且 `CreateShadow` 与 `DuplicateAccount`
+都不继承 `provider_user_id`。
+
+`provider_user_id` 不会被常规操作清掉：`UpdateAccount`、`BulkUpdate`、CRS 同步的
+builder 里都没有这一列，只有创建时写入。
+
+金额精度：**全程十进制，不经过二进制浮点**。
+
+- 数据库列 `decimal(20,10)`；
+- Go 侧一律 `shopspring/decimal`，从 SQL 扫描、聚合、快照到序列化都不转 float64；
+- JSON **以十进制字符串传输**（`decimal.Decimal` 的 `MarshalJSON` 默认带引号）。
+  这一点是刻意的：JSON 数字在 JS 侧被解析成 float64，`decimal(20,10)` 的精度当场丢失；
+- 前端 `frontend/src/utils/providerMoney.ts` 用 **BigInt 按 10^10 缩放**做精确解析与求和，
+  只在展示时收敛位数；
+- CSV 导出输出完整精度原值，不做展示层收敛。
+
+展示位数是**自适应**的，不能改回固定 1 位：
+
+- 默认 2 位（货币惯例）：`$29.31`、`$0.06`；
+- 非零但会被收敛成 `0.00` 时放宽到 6 位并去掉末尾零：`$0.0001`，
+  避免把有用量显示成零。
+
+曾经用过固定 1 位小数，线上真实用量 `total_cost=0.05944` 被显示成 `$0.1`，
+比实际虚高近 70%，而管理端用量统计同一笔显示 `$0.059`——两边对不上，
+在对账页面上直接被当成「给供号商多算钱」。底层从未算错（存储、快照、CSV
+一直是全精度），但对账界面上的数字虚高是不可接受的。
+`providerMoney.spec.ts` 用这个真实值钉住了回归。
+
+CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开头。
+后端 `handler/provider.CSVCell` 与前端 `csvCell` 在这些首字符前补单引号，
+两边必须保持一致——只防一边等于没防。
+
+分页：结算历史与账号列表都走仓库标准分页（`response.ParsePagination` +
+`response.Paginated`，响应 `items/total/page/page_size/pages`，前端用
+`components/common/Pagination.vue` + `getPersistedPageSize`）。
+
+结算历史**必须返回 total**：它是财务凭证，供号商要能确认看到的就是全部，
+而不是被静默截断到前 N 条——这正是分页前的行为。
+
+账号列表页需要的「本期起始时间」不塞进分页体，改由轻量端点
+`GET /provider/billing/period` 提供（只读最近一条结算单，不跑任何用量聚合）。
+不要为拿这一个时间戳去调 `GET /billing/current`，那会连带算出按日明细。
+
+管理端对账面板不允许一键直接结算：先看分账号明细（可导出核对），明细逐行合计与
+后端总额**精确不一致**时显示警告并**禁用结算按钮**，再二次确认。
+一致性判定用 BigInt 精确比较而非容差：两边同源，任何差异都是真实的取数口径问题。
+
+身份字段必须同时写进 extra（**踩坑重灾区之二**）：
+
+换票拿到的 `account_uuid` / `org_uuid` / `email_address` 除了写 credentials，
+还必须复刻进 `extra`（`MirrorProviderIdentityToExtra`）。**网关只认 extra 里的那份**：
+
+- `gateway_upstream_request.go` 用 `account.GetExtraString("account_uuid")`，
+  并以 `accountUUID != ""` 为硬前提；为空时 `RewriteUserIDWithMasking` **整段跳过**，
+  也就是说 `session_id_masking_enabled=true` 写了也白写；
+- `gateway_claude_oauth_body.go` 的 `FormatMetadataUserID` 同样从 extra 取，
+  缺失时拼出来的 `metadata.user_id` 少一段账号 UUID，本身就是破绽。
+
+管理端走 `buildExtraInfo`（`useAccountOAuth.ts`）写 extra，CRS 同步也专门把这两个键
+从 credentials 复制进 extra。供号商上号必须对齐，否则伪装静默失效且无任何报错。
+
+注意调用顺序：必须在 `SanitizeProviderExtra` **之后**复刻。白名单只放行档位键，
+先写会被丢掉。重新授权（Reauth）时还要先 `RefreshProviderIdentityExtra` 清掉旧值
+——供号商换个 Anthropic 账号重新授权时，用错身份比没有身份更糟。
+
+档位并发下限是 1，不是 0：`ConcurrencyService.AcquireAccountSlot` 对
+`maxConcurrency <= 0` 直接返回「无限制」，填 0 会让本该最小的档位变成不限并发。
+`max_sessions` / `base_rpm` / `window_cost_limit` 的 0 表示「不启用该限制」，
+是既有约定，与并发不同，不要一起改。
+
+上号原子性：
+
+- 账号与分组绑定走 `CreateWithAccountGroups`（同事务）。原先是 `Create` + `BindGroups`
+  两段写，绑组失败会留下一个没有任何分组的账号，而调用方只收到错误、以为什么都没发生，
+  于是去删自己刚建的代理，却因为账号还引用着而删不掉，最终留下孤儿。
+- 上号失败回收代理时用 `context.WithoutCancel` + 独立超时：上号失败常常正是因为
+  请求超时或客户端断开，此时请求 ctx 已取消，拿它做清理必然也失败。
+
+站点开关是双向的：关站后不仅 `/api/v1/provider/*` 全部 404
+（`ProviderOnly`），供号商**也无法登录**——`Login` 里的 `assertProviderPortalOpenFor`
+对 `IsProviderUser()` 返回 `PROVIDER_PORTAL_DISABLED`。
+不拦的话供号商仍能拿到 JWT 进入面板、每个接口都 404，对外表现成「系统坏了」。
+管理员即便带 `is_provider` 也不受影响（`IsProviderUser` 已排除管理员），
+否则关站后没人能进去把站点重新打开。
+
+邀请码：校验 → 建用户 → CAS 消费在同一事务内完成。与普通注册的「标记失败只记日志」
+刻意不同——普通邀请码只影响赠送，供号商邀请码是准入凭证，
+绝不能出现「码没消费掉但人已经进来了」。并发抢同一枚码时输的一方整体回滚。
+
+### 4.14.1 已知未决问题
+
+以下问题在代码审查中被识别，**上线前必须评估**：
+
+- 备份导出结构不含 `provider_user_id` / `provider_tier`，恢复后账号会退回「管理员自有」。
+- 供号商自己没有改密入口（`ProviderDenyConsumerRoutes` 挡掉了 `/user/password`），
+  由管理员代改：用户管理 → 目标行「编辑」→ 填密码。`PUT /admin/users/:id` 对
+  `is_provider` 无任何限制，留空则不改密。
+- 若给托管分组配了**渠道自定义单价或分组图片单价**，这些加价会进 `total_cost`，
+  等于按加价后的金额付给供号商。上线前确认托管分组是否配了自定义定价。
+- 删除供号商用户时不检查其名下账号与待结算金额。
+- 对账 SQL 的三条口径约束（1 倍率、不过滤软删账号、强制结算时区）目前靠代码注释与
+  单元测试约束，**仍无 DB 集成测试覆盖**。
+- `usage_logs` 是否已在生产库转成分区表未确认；若已分区，保留清理走的是
+  DROP 月分区路径，冷却期与未结算保护同样适用，但分区边界是日历月，
+  粒度比行删除粗，需要确认最早未结算周期不会落在待 DROP 的分区内。
+- **档位里的 RPM 目前不参与选号门控**（平台既有问题，非供号商特有）。
+  生产走 Redis 调度快照，而 `filterSchedulerExtra`（`scheduler_cache.go`）的白名单
+  收了 `window_cost_limit` / `max_sessions` 却**没收 `base_rpm`**，
+  于是选号时 `GetBaseRPM()` 恒为 0，`isAccountSchedulableForRPM` 恒放行。
+  影响所有配了 `base_rpm` 的账号，管理端自建号同样如此。
+  后果：1-5 档之间的 RPM 差异（10/20/30/50/80）实际不生效，只有并发、会话数、
+  窗口成本三项在起作用。
+  **修复需谨慎**：把 `base_rpm` 加进白名单会让线上所有已配置 RPM 的存量账号
+  突然开始受限，等于一次性收紧可用容量，属于行为变更而非纯 bug 修复，
+  应当先评估存量配置再决定。
+
+设置项：
+
+```text
+provider_portal_enabled
+provider_selectable_groups
+provider_default_group_id
+provider_capacity_tiers
+provider_default_tier
+provider_custom_tier_enabled
+provider_custom_tier_caps
+provider_settlement_timezone
+provider_settlement_cooldown_seconds   # 种子 600，区间 60..86400
+provider_account_priority              # 种子 1，区间 0..100，硬门槛语义见上文
+```
+
+数据库迁移：
+
+```text
+backend/migrations/180_add_provider_portal.sql
+backend/migrations/181_provider_settlement_integrity.sql
+```
+
+180 新增 `users.is_provider`、`accounts.provider_user_id`（partial index）、
+`accounts.provider_tier` 与 `provider_settlements` 表。
+
+181 补财务完整性：`provider_settlements.last_usage_id`（封账水位）与 `void_reason`、
+金额/周期 CHECK 约束、`(provider_user_id, period_end) WHERE status='settled'` 的
+partial unique index，以及明细快照表 `provider_settlement_items`。
 
 ## 5. 当前自动标定状态
 
@@ -912,6 +1237,31 @@ backend/internal/service/setting_claude_profile.go
 backend/internal/service/gateway_upstream_request.go
 backend/internal/service/gateway_billing_block.go
 backend/internal/service/claude_mimicry_guard.go
+```
+
+供号商站点：
+
+```text
+backend/migrations/180_add_provider_portal.sql
+backend/ent/schema/provider_settlement.go
+backend/internal/service/provider_settings.go
+backend/internal/service/provider_tier.go
+backend/internal/service/provider_onboard.go
+backend/internal/service/provider_settlement.go
+backend/internal/service/auth_provider_register.go
+backend/internal/repository/provider_settlement_repo.go
+backend/internal/repository/usage_log_repo_provider.go
+backend/internal/server/middleware/provider_guard.go
+backend/internal/server/routes/provider.go
+backend/internal/handler/provider/
+backend/internal/handler/admin/provider_handler.go
+frontend/src/views/provider/
+frontend/src/views/admin/ProvidersView.vue
+frontend/src/components/admin/provider/ProviderSettingsPanel.vue
+frontend/src/components/layout/ProviderLayout.vue
+frontend/src/utils/providerMoney.ts
+frontend/src/api/provider/
+frontend/src/api/admin/providers.ts
 ```
 
 Claude Chrome Cookie OAuth：
