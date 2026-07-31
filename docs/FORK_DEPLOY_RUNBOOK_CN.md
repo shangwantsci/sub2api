@@ -14,11 +14,12 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-29 已按本流程部署 `0.1.156-0832ab07`，GitHub Actions
-> run `30416049073`；供号商金额显示改自适应小数位（修 `$0.059` 被显示成 `$0.1`）、
-> 授权方式改回 OAuth / Setup Token 通用叫法，纯前端无迁移。上一轮为 2026-07-27 的
-> `0.1.156-08e222ed`（run `30240480199`，system→messages 迁移不再携带
-> `[System Instructions]` 标签）。
+> 最近验证：2026-07-31 已按本流程部署 `0.1.156-aba0a308`，GitHub Actions
+> run `30651632725`；供号商上号新增「由平台提供 IP」、自带代理改为粘贴连接串，
+> 并修掉数处会静默算错钱的问题。**本轮含两个数据库迁移（182 / 183）**，
+> 其中 183 会回填历史供号商代理的归属。功能主体在 `4d3ff165`（run `30650654467`）。
+> 上一轮为 2026-07-29 的 `0.1.156-0832ab07`（run `30416049073`，金额显示改自适应
+> 小数位）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -448,6 +449,86 @@ docker compose -f docker-compose.local.yml -f docker-compose.override.yml \
 
 - 供号商自己不能改密码，由管理员在「用户管理 → 编辑」代改；
 - 备份导出不含 `provider_user_id` / `provider_tier`，恢复后账号归属会丢。
+
+### 供号商代理自动分配发布检查（本轮含迁移 182 / 183）
+
+两个迁移都由应用启动时自动执行，部署顺序不变：
+
+```text
+backend/migrations/182_add_proxy_auto_assign.sql          proxies 加 provider_user_id / auto_assignable
+backend/migrations/183_backfill_provider_proxy_owner.sql  回填 182 之前建的供号商代理归属
+```
+
+182 是 `ADD COLUMN IF NOT EXISTS`，幂等。183 是数据回填，条件里带
+`provider_user_id IS NULL`，重跑不会二次改写；它只回填「名字前缀能解析出、且该用户
+确实是 `is_provider` 且非管理员」的记录，管理员自己起名叫 `provider-1-xxx` 的代理
+不会被误标成私有。
+
+**回滚需要注意**：应用可以直接回滚（旧镜像不认识这两列，读取时忽略）。但 183 回填的
+归属不会被撤销 —— 那本来就是修正，留着是对的。
+
+部署后确认：
+
+```sql
+-- 两个迁移都已记录
+SELECT filename FROM schema_migrations WHERE filename LIKE '18%';
+-- 新列与默认值：auto_assignable 必须是 NOT NULL DEFAULT false
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name='proxies' AND column_name IN ('provider_user_id','auto_assignable');
+-- 安全默认：升级后不该有任何代理进入自动分配池
+SELECT count(*) FROM proxies WHERE auto_assignable;
+-- 回填结果：带 provider- 前缀的代理归属都应非空
+SELECT id, name, provider_user_id, auto_assignable
+FROM proxies WHERE deleted_at IS NULL AND name ~ '^provider-\d+-' ORDER BY id;
+```
+
+还应确认：
+
+- 管理端代理列表出现「自动分配」列，供号商私有代理那一行的开关是**置灰**的；
+- 系统设置 → 供货商 tab 出现「供号商可用的 IP 来源」下拉与「单个平台 IP 最多绑定
+  账号数」输入（种子值 2）；
+- 供号商上号页的代理区块变成来源单选 + 粘贴框；策略为「仅平台 IP」且池子为空时，
+  页面只显示「当前无法上号」，**不应同时露出自带代理的输入框**；
+- 手工用量清理对覆盖未结算区间的时间范围返回
+  `USAGE_CLEANUP_RANGE_COVERS_UNSETTLED`，且删除条件已排除供号商账号的行。
+
+2026-07-31 `aba0a308` 生产验证：
+
+```text
+GitHub Actions run: 30651632725 (custom-image success)；功能主体 30650654467
+image digest: sha256:2eef1b6d78340aeb0231023faf2af0b5df8d1380f587a9cffc6cb2ad28a5eb0f
+env backup: backups/.env.20260731-173758.before-aba0a308
+            backups/.env.20260731-172623.before-4d3ff165（功能主体那轮）
+rollback tag: sub2api-rollback:pre-aba0a308 (= 4d3ff165)
+              sub2api-rollback:pre-4d3ff165 (= 0832ab07，回到本轮之前用这个)
+
+容器: 两轮均 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: aba0a308, built: 2026-07-31T17:34:50Z)
+镜像 mutable/immutable ID: 一致
+迁移: 180/181/182/183 均已记录，无报错
+
+关键验证：
+  proxies 新列: auto_assignable boolean NOT NULL DEFAULT false / provider_user_id bigint NULL
+  新索引: idx_proxies_provider_user_id、idx_proxies_auto_assign_pool
+  安全默认: auto_assignable=true 的代理数 0
+  回填结果: 代理 74 -> provider 44、代理 76 -> provider 45
+  归属分布: 41 平台自有 + 2 供号商私有，41 条平台代理未被误标
+  新的分账号明细 SQL 在真实数据上跑通:
+    账号 2871 -> 38 请求 / $29.3089 / 水位 873260（与结算单 #1 完全吻合）
+    账号 2873 -> 46 请求 / $23.2679，两者 late_rows 均为 0
+  清理守卫: 近 30 天 258003 行可清理 / 84 行因属于供号商账号受保护
+
+号池未受影响：
+  账号总数 63，供号商账号 1（账号 2873，归属 45）
+  部署后 5 分钟真实流量: 6 条 usage / 4 个账号
+  启动窗口 panic / fatal: 0
+  本机 /health 与公网 https://lumos7.cc/health: 均 200
+
+注意：本轮发现文档此前记载的「供号商站点未开启」已过期 —— 站点实际已开启，
+有 4 个 is_provider 用户、1 个供号商账号在跑，并已产生 1 张结算单（$29.3089）。
+迁移 182 当初没做回填正是基于那条过期记载，才需要补 183。
+```
 
 2026-07-29 `0832ab07` 生产验证（金额显示自适应位数 + 授权方式改名，纯前端）：
 
