@@ -55,7 +55,8 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 	dataProxies := make([]DataProxy, 0, len(proxies))
 	for i := range proxies {
 		p := proxies[i]
-		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
+		key := buildOwnedProxyKey(
+			buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password), p.ProviderUserID)
 
 		var expiresAt *int64
 		if p.ExpiresAt != nil {
@@ -79,10 +80,14 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 			FallbackMode:    p.FallbackMode,
 			BackupProxyName: backupProxyName,
 			ExpiryWarnDays:  p.ExpiryWarnDays,
+			ProviderUserID:  p.ProviderUserID,
+			AutoAssignable:  p.AutoAssignable,
 		})
 	}
 
 	payload := DataPayload{
+		Type:       dataType,
+		Version:    dataVersion,
 		ExportedAt: time.Now().UTC().Format(time.RFC3339),
 		Proxies:    dataProxies,
 		Accounts:   []DataAccount{},
@@ -122,19 +127,23 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 	proxyNameToID := make(map[string]int64, len(existingProxies))
 	for i := range existingProxies {
 		p := existingProxies[i]
-		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
+		key := buildOwnedProxyKey(
+			buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password), p.ProviderUserID)
 		proxyByKey[key] = p
 		if p.Name != "" {
 			proxyNameToID[p.Name] = p.ID
 		}
 	}
+	ownerChecker := newProviderOwnerChecker(h.adminService)
 
 	latencyProbeIDs := make([]int64, 0, len(req.Data.Proxies))
 	for i := range req.Data.Proxies {
 		item := req.Data.Proxies[i]
 		key := item.ProxyKey
 		if key == "" {
-			key = buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
+			key = buildOwnedProxyKey(
+				buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password),
+				item.ProviderUserID)
 		}
 
 		if err := validateDataProxy(item); err != nil {
@@ -151,6 +160,14 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		normalizedStatus := normalizeProxyStatus(item.Status)
 		if existing, ok := proxyByKey[key]; ok {
 			result.ProxyReused++
+			if msg := proxyOwnershipMismatch(item, existing); msg != "" {
+				result.Errors = append(result.Errors, DataImportError{
+					Kind:     "proxy",
+					Name:     item.Name,
+					ProxyKey: key,
+					Message:  msg,
+				})
+			}
 			if normalizedStatus != "" && normalizedStatus != existing.Status {
 				// 已存在代理同步 status 时，同时保留/覆盖导入 item 的完整字段，
 				// 避免 UpdateProxy 零值覆盖有效期/fallback 配置。
@@ -221,6 +238,16 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 			}
 		}
 
+		proxyOwner, proxyOwnerNote := ownerChecker.sanitize(ctx, item.ProviderUserID)
+		autoAssignable := item.AutoAssignable
+		if proxyOwnerNote != "" {
+			// 归属没落上，就绝不能顺带把这条代理变成可共享的平台代理。
+			autoAssignable = false
+			result.Errors = append(result.Errors, DataImportError{
+				Kind: "proxy", Name: item.Name, ProxyKey: key, Message: proxyOwnerNote,
+			})
+		}
+
 		created, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
 			Name:           defaultProxyName(item.Name),
 			Protocol:       item.Protocol,
@@ -232,6 +259,8 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 			FallbackMode:   fallbackMode,
 			BackupProxyID:  backupProxyID,
 			ExpiryWarnDays: item.ExpiryWarnDays,
+			ProviderUserID: proxyOwner,
+			AutoAssignable: autoAssignable,
 		})
 		if err != nil {
 			result.ProxyFailed++

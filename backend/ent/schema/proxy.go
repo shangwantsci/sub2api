@@ -64,6 +64,12 @@ func (Proxy) Fields() []ent.Field {
 		field.Int("expiry_warn_days").
 			Default(7).
 			Comment("Days before expiry to flag as expiring-soon (per proxy)."),
+		field.Int64("provider_user_id").
+			Optional().Nillable().
+			Comment("Owning provider user id (NULL means platform-owned)."),
+		field.Bool("auto_assignable").
+			Default(false).
+			Comment("Admin opt-in for the provider auto-assign pool."),
 	}
 }
 
@@ -85,5 +91,6 @@ func (Proxy) Indexes() []ent.Index {
 		index.Fields("deleted_at"),
 		index.Fields("expires_at"),
 		index.Fields("backup_proxy_id"),
+		index.Fields("provider_user_id"),
 	}
 }

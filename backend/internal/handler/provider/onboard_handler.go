@@ -61,15 +61,6 @@ func (h *Handler) GenerateAuthURL(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// ProxyPayload 是供号商自带的代理。
-type ProxyPayload struct {
-	Protocol string `json:"protocol" binding:"required"`
-	Host     string `json:"host" binding:"required"`
-	Port     int    `json:"port" binding:"required"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
 // CustomTierPayload 是自定义档参数。
 //
 // 刻意不含 rpm_strategy：那决定调度器如何处理粘性会话，属于平台调度策略，
@@ -97,7 +88,13 @@ type OnboardRequest struct {
 	SessionID  string `json:"session_id"`
 	Code       string `json:"code"`
 
-	Proxy         ProxyPayload       `json:"proxy" binding:"required"`
+	// ProxyMode 决定出口来自平台代理池（auto）还是供号商自带（manual）。
+	// 实际是否放行还要过站点策略，见 service.AssertProviderProxyModeAllowed。
+	ProxyMode string `json:"proxy_mode" binding:"required,oneof=auto manual"`
+	// ProxyURL 只在 manual 模式使用，接受多种粘贴写法，见 service.ParseProviderProxyURL。
+	// 刻意不收 protocol/host/port 这些分离字段：供号商手上就是一整行连接串。
+	ProxyURL string `json:"proxy_url"`
+
 	HostingTypeID int64              `json:"hosting_type_id"`
 	Tier          string             `json:"tier"`
 	CustomTier    *CustomTierPayload `json:"custom_tier"`
@@ -132,35 +129,29 @@ func (h *Handler) Onboard(c *gin.Context) {
 		return
 	}
 
-	proxyInput, err := service.ValidateProviderProxy(service.ProviderProxyInput{
-		Protocol: req.Proxy.Protocol,
-		Host:     req.Proxy.Host,
-		Port:     req.Proxy.Port,
-		Username: req.Proxy.Username,
-		Password: req.Proxy.Password,
-	})
-	if err != nil {
+	if err := service.AssertProviderProxyModeAllowed(settings.ProxyModePolicy, req.ProxyMode); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	// 先建代理：换 token 就要走它，避免用平台出口换到的凭据与后续调度出口不一致。
-	proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
-		Name:     service.ProviderProxyName(providerID, proxyInput.Host, proxyInput.Port),
-		Protocol: proxyInput.Protocol,
-		Host:     proxyInput.Host,
-		Port:     proxyInput.Port,
-		Username: proxyInput.Username,
-		Password: proxyInput.Password,
-	})
+	// 先定出口：换 token 就要走它，避免用平台默认出口换到的凭据与后续调度出口不一致。
+	proxyID, createdProxy, err := h.resolveOnboardProxy(ctx, providerID, req, settings)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// 只有本次新建的供号商私有代理才允许回收。auto 模式拿到的是共享的平台代理，
+	// 删掉会波及别人的账号 —— DeleteProxy 仅在还有账号引用时才拒绝，
+	// 恰好选中一条当前零绑定的平台代理就会被真的删掉。
+	cleanup := func(reason string) {
+		if createdProxy {
+			h.cleanupOrphanProxy(ctx, proxyID, reason)
+		}
+	}
 
-	tokenInfo, err := h.exchangeCredentials(ctx, req, proxy.ID)
+	tokenInfo, err := h.exchangeCredentials(ctx, req, proxyID)
 	if err != nil {
-		h.cleanupOrphanProxy(ctx, proxy.ID, "credential exchange failed")
+		cleanup("credential exchange failed")
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -173,7 +164,7 @@ func (h *Handler) Onboard(c *gin.Context) {
 	}
 	groupMin, groupHasAccounts, err := h.resolveGroupMinPriority(ctx, hostingGroupID)
 	if err != nil {
-		h.cleanupOrphanProxy(ctx, proxy.ID, "group priority lookup failed")
+		cleanup("group priority lookup failed")
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -188,9 +179,9 @@ func (h *Handler) Onboard(c *gin.Context) {
 		HostingType:    req.HostingTypeID,
 		Tier:           req.Tier,
 		CustomTier:     toServiceCustomTier(req.CustomTier),
-	}, proxy.ID, groupMin, groupHasAccounts)
+	}, proxyID, groupMin, groupHasAccounts)
 	if err != nil {
-		h.cleanupOrphanProxy(ctx, proxy.ID, "account input build failed")
+		cleanup("account input build failed")
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -199,13 +190,93 @@ func (h *Handler) Onboard(c *gin.Context) {
 	if err != nil {
 		// CreateAccount 内部账号与分组绑定是同一事务，失败即整体回滚，
 		// 所以这里只需回收代理，不会有引用它的残留账号。
-		h.cleanupOrphanProxy(ctx, proxy.ID, "account creation failed")
+		cleanup("account creation failed")
 		response.ErrorFrom(c, err)
 		return
 	}
 
 	// 只回脱敏视图，不回 tokenInfo。
 	response.Success(c, AccountViewFromService(account, settings, nil))
+}
+
+// resolveOnboardProxy 定出本次上号使用的出口代理。
+//
+// 返回的 created 表示这条代理是本次新建的供号商私有代理 —— 只有它才允许在后续失败时
+// 回收。auto 模式选中的是共享的平台代理，任何情况下都不能删。
+func (h *Handler) resolveOnboardProxy(
+	ctx context.Context,
+	providerID int64,
+	req OnboardRequest,
+	settings service.ProviderSettings,
+) (proxyID int64, created bool, err error) {
+	if strings.TrimSpace(strings.ToLower(req.ProxyMode)) == service.ProviderProxyModeAuto {
+		candidates, listErr := h.adminService.GetAllProxiesWithAccountCount(ctx)
+		if listErr != nil {
+			return 0, false, listErr
+		}
+		selected, selErr := service.SelectAutoAssignProxy(candidates, settings.AutoProxyMaxAccounts, time.Now())
+		if selErr != nil {
+			return 0, false, selErr
+		}
+		return selected.ID, false, nil
+	}
+
+	proxyInput, err := service.ParseProviderProxyURL(req.ProxyURL)
+	if err != nil {
+		return 0, false, err
+	}
+
+	// 同一个供号商反复用同一条代理上号是常态。不复用的话代理池会被同参数记录撑爆，
+	// 而且每条记录各绑一个账号，绑定数统计跟着失真。
+	existing, err := h.findProviderProxy(ctx, providerID, proxyInput)
+	if err != nil {
+		return 0, false, err
+	}
+	if existing != nil {
+		return existing.ID, false, nil
+	}
+
+	proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
+		Name:     service.ProviderProxyName(providerID, proxyInput.Host, proxyInput.Port),
+		Protocol: proxyInput.Protocol,
+		Host:     proxyInput.Host,
+		Port:     proxyInput.Port,
+		Username: proxyInput.Username,
+		Password: proxyInput.Password,
+		// 归属必须落到列上。只靠记录名前缀的话，自动分配会把这条代理当成平台自有
+		// 而分给别的供号商，两家账号就共用同一个出口 IP 了。
+		ProviderUserID: &providerID,
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	return proxy.ID, true, nil
+}
+
+// findProviderProxy 查这个供号商名下是否已有一条参数完全相同的代理。
+func (h *Handler) findProviderProxy(
+	ctx context.Context,
+	providerID int64,
+	in service.ProviderProxyInput,
+) (*service.Proxy, error) {
+	proxies, err := h.adminService.GetAllProxies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range proxies {
+		p := &proxies[i]
+		if p.ProviderUserID == nil || *p.ProviderUserID != providerID {
+			continue
+		}
+		if p.Protocol == in.Protocol &&
+			p.Host == in.Host &&
+			p.Port == in.Port &&
+			p.Username == in.Username &&
+			p.Password == in.Password {
+			return p, nil
+		}
+	}
+	return nil, nil
 }
 
 // resolveGroupMinPriority 返回目标分组内现有账号的最小 priority。

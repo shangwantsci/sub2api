@@ -173,3 +173,37 @@ func TestOnboardOptionsOmitGroupPolicies(t *testing.T) {
 			"onboard options must not expose %q; payload=%s", needle, payload)
 	}
 }
+
+// 代理来源策略要下发（上号页据此决定渲染哪些选项），但可用出口的数量绝不下发——
+// 那等于把平台代理池的规模告诉供号商。
+func TestOnboardOptionsExposePolicyButNotPoolSize(t *testing.T) {
+	options := OnboardOptionsFromSettings(service.ProviderSettings{
+		CapacityTiers:   service.DefaultProviderCapacityTiers(),
+		DefaultTier:     "3",
+		ProxyModePolicy: service.ProviderProxyPolicyAutoOnly,
+	})
+	require.Equal(t, service.ProviderProxyPolicyAutoOnly, options.ProxyModePolicy)
+	// 纯设置翻译不查代理池；可用性由 handler 单独补，默认 false。
+	require.False(t, options.AutoProxyAvailable)
+
+	raw, err := json.Marshal(options)
+	require.NoError(t, err)
+	payload := string(raw)
+	for _, needle := range []string{
+		"account_count", "available_count", "proxy_pool", "proxy_host", "proxy_id",
+	} {
+		require.NotContains(t, payload, needle,
+			"onboard options must not expose %q; payload=%s", needle, payload)
+	}
+}
+
+// settings 表被手改成未知策略时必须回落种子值，而不是把前端不认识的字符串发出去
+// 让上号页渲染成一个没有任何选项的空白区块。
+func TestOnboardOptionsNormalizeUnknownProxyPolicy(t *testing.T) {
+	options := OnboardOptionsFromSettings(service.ProviderSettings{
+		CapacityTiers:   service.DefaultProviderCapacityTiers(),
+		DefaultTier:     "3",
+		ProxyModePolicy: "platform_only",
+	})
+	require.Equal(t, service.DefaultProviderProxyModePolicy, options.ProxyModePolicy)
+}

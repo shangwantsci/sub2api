@@ -409,6 +409,14 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		ProviderUserID: input.ProviderUserID,
 		ProviderTier:   input.ProviderTier,
 	}
+	// 备份恢复要能还原「已停用」「已暂停调度」这类人工决定；其余调用方不传，
+	// 保持上面的 active + 可调度默认。
+	if status := strings.TrimSpace(input.Status); status != "" {
+		account.Status = status
+	}
+	if input.Schedulable != nil {
+		account.Schedulable = *input.Schedulable
+	}
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {

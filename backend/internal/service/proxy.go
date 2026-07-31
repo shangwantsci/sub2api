@@ -28,6 +28,11 @@ type Proxy struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	// ProviderUserID 为空表示平台自有。非空即某个供号商上号时自带的代理，
+	// 永不进入自动分配池，否则会把一家自费的出口分给另一家。
+	ProviderUserID *int64
+	// AutoAssignable 由管理员显式勾选，默认 false。
+	AutoAssignable bool
 }
 
 func (p *Proxy) IsActive() bool {

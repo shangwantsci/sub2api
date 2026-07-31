@@ -890,3 +890,140 @@ func TestUsageCleanupServiceIsTaskCanceledError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status err")
 }
+
+type settlementFloorStub struct {
+	earliest time.Time
+	err      error
+}
+
+func (s settlementFloorStub) EarliestUnsettledStart(context.Context) (time.Time, error) {
+	return s.earliest, s.err
+}
+
+func newCleanupServiceWithFloor(repo UsageCleanupRepository, floor settlementFloorStub) *UsageCleanupService {
+	dashboard := &DashboardAggregationService{}
+	dashboard.SetProviderSettlementGuard(floor)
+	cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, MaxRangeDays: 31, BatchSize: 3}}
+	return NewUsageCleanupService(repo, nil, dashboard, cfg)
+}
+
+// 供号商结算是按 usage_logs 现场聚合的：未结算区间的行一删，应付金额就静默缩水，
+// 而且当期还没封账、快照里没有对应行，事后完全无从重算。
+//
+// 与定时保留清理刻意不同——那边把截止点夹紧后继续跑，手工清理直接拒绝：
+// 静默截短会让管理员以为自己指定的区间已经清干净了。
+func TestUsageCleanupServiceCreateTaskRejectsUnsettledRange(t *testing.T) {
+	unsettledFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name    string
+		end     time.Time
+		wantErr bool
+	}{
+		{"完全早于未结算起点", unsettledFrom.Add(-time.Hour), false},
+		// 删除条件是 created_at 的闭区间，终点压在起点上会把那一刻的行也删掉。
+		{"终点正好压在未结算起点上", unsettledFrom, true},
+		{"伸进未结算区间", unsettledFrom.Add(time.Hour), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &cleanupRepoStub{}
+			svc := newCleanupServiceWithFloor(repo, settlementFloorStub{earliest: unsettledFrom})
+
+			_, err := svc.CreateTask(context.Background(), UsageCleanupFilters{
+				StartTime: unsettledFrom.Add(-48 * time.Hour),
+				EndTime:   tc.end,
+			}, 1)
+
+			repo.mu.Lock()
+			defer repo.mu.Unlock()
+			if !tc.wantErr {
+				require.NoError(t, err)
+				require.Len(t, repo.created, 1)
+				return
+			}
+			require.Error(t, err)
+			require.Equal(t, "USAGE_CLEANUP_RANGE_COVERS_UNSETTLED", infraerrors.Reason(err))
+			require.Empty(t, repo.created, "被拒绝的任务不得落库")
+		})
+	}
+}
+
+func TestUsageCleanupServiceCreateTaskAllowsWhenNothingUnsettled(t *testing.T) {
+	repo := &cleanupRepoStub{}
+	// 零值表示当前没有任何未结算区间（例如供号商站点还没开）。
+	svc := newCleanupServiceWithFloor(repo, settlementFloorStub{})
+
+	_, err := svc.CreateTask(context.Background(), UsageCleanupFilters{
+		StartTime: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC),
+	}, 1)
+	require.NoError(t, err)
+}
+
+// 查不出未结算区间时必须拒绝而不是放行：删除不可逆，宁可让管理员稍后重试。
+func TestUsageCleanupServiceCreateTaskRejectsWhenGuardUnavailable(t *testing.T) {
+	repo := &cleanupRepoStub{}
+	svc := newCleanupServiceWithFloor(repo, settlementFloorStub{err: errors.New("db down")})
+
+	_, err := svc.CreateTask(context.Background(), UsageCleanupFilters{
+		StartTime: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+	}, 1)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, infraerrors.Code(err))
+	require.Equal(t, "USAGE_CLEANUP_SETTLEMENT_GUARD_UNAVAILABLE", infraerrors.Reason(err))
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Empty(t, repo.created)
+}
+
+// 管理员作废一期结算单会让「最早未结算起点」回退，任务从 pending 到真正开跑之间
+// 足够发生这件事，所以执行前必须再验一次，不能只信建任务时那一次。
+func TestUsageCleanupServiceExecuteTaskRejectsRegressedFloor(t *testing.T) {
+	unsettledFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	repo := &cleanupRepoStub{
+		deleteQueue: []cleanupDeleteResponse{{deleted: 3}},
+	}
+	svc := newCleanupServiceWithFloor(repo, settlementFloorStub{earliest: unsettledFrom})
+
+	svc.executeTask(context.Background(), &UsageCleanupTask{
+		ID: 7,
+		Filters: UsageCleanupFilters{
+			StartTime: unsettledFrom.Add(-48 * time.Hour),
+			EndTime:   unsettledFrom.Add(time.Hour),
+		},
+	})
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Empty(t, repo.deleteCalls, "守卫拒绝后一行都不能删")
+	require.Empty(t, repo.markSucceeded)
+	require.Len(t, repo.markFailed, 1)
+	require.Equal(t, int64(7), repo.markFailed[0].taskID)
+	require.Contains(t, repo.markFailed[0].errMsg, "unsettled")
+}
+
+// 未注入守卫（例如供号商功能整体未接线）时不应该把清理全锁死。
+func TestUsageCleanupServiceExecuteTaskRunsWithoutGuard(t *testing.T) {
+	repo := &cleanupRepoStub{
+		deleteQueue: []cleanupDeleteResponse{{deleted: 1}},
+	}
+	cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, BatchSize: 3}}
+	svc := NewUsageCleanupService(repo, nil, nil, cfg)
+
+	svc.executeTask(context.Background(), &UsageCleanupTask{
+		ID: 8,
+		Filters: UsageCleanupFilters{
+			StartTime: time.Now().Add(-48 * time.Hour),
+			EndTime:   time.Now().Add(-24 * time.Hour),
+		},
+	})
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.markSucceeded, 1)
+	require.Empty(t, repo.markFailed)
+}

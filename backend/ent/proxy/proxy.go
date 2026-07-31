@@ -43,6 +43,10 @@ const (
 	FieldBackupProxyID = "backup_proxy_id"
 	// FieldExpiryWarnDays holds the string denoting the expiry_warn_days field in the database.
 	FieldExpiryWarnDays = "expiry_warn_days"
+	// FieldProviderUserID holds the string denoting the provider_user_id field in the database.
+	FieldProviderUserID = "provider_user_id"
+	// FieldAutoAssignable holds the string denoting the auto_assignable field in the database.
+	FieldAutoAssignable = "auto_assignable"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
 	EdgeAccounts = "accounts"
 	// EdgeBackupProxy holds the string denoting the backup_proxy edge name in mutations.
@@ -79,6 +83,8 @@ var Columns = []string{
 	FieldFallbackMode,
 	FieldBackupProxyID,
 	FieldExpiryWarnDays,
+	FieldProviderUserID,
+	FieldAutoAssignable,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -125,6 +131,8 @@ var (
 	FallbackModeValidator func(string) error
 	// DefaultExpiryWarnDays holds the default value on creation for the "expiry_warn_days" field.
 	DefaultExpiryWarnDays int
+	// DefaultAutoAssignable holds the default value on creation for the "auto_assignable" field.
+	DefaultAutoAssignable bool
 )
 
 // OrderOption defines the ordering options for the Proxy queries.
@@ -203,6 +211,16 @@ func ByBackupProxyID(opts ...sql.OrderTermOption) OrderOption {
 // ByExpiryWarnDays orders the results by the expiry_warn_days field.
 func ByExpiryWarnDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldExpiryWarnDays, opts...).ToFunc()
+}
+
+// ByProviderUserID orders the results by the provider_user_id field.
+func ByProviderUserID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProviderUserID, opts...).ToFunc()
+}
+
+// ByAutoAssignable orders the results by the auto_assignable field.
+func ByAutoAssignable(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAutoAssignable, opts...).ToFunc()
 }
 
 // ByAccountsCount orders the results by accounts count.

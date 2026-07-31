@@ -139,6 +139,10 @@ func (s *UsageCleanupService) CreateTask(ctx context.Context, filters UsageClean
 		logger.LegacyPrintf("service.usage_cleanup", "[UsageCleanup] create_task rejected: operator=%d err=%v %s", createdBy, err, describeUsageCleanupFilters(filters))
 		return nil, err
 	}
+	if err := s.assertRangeSettled(ctx, filters); err != nil {
+		logger.LegacyPrintf("service.usage_cleanup", "[UsageCleanup] create_task rejected by settlement guard: operator=%d err=%v %s", createdBy, err, describeUsageCleanupFilters(filters))
+		return nil, err
+	}
 
 	task := &UsageCleanupTask{
 		Status:    UsageCleanupStatusPending,
@@ -188,6 +192,14 @@ func (s *UsageCleanupService) runOnce() {
 
 func (s *UsageCleanupService) executeTask(ctx context.Context, task *UsageCleanupTask) {
 	if task == nil {
+		return
+	}
+
+	// 建任务时已经查过一次，这里必须再验一次：作废一期结算单会让「最早未结算起点」
+	// 回退，而任务从 pending 到真正开跑之间足够发生这件事。删除不可逆，多查一次很便宜。
+	if err := s.assertRangeSettled(ctx, task.Filters); err != nil {
+		logger.LegacyPrintf("service.usage_cleanup", "[UsageCleanup] task rejected by settlement guard: task=%d err=%v %s", task.ID, err, describeUsageCleanupFilters(task.Filters))
+		s.markTaskFailed(task.ID, task.DeletedRows, err)
 		return
 	}
 
@@ -286,6 +298,35 @@ func (s *UsageCleanupService) isTaskCanceled(ctx context.Context, taskID int64) 
 		logger.LegacyPrintf("service.usage_cleanup", "[UsageCleanup] task cancel detected: task=%d", taskID)
 	}
 	return status == UsageCleanupStatusCanceled, nil
+}
+
+// assertRangeSettled 拒绝会伤到供号商未结算流水的清理范围。
+//
+// 供号商结算是按 usage_logs 现场聚合的：未结算区间的行一旦删掉，应付金额就静默缩水，
+// 而且当期还没封账、provider_settlement_items 里没有快照，事后完全无从重算。
+//
+// 与定时保留清理的处理方式刻意不同——那边是把截止点夹紧后继续跑，这里直接拒绝并
+// 说明原因。手工清理是管理员显式指定区间的一次性操作，静默截短会让人以为指定的
+// 范围已经清干净了。
+func (s *UsageCleanupService) assertRangeSettled(ctx context.Context, filters UsageCleanupFilters) error {
+	if s == nil || s.dashboard == nil {
+		return nil
+	}
+	earliest, ok := s.dashboard.ProviderSettlementFloor(ctx)
+	if !ok {
+		// 查不出未结算区间时不能放行：删除不可逆，宁可让管理员稍后重试。
+		return infraerrors.New(http.StatusServiceUnavailable,
+			"USAGE_CLEANUP_SETTLEMENT_GUARD_UNAVAILABLE",
+			"cannot verify the provider settlement state right now; please retry later")
+	}
+	// 删除条件是 created_at 的闭区间，end == earliest 会连未结算周期起点那一刻的行
+	// 一起删掉，所以这里要求严格早于。
+	if earliest.IsZero() || filters.EndTime.Before(earliest) {
+		return nil
+	}
+	return infraerrors.BadRequest("USAGE_CLEANUP_RANGE_COVERS_UNSETTLED",
+		fmt.Sprintf("date range reaches into an unsettled provider billing period starting at %s; settle that period first or move end_date before it",
+			earliest.UTC().Format(time.RFC3339)))
 }
 
 func (s *UsageCleanupService) validateFilters(filters UsageCleanupFilters) error {

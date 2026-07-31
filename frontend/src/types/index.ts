@@ -797,6 +797,10 @@ export interface Proxy {
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days: number
+  /** 非空表示这条代理归某个供号商所有（上号时自带），永不进入自动分配池。 */
+  provider_user_id?: number | null
+  /** 管理员是否把这条代理开放给供号商上号时自动分配。 */
+  auto_assignable: boolean
   created_at: string
   updated_at: string
 }
@@ -1241,6 +1245,7 @@ export interface CreateProxyRequest {
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days?: number
+  auto_assignable?: boolean
 }
 
 export interface UpdateProxyRequest {
@@ -1255,6 +1260,7 @@ export interface UpdateProxyRequest {
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days?: number
+  auto_assignable?: boolean
 }
 
 export interface AdminDataPayload {

@@ -37740,6 +37740,9 @@ type ProxyMutation struct {
 	fallback_mode       *string
 	expiry_warn_days    *int
 	addexpiry_warn_days *int
+	provider_user_id    *int64
+	addprovider_user_id *int64
+	auto_assignable     *bool
 	clearedFields       map[string]struct{}
 	accounts            map[int64]struct{}
 	removedaccounts     map[int64]struct{}
@@ -38458,6 +38461,112 @@ func (m *ProxyMutation) ResetExpiryWarnDays() {
 	m.addexpiry_warn_days = nil
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (m *ProxyMutation) SetProviderUserID(i int64) {
+	m.provider_user_id = &i
+	m.addprovider_user_id = nil
+}
+
+// ProviderUserID returns the value of the "provider_user_id" field in the mutation.
+func (m *ProxyMutation) ProviderUserID() (r int64, exists bool) {
+	v := m.provider_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProviderUserID returns the old "provider_user_id" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldProviderUserID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProviderUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProviderUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProviderUserID: %w", err)
+	}
+	return oldValue.ProviderUserID, nil
+}
+
+// AddProviderUserID adds i to the "provider_user_id" field.
+func (m *ProxyMutation) AddProviderUserID(i int64) {
+	if m.addprovider_user_id != nil {
+		*m.addprovider_user_id += i
+	} else {
+		m.addprovider_user_id = &i
+	}
+}
+
+// AddedProviderUserID returns the value that was added to the "provider_user_id" field in this mutation.
+func (m *ProxyMutation) AddedProviderUserID() (r int64, exists bool) {
+	v := m.addprovider_user_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (m *ProxyMutation) ClearProviderUserID() {
+	m.provider_user_id = nil
+	m.addprovider_user_id = nil
+	m.clearedFields[proxy.FieldProviderUserID] = struct{}{}
+}
+
+// ProviderUserIDCleared returns if the "provider_user_id" field was cleared in this mutation.
+func (m *ProxyMutation) ProviderUserIDCleared() bool {
+	_, ok := m.clearedFields[proxy.FieldProviderUserID]
+	return ok
+}
+
+// ResetProviderUserID resets all changes to the "provider_user_id" field.
+func (m *ProxyMutation) ResetProviderUserID() {
+	m.provider_user_id = nil
+	m.addprovider_user_id = nil
+	delete(m.clearedFields, proxy.FieldProviderUserID)
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (m *ProxyMutation) SetAutoAssignable(b bool) {
+	m.auto_assignable = &b
+}
+
+// AutoAssignable returns the value of the "auto_assignable" field in the mutation.
+func (m *ProxyMutation) AutoAssignable() (r bool, exists bool) {
+	v := m.auto_assignable
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAutoAssignable returns the old "auto_assignable" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldAutoAssignable(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAutoAssignable is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAutoAssignable requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAutoAssignable: %w", err)
+	}
+	return oldValue.AutoAssignable, nil
+}
+
+// ResetAutoAssignable resets all changes to the "auto_assignable" field.
+func (m *ProxyMutation) ResetAutoAssignable() {
+	m.auto_assignable = nil
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by ids.
 func (m *ProxyMutation) AddAccountIDs(ids ...int64) {
 	if m.accounts == nil {
@@ -38573,7 +38682,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 16)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -38616,6 +38725,12 @@ func (m *ProxyMutation) Fields() []string {
 	if m.expiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
+	if m.provider_user_id != nil {
+		fields = append(fields, proxy.FieldProviderUserID)
+	}
+	if m.auto_assignable != nil {
+		fields = append(fields, proxy.FieldAutoAssignable)
+	}
 	return fields
 }
 
@@ -38652,6 +38767,10 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.BackupProxyID()
 	case proxy.FieldExpiryWarnDays:
 		return m.ExpiryWarnDays()
+	case proxy.FieldProviderUserID:
+		return m.ProviderUserID()
+	case proxy.FieldAutoAssignable:
+		return m.AutoAssignable()
 	}
 	return nil, false
 }
@@ -38689,6 +38808,10 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldBackupProxyID(ctx)
 	case proxy.FieldExpiryWarnDays:
 		return m.OldExpiryWarnDays(ctx)
+	case proxy.FieldProviderUserID:
+		return m.OldProviderUserID(ctx)
+	case proxy.FieldAutoAssignable:
+		return m.OldAutoAssignable(ctx)
 	}
 	return nil, fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -38796,6 +38919,20 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetExpiryWarnDays(v)
 		return nil
+	case proxy.FieldProviderUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProviderUserID(v)
+		return nil
+	case proxy.FieldAutoAssignable:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAutoAssignable(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -38810,6 +38947,9 @@ func (m *ProxyMutation) AddedFields() []string {
 	if m.addexpiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
+	if m.addprovider_user_id != nil {
+		fields = append(fields, proxy.FieldProviderUserID)
+	}
 	return fields
 }
 
@@ -38822,6 +38962,8 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPort()
 	case proxy.FieldExpiryWarnDays:
 		return m.AddedExpiryWarnDays()
+	case proxy.FieldProviderUserID:
+		return m.AddedProviderUserID()
 	}
 	return nil, false
 }
@@ -38845,6 +38987,13 @@ func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddExpiryWarnDays(v)
 		return nil
+	case proxy.FieldProviderUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddProviderUserID(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Proxy numeric field %s", name)
 }
@@ -38867,6 +39016,9 @@ func (m *ProxyMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(proxy.FieldBackupProxyID) {
 		fields = append(fields, proxy.FieldBackupProxyID)
+	}
+	if m.FieldCleared(proxy.FieldProviderUserID) {
+		fields = append(fields, proxy.FieldProviderUserID)
 	}
 	return fields
 }
@@ -38896,6 +39048,9 @@ func (m *ProxyMutation) ClearField(name string) error {
 		return nil
 	case proxy.FieldBackupProxyID:
 		m.ClearBackupProxyID()
+		return nil
+	case proxy.FieldProviderUserID:
+		m.ClearProviderUserID()
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy nullable field %s", name)
@@ -38946,6 +39101,12 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldExpiryWarnDays:
 		m.ResetExpiryWarnDays()
+		return nil
+	case proxy.FieldProviderUserID:
+		m.ResetProviderUserID()
+		return nil
+	case proxy.FieldAutoAssignable:
+		m.ResetAutoAssignable()
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)

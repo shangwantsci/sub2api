@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"strconv"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -102,12 +103,25 @@ func (h *Handler) GetHostingTypes(c *gin.Context) {
 // GetOnboardOptions 返回上号页需要的托管类型与档位选项。
 // GET /api/v1/provider/onboard/options
 func (h *Handler) GetOnboardOptions(c *gin.Context) {
-	settings, err := h.loadSettings(c.Request.Context())
+	ctx := c.Request.Context()
+	settings, err := h.loadSettings(ctx)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, OnboardOptionsFromSettings(settings))
+
+	out := OnboardOptionsFromSettings(settings)
+	// manual_only 下这个标志不会被上号页用到，省掉一次全表聚合。
+	if out.ProxyModePolicy != service.ProviderProxyPolicyManualOnly {
+		candidates, listErr := h.adminService.GetAllProxiesWithAccountCount(ctx)
+		if listErr != nil {
+			response.ErrorFrom(c, listErr)
+			return
+		}
+		out.AutoProxyAvailable = service.HasAutoAssignableProxy(
+			candidates, settings.AutoProxyMaxAccounts, time.Now())
+	}
+	response.Success(c, out)
 }
 
 // GetProfile 返回当前供号商的基本信息。

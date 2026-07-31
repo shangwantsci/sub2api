@@ -155,6 +155,15 @@ export interface ProviderSettings {
    * 其余一个请求都拿不到。因此该值必须与同分组内其它账号一致。
    */
   account_priority: number
+  /**
+   * 单个平台代理最多绑定多少个供号商账号。
+   *
+   * 自动分配按「绑定最少优先」挑，到顶的代理不再参与。同一出口 IP 上挂太多账号
+   * 会让这些账号彼此关联，所以这是个上限而不是目标值。
+   */
+  auto_proxy_max_accounts: number
+  /** 供号商上号可用的出口来源：both | auto_only | manual_only。 */
+  proxy_mode_policy: 'both' | 'auto_only' | 'manual_only'
 }
 
 /**

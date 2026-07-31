@@ -1686,6 +1686,10 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	// proxyDescAutoAssignable is the schema descriptor for auto_assignable field.
+	proxyDescAutoAssignable := proxyFields[12].Descriptor()
+	// proxy.DefaultAutoAssignable holds the default value on creation for the auto_assignable field.
+	proxy.DefaultAutoAssignable = proxyDescAutoAssignable.Default.(bool)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

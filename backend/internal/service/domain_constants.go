@@ -484,6 +484,13 @@ const (
 	// 注意调度里 priority 是硬门槛而非权重：filterByMinPriority 只保留数值最小的一批，
 	// 其余完全不参与。因此该值必须与同分组内其它账号一致，否则一边会被永久饿死。
 	SettingKeyProviderAccountPriority = "provider_account_priority"
+	// SettingKeyProviderAutoProxyMaxAccounts 单个平台代理最多绑定的供号商账号数（种子值 2）。
+	// 自动分配按「绑定账号最少」选号，这个值是封顶：所有开放的代理都到顶时拒绝上号，
+	// 而不是让多个账号继续堆在同一个出口 IP 上。
+	SettingKeyProviderAutoProxyMaxAccounts = "provider_auto_proxy_max_accounts"
+	// SettingKeyProviderProxyModePolicy 供号商上号允许的代理来源（种子值 both）。
+	// both | auto_only | manual_only。代理池耗尽时可切 manual_only 让供号商自带。
+	SettingKeyProviderProxyModePolicy = "provider_proxy_mode_policy"
 
 	// Gateway Forwarding Behavior
 	// SettingKeyEnableFingerprintUnification 是否统一 OAuth 账号的 X-Stainless-* 指纹头（默认 true）

@@ -106,6 +106,24 @@ func (s *DashboardAggregationService) SetProviderSettlementGuard(guard ProviderS
 	s.settlementGuard = guard
 }
 
+// ProviderSettlementFloor 返回所有供号商中最早的未结算周期起点。
+//
+// 第二个返回值为 false 表示守卫已注入但查不出来，调用方必须保守处理：删 usage_logs
+// 不可逆，未结算区间的行一旦没了，应付金额就静默缩水，而且当期还没封账、
+// provider_settlement_items 里没有快照，事后无从重算。
+//
+// 未注入守卫时返回零值 + true（没有需要保护的区间），与定时清理的既有行为一致。
+func (s *DashboardAggregationService) ProviderSettlementFloor(ctx context.Context) (time.Time, bool) {
+	if s == nil || s.settlementGuard == nil {
+		return time.Time{}, true
+	}
+	earliest, err := s.settlementGuard.EarliestUnsettledStart(ctx)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return earliest, true
+}
+
 // clampUsageCutoffForSettlement 把 usage_logs 的保留截止点夹到未结算区间之前。
 //
 // 读取失败时返回零值（放弃本轮清理）而不是原截止点：宁可多留一轮数据，
@@ -114,13 +132,10 @@ func (s *DashboardAggregationService) clampUsageCutoffForSettlement(
 	ctx context.Context,
 	cutoff time.Time,
 ) (time.Time, bool) {
-	if s.settlementGuard == nil {
-		return cutoff, true
-	}
-	earliest, err := s.settlementGuard.EarliestUnsettledStart(ctx)
-	if err != nil {
+	earliest, ok := s.ProviderSettlementFloor(ctx)
+	if !ok {
 		logger.LegacyPrintf("service.dashboard_aggregation",
-			"[DashboardAggregation] 无法确定供号商未结算区间，跳过本轮 usage_logs 清理: %v", err)
+			"[DashboardAggregation] 无法确定供号商未结算区间，跳过本轮 usage_logs 清理")
 		return time.Time{}, false
 	}
 	if earliest.IsZero() || cutoff.Before(earliest) {

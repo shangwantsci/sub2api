@@ -215,6 +215,35 @@
             </span>
           </template>
 
+          <template #cell-auto_assignable="{ row }">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                :disabled="!!row.provider_user_id || togglingAutoAssign === row.id"
+                class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800"
+                :class="[
+                  row.auto_assignable
+                    ? 'bg-primary-500 hover:bg-primary-600'
+                    : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500'
+                ]"
+                :title="autoAssignTitle(row)"
+                @click="handleToggleAutoAssign(row)"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                  :class="[row.auto_assignable ? 'translate-x-4' : 'translate-x-0']"
+                />
+              </button>
+              <span
+                v-if="row.provider_user_id"
+                class="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                :title="t('admin.proxies.autoAssignProviderOwned')"
+              >
+                {{ t('admin.proxies.columns.providerOwned', { id: row.provider_user_id }) }}
+              </span>
+            </div>
+          </template>
+
           <template #cell-latency="{ row }">
             <div class="flex flex-col gap-1">
               <span
@@ -968,7 +997,13 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type {
+  Proxy,
+  ProxyAccountSummary,
+  ProxyProtocol,
+  ProxyQualityCheckResult,
+  UpdateProxyRequest
+} from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -988,6 +1023,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { parseProxyUrl } from '@/utils/proxyUrl'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1001,6 +1037,7 @@ const columns = computed<Column[]>(() => [
   { key: 'auth', label: t('admin.proxies.columns.auth'), sortable: false },
   { key: 'location', label: t('admin.proxies.columns.location'), sortable: false },
   { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true },
+  { key: 'auto_assignable', label: t('admin.proxies.columns.autoAssignable'), sortable: false },
   { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: false },
   { key: 'expiry', label: t('admin.proxies.columns.expiry'), sortable: true },
   { key: 'created_at', label: t('admin.proxies.columns.createdAt'), sortable: true },
@@ -1275,39 +1312,9 @@ const handleDataImported = () => {
   loadProxies()
 }
 
-// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port
-const parseProxyUrl = (
-  line: string
-): {
-  protocol: ProxyProtocol
-  host: string
-  port: number
-  username: string
-  password: string
-} | null => {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-
-  // Regex to parse proxy URL (supports http, https, socks5, socks5h)
-  const regex = /^(https?|socks5h?):\/\/(?:([^:@]+):([^@]+)@)?([^:]+):(\d+)$/i
-  const match = trimmed.match(regex)
-
-  if (!match) return null
-
-  const [, protocol, username, password, host, port] = match
-  const portNum = parseInt(port, 10)
-
-  if (portNum < 1 || portNum > 65535) return null
-
-  return {
-    protocol: protocol.toLowerCase() as ProxyProtocol,
-    host: host.trim(),
-    port: portNum,
-    username: username?.trim() || '',
-    password: password?.trim() || ''
-  }
-}
-
+// 解析实现在 @/utils/proxyUrl，与后端 service.ParseProviderProxyURL 对齐。
+// 这里刻意不开 allowSchemeless：批量导入的代理可能是 http，
+// 给省略协议头的写法默认补一个 socks5h 会把协议猜错。
 const parseBatchInput = () => {
   const lines = batchInput.value.split('\n').filter((l) => l.trim())
   const seen = new Set<string>()
@@ -1425,6 +1432,53 @@ const closeEditModal = () => {
   editingProxy.value = null
   editPasswordVisible.value = false
   editPasswordDirty.value = false
+}
+
+const togglingAutoAssign = ref<number | null>(null)
+
+const autoAssignTitle = (row: Proxy) => {
+  if (row.provider_user_id) return t('admin.proxies.autoAssignProviderOwned')
+  return row.auto_assignable
+    ? t('admin.proxies.autoAssignEnabled')
+    : t('admin.proxies.autoAssignDisabled')
+}
+
+/**
+ * 行内开关只想改一个字段，但后端 UpdateProxy 对 expires_at / fallback_mode /
+ * backup_proxy_id / expiry_warn_days 是**直接透传**的：不带上就等于把它们清成零值，
+ * 代理的有效期和到期回退配置会被静默抹掉。所以必须把当前值原样回传。
+ *
+ * status 刻意不传：请求体的校验只接受 active/inactive，而列表里可能是 expired，
+ * 带上会被 400 掉；不传则后端保留原值。
+ */
+const buildProxyPatch = (row: Proxy, patch: Partial<UpdateProxyRequest>): UpdateProxyRequest => ({
+  name: row.name,
+  protocol: row.protocol,
+  host: row.host,
+  port: row.port,
+  expires_at: row.expires_at ? Math.floor(new Date(row.expires_at).getTime() / 1000) : null,
+  fallback_mode: row.fallback_mode,
+  backup_proxy_id: row.backup_proxy_id ?? null,
+  expiry_warn_days: row.expiry_warn_days,
+  ...patch
+})
+
+const handleToggleAutoAssign = async (row: Proxy) => {
+  // 供号商自带的代理不能进共享池——那会把一家自费的出口分给另一家。
+  // 后端 service 层同样硬拒绝，这里只是别让管理员点了才发现。
+  if (row.provider_user_id) return
+
+  const next = !row.auto_assignable
+  togglingAutoAssign.value = row.id
+  try {
+    await adminAPI.proxies.update(row.id, buildProxyPatch(row, { auto_assignable: next }))
+    row.auto_assignable = next
+  } catch (error) {
+    console.error('Failed to toggle proxy auto assign:', error)
+    appStore.showError(t('admin.proxies.autoAssignFailed'))
+  } finally {
+    togglingAutoAssign.value = null
+  }
 }
 
 const handleUpdateProxy = async () => {

@@ -114,6 +114,16 @@ export default {
     settlementCooldownHint:
       'Usage rows are written asynchronously. Closing a period stops this far short of the current moment so in-flight writes can land first. Defaults to 600 seconds.',
     cooldownRange: 'Cooldown must be between 60 and 86400 seconds',
+    proxyModePolicy: 'Exit IP sources offered to providers',
+    proxyModePolicyBoth: 'Both',
+    proxyModePolicyAutoOnly: 'Platform IPs only',
+    proxyModePolicyManualOnly: 'Provider-supplied only',
+    proxyModePolicyHint:
+      'Controls which options the onboarding page offers; the backend enforces the same rule. When platform IPs run short, switch to provider-supplied only so providers stop hitting "no IP available".',
+    autoProxyMaxAccounts: 'Max accounts per platform IP',
+    autoProxyMaxAccountsHint:
+      'Automatic assignment always picks the least loaded IP, and an IP at this cap drops out of the pool; once every open IP is capped, providers can no longer use a platform IP. Stacking many accounts behind one exit IP makes them look related, so keep this small. Defaults to 2.',
+    autoProxyMaxAccountsRange: 'Enter a number between 1 and {max}',
     accountPriority: 'Account scheduling priority (automatic)',
     accountPriorityHint:
       'Onboarding takes the lowest priority already present in the chosen hosting group, so new accounts line up with whatever is currently serving traffic there. Nothing to configure. Priority is a hard gate rather than a weight: only the lowest value in a group is ever scheduled, so a mismatch would leave one side with no traffic at all.',

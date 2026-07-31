@@ -39,7 +39,9 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 		SetPort(proxyIn.Port).
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
-		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+		SetExpiryWarnDays(proxyIn.ExpiryWarnDays).
+		SetAutoAssignable(proxyIn.AutoAssignable).
+		SetNillableProviderUserID(proxyIn.ProviderUserID)
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	}
@@ -98,7 +100,13 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 		SetPort(proxyIn.Port).
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
-		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+		SetExpiryWarnDays(proxyIn.ExpiryWarnDays).
+		SetAutoAssignable(proxyIn.AutoAssignable)
+	if proxyIn.ProviderUserID != nil {
+		builder.SetProviderUserID(*proxyIn.ProviderUserID)
+	} else {
+		builder.ClearProviderUserID()
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	} else {
@@ -454,6 +462,8 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		FallbackMode:   m.FallbackMode,
 		BackupProxyID:  m.BackupProxyID,
 		ExpiryWarnDays: m.ExpiryWarnDays,
+		ProviderUserID: m.ProviderUserID,
+		AutoAssignable: m.AutoAssignable,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username

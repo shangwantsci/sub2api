@@ -187,6 +187,34 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 	return _c
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (_c *ProxyCreate) SetProviderUserID(v int64) *ProxyCreate {
+	_c.mutation.SetProviderUserID(v)
+	return _c
+}
+
+// SetNillableProviderUserID sets the "provider_user_id" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableProviderUserID(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetProviderUserID(*v)
+	}
+	return _c
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (_c *ProxyCreate) SetAutoAssignable(v bool) *ProxyCreate {
+	_c.mutation.SetAutoAssignable(v)
+	return _c
+}
+
+// SetNillableAutoAssignable sets the "auto_assignable" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableAutoAssignable(v *bool) *ProxyCreate {
+	if v != nil {
+		_c.SetAutoAssignable(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -270,6 +298,10 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultExpiryWarnDays
 		_c.mutation.SetExpiryWarnDays(v)
 	}
+	if _, ok := _c.mutation.AutoAssignable(); !ok {
+		v := proxy.DefaultAutoAssignable
+		_c.mutation.SetAutoAssignable(v)
+	}
 	return nil
 }
 
@@ -336,6 +368,9 @@ func (_c *ProxyCreate) check() error {
 	}
 	if _, ok := _c.mutation.ExpiryWarnDays(); !ok {
 		return &ValidationError{Name: "expiry_warn_days", err: errors.New(`ent: missing required field "Proxy.expiry_warn_days"`)}
+	}
+	if _, ok := _c.mutation.AutoAssignable(); !ok {
+		return &ValidationError{Name: "auto_assignable", err: errors.New(`ent: missing required field "Proxy.auto_assignable"`)}
 	}
 	return nil
 }
@@ -415,6 +450,14 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiryWarnDays(); ok {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
+	}
+	if value, ok := _c.mutation.ProviderUserID(); ok {
+		_spec.SetField(proxy.FieldProviderUserID, field.TypeInt64, value)
+		_node.ProviderUserID = &value
+	}
+	if value, ok := _c.mutation.AutoAssignable(); ok {
+		_spec.SetField(proxy.FieldAutoAssignable, field.TypeBool, value)
+		_node.AutoAssignable = value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -699,6 +742,42 @@ func (u *ProxyUpsert) AddExpiryWarnDays(v int) *ProxyUpsert {
 	return u
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (u *ProxyUpsert) SetProviderUserID(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldProviderUserID, v)
+	return u
+}
+
+// UpdateProviderUserID sets the "provider_user_id" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateProviderUserID() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldProviderUserID)
+	return u
+}
+
+// AddProviderUserID adds v to the "provider_user_id" field.
+func (u *ProxyUpsert) AddProviderUserID(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldProviderUserID, v)
+	return u
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (u *ProxyUpsert) ClearProviderUserID() *ProxyUpsert {
+	u.SetNull(proxy.FieldProviderUserID)
+	return u
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (u *ProxyUpsert) SetAutoAssignable(v bool) *ProxyUpsert {
+	u.Set(proxy.FieldAutoAssignable, v)
+	return u
+}
+
+// UpdateAutoAssignable sets the "auto_assignable" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateAutoAssignable() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldAutoAssignable)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -972,6 +1051,48 @@ func (u *ProxyUpsertOne) AddExpiryWarnDays(v int) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateExpiryWarnDays() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetProviderUserID sets the "provider_user_id" field.
+func (u *ProxyUpsertOne) SetProviderUserID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetProviderUserID(v)
+	})
+}
+
+// AddProviderUserID adds v to the "provider_user_id" field.
+func (u *ProxyUpsertOne) AddProviderUserID(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddProviderUserID(v)
+	})
+}
+
+// UpdateProviderUserID sets the "provider_user_id" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateProviderUserID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateProviderUserID()
+	})
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (u *ProxyUpsertOne) ClearProviderUserID() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearProviderUserID()
+	})
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (u *ProxyUpsertOne) SetAutoAssignable(v bool) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetAutoAssignable(v)
+	})
+}
+
+// UpdateAutoAssignable sets the "auto_assignable" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateAutoAssignable() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateAutoAssignable()
 	})
 }
 
@@ -1414,6 +1535,48 @@ func (u *ProxyUpsertBulk) AddExpiryWarnDays(v int) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateExpiryWarnDays() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetProviderUserID sets the "provider_user_id" field.
+func (u *ProxyUpsertBulk) SetProviderUserID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetProviderUserID(v)
+	})
+}
+
+// AddProviderUserID adds v to the "provider_user_id" field.
+func (u *ProxyUpsertBulk) AddProviderUserID(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddProviderUserID(v)
+	})
+}
+
+// UpdateProviderUserID sets the "provider_user_id" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateProviderUserID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateProviderUserID()
+	})
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (u *ProxyUpsertBulk) ClearProviderUserID() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.ClearProviderUserID()
+	})
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (u *ProxyUpsertBulk) SetAutoAssignable(v bool) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetAutoAssignable(v)
+	})
+}
+
+// UpdateAutoAssignable sets the "auto_assignable" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateAutoAssignable() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateAutoAssignable()
 	})
 }
 

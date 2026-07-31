@@ -458,6 +458,59 @@ func TestValidateProviderSettings(t *testing.T) {
 		_, err := ValidateProviderSettings(s)
 		require.Error(t, err)
 	})
+
+	// 与结算冷却期一致：没填（零值）回落种子值而不是报错。
+	// testProviderSettings() 夹具本身就没设这两项，改成报错会让上面每个子测试一起挂。
+	t.Run("auto proxy settings fall back to seeds when unset", func(t *testing.T) {
+		out, err := ValidateProviderSettings(testProviderSettings())
+		require.NoError(t, err)
+		require.Equal(t, DefaultProviderAutoProxyMaxAccounts, out.AutoProxyMaxAccounts)
+		require.Equal(t, DefaultProviderProxyModePolicy, out.ProxyModePolicy)
+	})
+
+	// 种子值本身必须能过校验，否则首次部署一保存设置就失败。
+	t.Run("seed settings pass validation", func(t *testing.T) {
+		out, err := ValidateProviderSettings(defaultProviderSettings())
+		require.NoError(t, err)
+		require.Equal(t, DefaultProviderAutoProxyMaxAccounts, out.AutoProxyMaxAccounts)
+		require.Equal(t, DefaultProviderProxyModePolicy, out.ProxyModePolicy)
+	})
+
+	t.Run("keeps a valid auto proxy cap", func(t *testing.T) {
+		s := testProviderSettings()
+		s.AutoProxyMaxAccounts = 5
+		out, err := ValidateProviderSettings(s)
+		require.NoError(t, err)
+		require.Equal(t, 5, out.AutoProxyMaxAccounts)
+	})
+
+	t.Run("rejects an auto proxy cap above the guard rail", func(t *testing.T) {
+		s := testProviderSettings()
+		s.AutoProxyMaxAccounts = providerMaxAutoProxyMaxAccounts + 1
+		_, err := ValidateProviderSettings(s)
+		require.Error(t, err)
+	})
+
+	t.Run("accepts every documented proxy mode policy", func(t *testing.T) {
+		for _, policy := range []string{
+			ProviderProxyPolicyBoth,
+			ProviderProxyPolicyAutoOnly,
+			ProviderProxyPolicyManualOnly,
+		} {
+			s := testProviderSettings()
+			s.ProxyModePolicy = policy
+			out, err := ValidateProviderSettings(s)
+			require.NoError(t, err, policy)
+			require.Equal(t, policy, out.ProxyModePolicy)
+		}
+	})
+
+	t.Run("rejects an unknown proxy mode policy", func(t *testing.T) {
+		s := testProviderSettings()
+		s.ProxyModePolicy = "platform_only"
+		_, err := ValidateProviderSettings(s)
+		require.Error(t, err)
+	})
 }
 
 // 供号商侧接口只能看到 label，绝不能拿到底层策略。

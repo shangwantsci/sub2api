@@ -34,6 +34,12 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "accounts", "session_window_status", "character varying", 20, true)
 	requireIndex(t, tx, "accounts", "idx_accounts_autopause_expiry_due")
 
+	// proxies: 代理归属与自动分配池（迁移 182）。
+	// 这两列只有手写迁移建，Ent 不参与建表，脱节的话线上是 column does not exist。
+	requireColumn(t, tx, "proxies", "provider_user_id", "bigint", 0, true)
+	requireColumn(t, tx, "proxies", "auto_assignable", "boolean", 0, false)
+	requireIndex(t, tx, "proxies", "idx_proxies_auto_assign_pool")
+
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
 

@@ -247,6 +247,47 @@ func (_u *ProxyUpdate) AddExpiryWarnDays(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (_u *ProxyUpdate) SetProviderUserID(v int64) *ProxyUpdate {
+	_u.mutation.ResetProviderUserID()
+	_u.mutation.SetProviderUserID(v)
+	return _u
+}
+
+// SetNillableProviderUserID sets the "provider_user_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableProviderUserID(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetProviderUserID(*v)
+	}
+	return _u
+}
+
+// AddProviderUserID adds value to the "provider_user_id" field.
+func (_u *ProxyUpdate) AddProviderUserID(v int64) *ProxyUpdate {
+	_u.mutation.AddProviderUserID(v)
+	return _u
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (_u *ProxyUpdate) ClearProviderUserID() *ProxyUpdate {
+	_u.mutation.ClearProviderUserID()
+	return _u
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (_u *ProxyUpdate) SetAutoAssignable(v bool) *ProxyUpdate {
+	_u.mutation.SetAutoAssignable(v)
+	return _u
+}
+
+// SetNillableAutoAssignable sets the "auto_assignable" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableAutoAssignable(v *bool) *ProxyUpdate {
+	if v != nil {
+		_u.SetAutoAssignable(*v)
+	}
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -446,6 +487,18 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ProviderUserID(); ok {
+		_spec.SetField(proxy.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProviderUserID(); ok {
+		_spec.AddField(proxy.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.ProviderUserIDCleared() {
+		_spec.ClearField(proxy.FieldProviderUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AutoAssignable(); ok {
+		_spec.SetField(proxy.FieldAutoAssignable, field.TypeBool, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -759,6 +812,47 @@ func (_u *ProxyUpdateOne) AddExpiryWarnDays(v int) *ProxyUpdateOne {
 	return _u
 }
 
+// SetProviderUserID sets the "provider_user_id" field.
+func (_u *ProxyUpdateOne) SetProviderUserID(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetProviderUserID()
+	_u.mutation.SetProviderUserID(v)
+	return _u
+}
+
+// SetNillableProviderUserID sets the "provider_user_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableProviderUserID(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetProviderUserID(*v)
+	}
+	return _u
+}
+
+// AddProviderUserID adds value to the "provider_user_id" field.
+func (_u *ProxyUpdateOne) AddProviderUserID(v int64) *ProxyUpdateOne {
+	_u.mutation.AddProviderUserID(v)
+	return _u
+}
+
+// ClearProviderUserID clears the value of the "provider_user_id" field.
+func (_u *ProxyUpdateOne) ClearProviderUserID() *ProxyUpdateOne {
+	_u.mutation.ClearProviderUserID()
+	return _u
+}
+
+// SetAutoAssignable sets the "auto_assignable" field.
+func (_u *ProxyUpdateOne) SetAutoAssignable(v bool) *ProxyUpdateOne {
+	_u.mutation.SetAutoAssignable(v)
+	return _u
+}
+
+// SetNillableAutoAssignable sets the "auto_assignable" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableAutoAssignable(v *bool) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetAutoAssignable(*v)
+	}
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -988,6 +1082,18 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ProviderUserID(); ok {
+		_spec.SetField(proxy.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProviderUserID(); ok {
+		_spec.AddField(proxy.FieldProviderUserID, field.TypeInt64, value)
+	}
+	if _u.mutation.ProviderUserIDCleared() {
+		_spec.ClearField(proxy.FieldProviderUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AutoAssignable(); ok {
+		_spec.SetField(proxy.FieldAutoAssignable, field.TypeBool, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

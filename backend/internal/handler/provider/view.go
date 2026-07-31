@@ -114,6 +114,12 @@ type OnboardOptionsView struct {
 	Tiers            []CapacityTierView `json:"tiers"`
 	DefaultTier      string             `json:"default_tier"`
 	CustomTier       CustomTierCapsView `json:"custom_tier"`
+	// ProxyModePolicy 决定上号页给出哪些代理来源选项：both | auto_only | manual_only。
+	ProxyModePolicy string `json:"proxy_mode_policy"`
+	// AutoProxyAvailable 报告平台侧当前还有没有可分配的出口。
+	//
+	// 只回布尔值。可用数量属于平台内部信息，下发出去等于把代理池规模告诉供号商。
+	AutoProxyAvailable bool `json:"auto_proxy_available"`
 }
 
 // OnboardOptionsFromSettings 把设置翻译成上号页选项，只暴露对外字段。
@@ -130,6 +136,7 @@ func OnboardOptionsFromSettings(settings service.ProviderSettings) OnboardOption
 			BaseRPM:         settings.CustomTierCaps.BaseRPM,
 			WindowCostLimit: settings.CustomTierCaps.WindowCostLimit,
 		},
+		ProxyModePolicy: service.NormalizeProviderProxyPolicy(settings.ProxyModePolicy),
 	}
 	for _, ht := range settings.EnabledHostingTypes() {
 		out.HostingTypes = append(out.HostingTypes, HostingTypeView{

@@ -142,7 +142,9 @@ func (r *usageLogRepository) GetProviderAccountBreakdown(
 			COUNT(*) AS requests,
 			COALESCE(SUM(ul.input_tokens + ul.output_tokens
 			           + ul.cache_creation_tokens + ul.cache_read_tokens), 0) AS tokens,
-			COALESCE(SUM(ul.total_cost), 0) AS standard_cost
+			COALESCE(SUM(ul.total_cost), 0) AS standard_cost,
+			COALESCE(MAX(ul.id), 0) AS max_usage_id,
+			COUNT(*) FILTER (WHERE ul.created_at < $2) AS late_rows
 		FROM usage_logs ul
 		JOIN accounts a ON a.id = ul.account_id
 		WHERE ` + providerWindowClause("a") + `
@@ -161,6 +163,7 @@ func (r *usageLogRepository) GetProviderAccountBreakdown(
 		if err := rows.Scan(
 			&item.AccountID, &item.AccountName, &item.Offline,
 			&item.Requests, &item.Tokens, &item.StandardCost,
+			&item.MaxUsageID, &item.LateRows,
 		); err != nil {
 			return nil, err
 		}

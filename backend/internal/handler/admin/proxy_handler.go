@@ -37,6 +37,7 @@ type CreateProxyRequest struct {
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
 	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	AutoAssignable bool   `json:"auto_assignable"`
 }
 
 // UpdateProxyRequest represents update proxy request
@@ -52,6 +53,9 @@ type UpdateProxyRequest struct {
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
 	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	// AutoAssignable 用指针区分「置为 false」与「本次不改」，
+	// 否则只改名字的 PUT 会把开关静默重置。
+	AutoAssignable *bool `json:"auto_assignable"`
 }
 
 // List handles listing all proxies with pagination
@@ -159,6 +163,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 			FallbackMode:   strings.TrimSpace(req.FallbackMode),
 			BackupProxyID:  req.BackupProxyID,
 			ExpiryWarnDays: req.ExpiryWarnDays,
+			AutoAssignable: req.AutoAssignable,
 		})
 		if err != nil {
 			return nil, err
@@ -199,6 +204,7 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		FallbackMode:   strings.TrimSpace(req.FallbackMode),
 		BackupProxyID:  req.BackupProxyID,
 		ExpiryWarnDays: req.ExpiryWarnDays,
+		AutoAssignable: req.AutoAssignable,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

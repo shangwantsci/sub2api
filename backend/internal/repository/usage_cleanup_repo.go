@@ -320,6 +320,16 @@ func (r *usageCleanupRepository) DeleteUsageLogsBatch(ctx context.Context, filte
 	return deleted, nil
 }
 
+// providerSettlementGuardClause 把供号商账号的用量排除在手工清理之外。
+//
+// service 层的时间守卫挡不住全部情况：结算的迟到行规则是「created_at 早于本期起点、
+// 但 id 大于上期水位」就补计，这类行的 created_at 完全可能落在一个「看起来早就该清理」
+// 的区间里。删掉就是静默少付 —— 当期还没封账，provider_settlement_items 里也没有快照，
+// 事后无从重算。
+//
+// 已封账的历史数据仍由定时保留策略清理，那条路径有 90 天量级的天然缓冲。
+const providerSettlementGuardClause = `NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = usage_logs.account_id AND a.provider_user_id IS NOT NULL)`
+
 func buildUsageCleanupWhere(filters service.UsageCleanupFilters) (string, []any) {
 	conditions := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -376,6 +386,8 @@ func buildUsageCleanupWhere(filters service.UsageCleanupFilters) (string, []any)
 		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", idx))
 		args = append(args, *filters.BillingType)
 	}
+
+	conditions = append(conditions, providerSettlementGuardClause)
 	return strings.Join(conditions, " AND "), args
 }
 

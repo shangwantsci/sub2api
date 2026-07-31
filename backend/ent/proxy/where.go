@@ -125,6 +125,16 @@ func ExpiryWarnDays(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiryWarnDays, v))
 }
 
+// ProviderUserID applies equality check predicate on the "provider_user_id" field. It's identical to ProviderUserIDEQ.
+func ProviderUserID(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldProviderUserID, v))
+}
+
+// AutoAssignable applies equality check predicate on the "auto_assignable" field. It's identical to AutoAssignableEQ.
+func AutoAssignable(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldAutoAssignable, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldCreatedAt, v))
@@ -888,6 +898,66 @@ func ExpiryWarnDaysLT(v int) predicate.Proxy {
 // ExpiryWarnDaysLTE applies the LTE predicate on the "expiry_warn_days" field.
 func ExpiryWarnDaysLTE(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldLTE(FieldExpiryWarnDays, v))
+}
+
+// ProviderUserIDEQ applies the EQ predicate on the "provider_user_id" field.
+func ProviderUserIDEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldProviderUserID, v))
+}
+
+// ProviderUserIDNEQ applies the NEQ predicate on the "provider_user_id" field.
+func ProviderUserIDNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldProviderUserID, v))
+}
+
+// ProviderUserIDIn applies the In predicate on the "provider_user_id" field.
+func ProviderUserIDIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldProviderUserID, vs...))
+}
+
+// ProviderUserIDNotIn applies the NotIn predicate on the "provider_user_id" field.
+func ProviderUserIDNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldProviderUserID, vs...))
+}
+
+// ProviderUserIDGT applies the GT predicate on the "provider_user_id" field.
+func ProviderUserIDGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldProviderUserID, v))
+}
+
+// ProviderUserIDGTE applies the GTE predicate on the "provider_user_id" field.
+func ProviderUserIDGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldProviderUserID, v))
+}
+
+// ProviderUserIDLT applies the LT predicate on the "provider_user_id" field.
+func ProviderUserIDLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldProviderUserID, v))
+}
+
+// ProviderUserIDLTE applies the LTE predicate on the "provider_user_id" field.
+func ProviderUserIDLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldProviderUserID, v))
+}
+
+// ProviderUserIDIsNil applies the IsNil predicate on the "provider_user_id" field.
+func ProviderUserIDIsNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldIsNull(FieldProviderUserID))
+}
+
+// ProviderUserIDNotNil applies the NotNil predicate on the "provider_user_id" field.
+func ProviderUserIDNotNil() predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotNull(FieldProviderUserID))
+}
+
+// AutoAssignableEQ applies the EQ predicate on the "auto_assignable" field.
+func AutoAssignableEQ(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldAutoAssignable, v))
+}
+
+// AutoAssignableNEQ applies the NEQ predicate on the "auto_assignable" field.
+func AutoAssignableNEQ(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldAutoAssignable, v))
 }
 
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.

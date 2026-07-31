@@ -178,54 +178,68 @@
           </div>
         </section>
 
-        <!-- 代理：供号商自带，必填 -->
+        <!-- 出口 IP：平台分配或供号商自带 -->
         <section class="card space-y-4 p-5">
           <h2 class="font-semibold text-gray-900 dark:text-dark-100">
             {{ t('provider.onboard.sectionProxy') }}
           </h2>
-          <p class="text-sm text-gray-500 dark:text-dark-400">
-            {{ t('provider.onboard.proxyHint') }}
+
+          <div v-if="showProxyModeChoice" class="space-y-2">
+            <span class="input-label">{{ t('provider.onboard.proxyMode') }}</span>
+            <div class="flex flex-wrap gap-4">
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
+                <input
+                  v-model="form.proxyMode"
+                  type="radio"
+                  value="auto"
+                  :disabled="!autoProxyAvailable"
+                />
+                <span>{{ t('provider.onboard.proxyModeAuto') }}</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
+                <input v-model="form.proxyMode" type="radio" value="manual" />
+                <span>{{ t('provider.onboard.proxyModeManual') }}</span>
+              </label>
+            </div>
+          </div>
+
+          <p v-if="proxyBlocked" class="text-sm text-red-600 dark:text-red-400">
+            {{ t('provider.onboard.proxyBlocked') }}
           </p>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label" for="proxy-protocol">
-                {{ t('provider.onboard.proxyProtocol') }}
-              </label>
-              <select id="proxy-protocol" v-model="form.proxy.protocol" class="input">
-                <option value="http">http</option>
-                <option value="https">https</option>
-                <option value="socks5">socks5</option>
-                <option value="socks5h">socks5h</option>
-              </select>
-            </div>
-            <div>
-              <label class="input-label" for="proxy-host">{{ t('provider.onboard.proxyHost') }}</label>
-              <input id="proxy-host" v-model.trim="form.proxy.host" type="text" required class="input" />
-            </div>
-            <div>
-              <label class="input-label" for="proxy-port">{{ t('provider.onboard.proxyPort') }}</label>
-              <input
-                id="proxy-port"
-                v-model.number="form.proxy.port"
-                type="number"
-                min="1"
-                max="65535"
-                required
-                class="input"
-              />
-            </div>
-            <div>
-              <label class="input-label" for="proxy-username">
-                {{ t('provider.onboard.proxyUsername') }}
-              </label>
-              <input id="proxy-username" v-model.trim="form.proxy.username" type="text" class="input" />
-            </div>
-            <div>
-              <label class="input-label" for="proxy-password">
-                {{ t('provider.onboard.proxyPassword') }}
-              </label>
-              <input id="proxy-password" v-model="form.proxy.password" type="password" class="input" />
-            </div>
+          <p
+            v-else-if="autoProxyAllowed && !autoProxyAvailable"
+            class="text-sm text-amber-600 dark:text-amber-400"
+          >
+            {{ t('provider.onboard.proxyAutoUnavailable') }}
+          </p>
+
+          <p
+            v-if="form.proxyMode === 'auto' && autoProxyAvailable"
+            class="text-sm text-gray-500 dark:text-dark-400"
+          >
+            {{ t('provider.onboard.proxyAutoHint') }}
+          </p>
+
+          <div v-if="form.proxyMode === 'manual' && manualProxyAllowed" class="space-y-2">
+            <label class="input-label" for="proxy-url">{{ t('provider.onboard.proxyUrl') }}</label>
+            <input
+              id="proxy-url"
+              v-model.trim="form.proxyUrl"
+              type="text"
+              required
+              class="input font-mono text-xs"
+              :placeholder="t('provider.onboard.proxyUrlPlaceholder')"
+            />
+            <p class="text-xs text-gray-500 dark:text-dark-400">
+              {{ t('provider.onboard.proxyUrlHint') }}
+            </p>
+            <p v-if="parsedProxy" class="text-xs text-emerald-600 dark:text-emerald-400">
+              {{ t('provider.onboard.proxyPreview', { address: parsedProxyAddress }) }}
+              <span v-if="parsedProxyHasAuth">{{ t('provider.onboard.proxyPreviewAuth') }}</span>
+            </p>
+            <p v-else-if="form.proxyUrl" class="text-xs text-red-500 dark:text-red-400">
+              {{ t('provider.onboard.proxyUrlInvalid') }}
+            </p>
           </div>
         </section>
 
@@ -313,7 +327,7 @@
           {{ successMessage }}
         </p>
 
-        <button type="submit" class="btn-primary w-full" :disabled="submitting">
+        <button type="submit" class="btn-primary w-full" :disabled="submitting || !proxyReady">
           {{ submitting ? t('provider.onboard.submitting') : t('provider.onboard.submit') }}
         </button>
       </form>
@@ -322,12 +336,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import ProviderLayout from '@/components/layout/ProviderLayout.vue'
 import { generateAuthURL, getOnboardOptions, onboard } from '@/api/provider'
-import type { ProviderOnboardOptions } from '@/api/provider'
+import type { ProviderOnboardOptions, ProviderProxyMode } from '@/api/provider'
+import { describeParsedProxy, parseProxyUrl } from '@/utils/proxyUrl'
+import { resolveProviderProxyModeState } from '@/utils/providerProxyMode'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -350,9 +366,41 @@ const form = reactive({
   code: '',
   hostingTypeID: 0,
   tier: '',
-  proxy: { protocol: 'http', host: '', port: 8080, username: '', password: '' },
+  proxyMode: 'auto' as ProviderProxyMode,
+  proxyUrl: '',
   custom: { concurrency: 1, max_sessions: 1, base_rpm: 10, window_cost_limit: 20 },
 })
+
+const proxyModeState = computed(() =>
+  resolveProviderProxyModeState(
+    options.value?.proxy_mode_policy,
+    options.value?.auto_proxy_available ?? false
+  )
+)
+const autoProxyAllowed = computed(() => proxyModeState.value.autoAllowed)
+const manualProxyAllowed = computed(() => proxyModeState.value.manualAllowed)
+const autoProxyAvailable = computed(() => proxyModeState.value.autoAvailable)
+const showProxyModeChoice = computed(() => proxyModeState.value.showChoice)
+
+// 平台没有可分配的出口，又不允许自带——这时任何提交都必然失败，
+// 与其让人填完一整张表再吃报错，不如提前说清楚。
+const proxyBlocked = computed(() => proxyModeState.value.blocked)
+
+// 预览按后端的落库规则来：allowSchemeless 对齐 ParseProviderProxyURL 支持的三种写法，
+// upgradeSocks5 对齐网关拨号时对 socks5 的升级，否则预览显示的协议和实际存的不一致。
+const parsedProxy = computed(() =>
+  form.proxyMode === 'manual'
+    ? parseProxyUrl(form.proxyUrl, { allowSchemeless: true, upgradeSocks5: true })
+    : null
+)
+const parsedProxyAddress = computed(() =>
+  parsedProxy.value ? describeParsedProxy(parsedProxy.value) : ''
+)
+const parsedProxyHasAuth = computed(() => Boolean(parsedProxy.value?.username))
+
+const proxyReady = computed(() =>
+  form.proxyMode === 'auto' ? autoProxyAvailable.value : manualProxyAllowed.value && !!parsedProxy.value
+)
 
 onMounted(async () => {
   try {
@@ -360,6 +408,9 @@ onMounted(async () => {
     options.value = data
     form.hostingTypeID = data.default_hosting_type_id || data.hosting_types[0]?.id || 0
     form.tier = data.default_tier || data.tiers[0]?.tier || ''
+    // 初始来源由策略决定，不能只看库存：只开放平台出口时即便池子空了也停在 auto，
+    // 否则页面会一边说「无法上号」一边把自带代理的输入框露出来。
+    form.proxyMode = proxyModeState.value.initialMode
   } catch (error) {
     errorMessage.value = (error as { message?: string })?.message || t('provider.onboard.loadFailed')
   } finally {
@@ -394,13 +445,10 @@ async function handleSubmit() {
       session_key: authMode.value === 'cookie' ? form.sessionKey : undefined,
       session_id: authMode.value === 'manual' ? form.sessionID : undefined,
       code: authMode.value === 'manual' ? form.code : undefined,
-      proxy: {
-        protocol: form.proxy.protocol,
-        host: form.proxy.host,
-        port: form.proxy.port,
-        username: form.proxy.username || undefined,
-        password: form.proxy.password || undefined,
-      },
+      proxy_mode: form.proxyMode,
+      // 发原串而不是前端解析结果：解析规则以后端为准，两边一旦漂移，
+      // 前端预览错了顶多显示不准，落库的才是对的。
+      proxy_url: form.proxyMode === 'manual' ? form.proxyUrl : undefined,
       hosting_type_id: form.hostingTypeID,
       tier: form.tier,
       custom_tier: form.tier === 'custom' ? { ...form.custom } : null,

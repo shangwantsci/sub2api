@@ -224,6 +224,15 @@ func (f *fakeUsageReader) GetProviderAccountBreakdown(
 		}
 		item.Requests++
 		item.StandardCost = item.StandardCost.Add(decimal.RequireFromString(r.cost))
+		// 与真实 SQL 的 MAX(ul.id) / COUNT(*) FILTER (created_at < start) 对齐。
+		// 封账的水位与迟到行告警现在都从明细汇总而来（见 aggregateProviderTotals），
+		// 这里漏掉就等于把水位喂成 0，测出来的是假的通过。
+		if r.id > item.MaxUsageID {
+			item.MaxUsageID = r.id
+		}
+		if r.createdAt.Before(w.Start) {
+			item.LateRows++
+		}
 	}
 	out := make([]ProviderAccountUsage, 0, len(byAccount))
 	for _, v := range byAccount {

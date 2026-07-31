@@ -64,6 +64,34 @@ type ProviderAccountUsage struct {
 	Requests     int64           `json:"requests"`
 	Tokens       int64           `json:"tokens"`
 	StandardCost decimal.Decimal `json:"standard_cost"`
+	// MaxUsageID / LateRows 供汇总出周期合计用，不下发给供号商：
+	// 水位与迟到行数是平台内部的结算机制。
+	MaxUsageID int64 `json:"-"`
+	LateRows   int64 `json:"-"`
+}
+
+// aggregateProviderTotals 从分账号明细汇总出周期合计。
+//
+// 刻意不再单独查一次总额。两次独立查询之间提交的行会进明细却不进金额，于是导出的
+// 对账凭证比结算单金额高；更糟的是那些行下期还会因为 id > 水位被再捕获一次，
+// 等于同一笔付两次。管理端面板的一致性校验也会因此把结算按钮永久禁用。
+// 让两者同源，这类偏差就不存在了。
+func aggregateProviderTotals(items []ProviderAccountUsage) ProviderPeriodTotals {
+	out := ProviderPeriodTotals{StandardCost: decimal.Zero}
+	for i := range items {
+		item := items[i]
+		out.Requests += item.Requests
+		out.Tokens += item.Tokens
+		out.StandardCost = out.StandardCost.Add(item.StandardCost)
+		out.LateRows += item.LateRows
+		if item.MaxUsageID > out.MaxUsageID {
+			out.MaxUsageID = item.MaxUsageID
+		}
+		if item.Requests > 0 {
+			out.AccountCount++
+		}
+	}
+	return out
 }
 
 // ProviderSettlement 是一条结算单。
@@ -261,20 +289,19 @@ func (s *ProviderSettlementService) GetCurrentPeriod(
 		tz = s.settings.GetProviderSettlementTimezone(ctx)
 	}
 
-	totals, err := s.usage.GetProviderPeriodTotals(ctx, providerUserID, window)
-	if err != nil {
-		return nil, err
-	}
+	// 本期金额从分账号明细汇总，两者同源。分开查在活跃供号商身上必然对不上——
+	// 两次查询之间还在产生新请求——管理端面板的一致性校验会因此把结算按钮禁用。
 	accounts, err := s.usage.GetProviderAccountBreakdown(ctx, providerUserID, window)
 	if err != nil {
 		return nil, err
 	}
+	totals := aggregateProviderTotals(accounts)
 
 	out := &ProviderCurrentPeriod{
 		ProviderUserID: providerUserID,
 		PeriodStart:    base.Start,
 		AsOf:           now,
-		Totals:         *totals,
+		Totals:         totals,
 		Accounts:       accounts,
 		Timezone:       tz,
 	}
@@ -324,14 +351,14 @@ func (s *ProviderSettlementService) Settle(
 			End:         periodEnd,
 			LastUsageID: base.LastUsageID,
 		}
-		totals, err := s.usage.GetProviderPeriodTotals(ctx, providerUserID, window)
-		if err != nil {
-			return err
-		}
+		// 结算金额与明细快照必须同源。分开查的话，两次查询之间提交的行会进快照却不进
+		// 金额：导出的对账凭证比结算单高，管理员按明细付款就多付了；更糟的是那些行
+		// 下期还会因为 id > 水位被再捕获一次，同一笔付两次。
 		items, err := s.usage.GetProviderAccountBreakdown(ctx, providerUserID, window)
 		if err != nil {
 			return err
 		}
+		totals := aggregateProviderTotals(items)
 
 		if totals.LateRows > 0 {
 			// 迟到行说明写入延迟超过了冷却期。金额没有丢（本期已补计），

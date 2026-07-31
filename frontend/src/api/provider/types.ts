@@ -61,20 +61,25 @@ export interface ProviderCustomTierCaps {
   window_cost_limit: number
 }
 
+/** 站点开放的出口来源。both = 两种都给选。 */
+export type ProviderProxyModePolicy = 'both' | 'auto_only' | 'manual_only'
+
+/** 单次上号声明的出口来源。 */
+export type ProviderProxyMode = 'auto' | 'manual'
+
 export interface ProviderOnboardOptions {
   hosting_types: ProviderHostingType[]
   default_hosting_type_id: number
   tiers: ProviderCapacityTier[]
   default_tier: string
   custom_tier: ProviderCustomTierCaps
-}
-
-export interface ProviderProxyPayload {
-  protocol: string
-  host: string
-  port: number
-  username?: string
-  password?: string
+  proxy_mode_policy: ProviderProxyModePolicy
+  /**
+   * 平台侧当前还有没有可分配的出口。
+   *
+   * 只有布尔值，没有数量：可用数量会暴露平台的出口规模。
+   */
+  auto_proxy_available: boolean
 }
 
 /**
@@ -99,7 +104,14 @@ export interface ProviderOnboardPayload {
   session_key?: string
   session_id?: string
   code?: string
-  proxy: ProviderProxyPayload
+  proxy_mode: ProviderProxyMode
+  /**
+   * 只在 manual 模式使用，一整行连接串。
+   *
+   * 刻意不拆成 protocol/host/port：供号商手上拿到的就是一整行，
+   * 解析以后端为准，前端只做即时预览。
+   */
+  proxy_url?: string
   hosting_type_id: number
   tier: string
   custom_tier?: ProviderCustomTierPayload | null

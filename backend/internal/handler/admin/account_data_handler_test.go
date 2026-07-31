@@ -123,8 +123,11 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	var resp dataResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Code)
-	require.Empty(t, resp.Data.Type)
-	require.Equal(t, 0, resp.Data.Version)
+	// 导出必须带格式标识。dataType/dataVersion 常量与 validateDataHeader 的校验一直都在，
+	// 只有导出侧漏了赋值，于是真实备份文件里根本没有这两个键，格式校验形同虚设。
+	// 这两行原本断言的是那个漏洞本身。
+	require.Equal(t, dataType, resp.Data.Type)
+	require.Equal(t, dataVersion, resp.Data.Version)
 	require.Len(t, resp.Data.Proxies, 1)
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
@@ -316,4 +319,232 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+}
+
+type fullDataResponse struct {
+	Code int         `json:"code"`
+	Data DataPayload `json:"data"`
+}
+
+func postAccountImport(t *testing.T, router *gin.Engine, accounts []map[string]any) DataImportResult {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"data": map[string]any{
+			"type":     dataType,
+			"version":  dataVersion,
+			"proxies":  []map[string]any{},
+			"accounts": accounts,
+		},
+		"skip_default_group_bind": true,
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Code int              `json:"code"`
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	return resp.Data
+}
+
+// 结算完全按 provider_user_id 聚合。这一列丢了，恢复出来的账号就不再计入任何
+// 供号商——直接少付钱且全程无报错。分组同理：一个组都没绑的账号不参与调度，
+// 用量恒为 0，归属恢复对了也白搭。
+func TestExportDataCarriesProviderAndSchedulingFields(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	owner := int64(42)
+	tier := "3"
+	adminSvc.accounts = []service.Account{
+		{
+			ID:             21,
+			Name:           "provider-account",
+			Platform:       service.PlatformAnthropic,
+			Type:           service.AccountTypeSetupToken,
+			Credentials:    map[string]any{"token": "secret"},
+			Concurrency:    3,
+			Priority:       1,
+			Status:         service.StatusDisabled,
+			Schedulable:    false,
+			ProviderUserID: &owner,
+			ProviderTier:   &tier,
+			GroupIDs:       []int64{2, 5},
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp fullDataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Data.Accounts, 1)
+
+	acc := resp.Data.Accounts[0]
+	require.NotNil(t, acc.ProviderUserID)
+	require.Equal(t, int64(42), *acc.ProviderUserID)
+	require.NotNil(t, acc.ProviderTier)
+	require.Equal(t, "3", *acc.ProviderTier)
+	require.Equal(t, service.StatusDisabled, acc.Status)
+	require.NotNil(t, acc.Schedulable)
+	require.False(t, *acc.Schedulable)
+	require.Equal(t, []int64{2, 5}, acc.GroupIDs)
+}
+
+func TestImportDataRestoresProviderAndSchedulingFields(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.groups = []service.Group{{ID: 2}, {ID: 5}}
+	adminSvc.users = []service.User{
+		{ID: 42, Role: service.RoleUser, Status: service.StatusActive, IsProvider: true},
+	}
+
+	result := postAccountImport(t, router, []map[string]any{
+		{
+			"name":             "provider-account",
+			"platform":         service.PlatformAnthropic,
+			"type":             service.AccountTypeSetupToken,
+			"credentials":      map[string]any{"token": "x"},
+			"concurrency":      3,
+			"priority":         1,
+			"provider_user_id": 42,
+			"provider_tier":    "3",
+			"status":           service.StatusDisabled,
+			"schedulable":      false,
+			"group_ids":        []int64{2, 5},
+		},
+	})
+	require.Empty(t, result.Errors)
+	require.Equal(t, 1, result.AccountCreated)
+
+	adminSvc.mu.Lock()
+	defer adminSvc.mu.Unlock()
+	require.Len(t, adminSvc.createdAccounts, 1)
+	created := adminSvc.createdAccounts[0]
+
+	require.NotNil(t, created.ProviderUserID)
+	require.Equal(t, int64(42), *created.ProviderUserID)
+	require.NotNil(t, created.ProviderTier)
+	require.Equal(t, "3", *created.ProviderTier)
+	require.Equal(t, service.StatusDisabled, created.Status)
+	require.NotNil(t, created.Schedulable)
+	require.False(t, *created.Schedulable)
+	require.Equal(t, []int64{2, 5}, created.GroupIDs)
+}
+
+// 备份不带这些字段时（旧格式）必须走安全默认，而不是报错或写坏数据。
+func TestImportDataWithoutNewFieldsKeepsDefaults(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	result := postAccountImport(t, router, []map[string]any{
+		{
+			"name":        "legacy",
+			"platform":    service.PlatformOpenAI,
+			"type":        service.AccountTypeOAuth,
+			"credentials": map[string]any{"token": "x"},
+			"concurrency": 1,
+			"priority":    50,
+		},
+	})
+	require.Empty(t, result.Errors)
+	require.Equal(t, 1, result.AccountCreated)
+
+	adminSvc.mu.Lock()
+	defer adminSvc.mu.Unlock()
+	created := adminSvc.createdAccounts[0]
+	require.Nil(t, created.ProviderUserID)
+	require.Nil(t, created.ProviderTier)
+	require.Empty(t, created.Status)
+	require.Nil(t, created.Schedulable)
+	require.Empty(t, created.GroupIDs)
+}
+
+// 归属指向的用户必须确实是本实例上的供号商。指向不存在的用户会让用量不计入任何人
+// （少付），指向另一个真实供号商则是把钱付给错的人。
+func TestImportDataDropsOwnershipWhenUserIsNotProvider(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.users = []service.User{
+		{ID: 42, Role: service.RoleUser, Status: service.StatusActive, IsProvider: false},
+	}
+
+	result := postAccountImport(t, router, []map[string]any{
+		{
+			"name":             "acc",
+			"platform":         service.PlatformOpenAI,
+			"type":             service.AccountTypeOAuth,
+			"credentials":      map[string]any{"token": "x"},
+			"concurrency":      1,
+			"priority":         50,
+			"provider_user_id": 42,
+			"provider_tier":    "3",
+		},
+	})
+	require.Equal(t, 1, result.AccountCreated)
+	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Message, "not a provider")
+
+	adminSvc.mu.Lock()
+	defer adminSvc.mu.Unlock()
+	created := adminSvc.createdAccounts[0]
+	require.Nil(t, created.ProviderUserID)
+	require.Nil(t, created.ProviderTier, "没有归属的档位没有意义，按档位回填只筛归属非空的账号")
+}
+
+// 停用的分组仍然是本实例上真实存在的分组，不能当成「不存在」把绑定丢掉。
+func TestImportDataKeepsBindingToDisabledGroup(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.groups = []service.Group{
+		{ID: 2, Status: service.StatusActive},
+		{ID: 9, Status: service.StatusDisabled},
+	}
+
+	result := postAccountImport(t, router, []map[string]any{
+		{
+			"name":        "acc",
+			"platform":    service.PlatformOpenAI,
+			"type":        service.AccountTypeOAuth,
+			"credentials": map[string]any{"token": "x"},
+			"concurrency": 1,
+			"priority":    50,
+			"group_ids":   []int64{2, 9},
+		},
+	})
+	require.Empty(t, result.Errors)
+
+	adminSvc.mu.Lock()
+	defer adminSvc.mu.Unlock()
+	require.Equal(t, []int64{2, 9}, adminSvc.createdAccounts[0].GroupIDs)
+}
+
+// 分组 id 只在同实例有意义。对不上的过滤掉但必须报出来——静默丢弃会得到一个
+// 不绑任何组、因而永远没有用量、结算恒为 0 的账号。
+func TestImportDataDropsUnknownGroupsWithWarning(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.groups = []service.Group{{ID: 2}}
+
+	result := postAccountImport(t, router, []map[string]any{
+		{
+			"name":        "acc",
+			"platform":    service.PlatformOpenAI,
+			"type":        service.AccountTypeOAuth,
+			"credentials": map[string]any{"token": "x"},
+			"concurrency": 1,
+			"priority":    50,
+			"group_ids":   []int64{2, 999},
+		},
+	})
+	require.Equal(t, 1, result.AccountCreated, "账号仍应建成功，只是少绑一个组")
+	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Message, "999")
+
+	adminSvc.mu.Lock()
+	defer adminSvc.mu.Unlock()
+	require.Equal(t, []int64{2}, adminSvc.createdAccounts[0].GroupIDs)
 }

@@ -5,15 +5,71 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 )
 
+// proxyNameMaxLen 与 Ent schema 里 proxies.name 的 MaxLen(100) 对齐。
+const proxyNameMaxLen = 100
+
 // ProviderProxyName 生成供号商代理的记录名，带归属标记，避免污染管理员代理池视图。
+//
+// 归属的权威来源是 proxies.provider_user_id 这一列，名字只是给管理员看的；
+// 任何代码都不应该靠解析这个前缀来判断归属。
 func ProviderProxyName(providerUserID int64, host string, port int) string {
-	return fmt.Sprintf("provider-%d-%s:%d", providerUserID, host, port)
+	name := fmt.Sprintf("provider-%d-%s:%d", providerUserID, host, port)
+	if len(name) <= proxyNameMaxLen {
+		return name
+	}
+	// host 列宽 255 而 name 只有 100，长域名拼出来会直接写库失败。
+	// 保留归属前缀与端口这两个有辨识度的部分，只截中间的 host。
+	prefix := fmt.Sprintf("provider-%d-", providerUserID)
+	suffix := fmt.Sprintf(":%d", port)
+	room := proxyNameMaxLen - len(prefix) - len(suffix)
+	if room <= 0 {
+		return truncateUTF8(name, proxyNameMaxLen)
+	}
+	return prefix + truncateUTF8(host, room) + suffix
+}
+
+// ErrProviderProxyModeNotAllowed 当前站点策略不开放这种代理来源。
+var ErrProviderProxyModeNotAllowed = infraerrors.BadRequest(
+	"PROXY_MODE_NOT_ALLOWED", "this proxy option is not available")
+
+// NormalizeProviderProxyPolicy 把策略值归一到三个合法取值之一，未知值回落种子值。
+func NormalizeProviderProxyPolicy(policy string) string {
+	switch p := strings.TrimSpace(strings.ToLower(policy)); p {
+	case ProviderProxyPolicyBoth, ProviderProxyPolicyAutoOnly, ProviderProxyPolicyManualOnly:
+		return p
+	default:
+		return DefaultProviderProxyModePolicy
+	}
+}
+
+// AssertProviderProxyModeAllowed 按站点策略校验单次上号请求声明的代理来源。
+//
+// 与 AssertProviderOAuthClientAllowed 同理，这是 service 层硬约束而不是 UI 隐藏：
+// 供号商可以直接构造请求，前端少渲染一个单选框拦不住任何人。
+func AssertProviderProxyModeAllowed(policy, mode string) error {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case ProviderProxyModeAuto:
+		if NormalizeProviderProxyPolicy(policy) == ProviderProxyPolicyManualOnly {
+			return ErrProviderProxyModeNotAllowed
+		}
+		return nil
+	case ProviderProxyModeManual:
+		if NormalizeProviderProxyPolicy(policy) == ProviderProxyPolicyAutoOnly {
+			return ErrProviderProxyModeNotAllowed
+		}
+		return nil
+	default:
+		return infraerrors.BadRequest("INVALID_PROXY_MODE", "proxy mode must be auto or manual")
+	}
 }
 
 // 供号商上号。
@@ -56,7 +112,8 @@ type ProviderOnboardInput struct {
 	AccountType string
 	Credentials map[string]any
 	Extra       map[string]any
-	Proxy       ProviderProxyInput
+	// 代理不在这里传：它在换票之前就已经落库（或从平台池里选出），
+	// 调用方只把 proxyID 作为参数交给 BuildProviderAccountInput。
 	HostingType int64
 	Tier        string
 	CustomTier  *ProviderCustomTierInput
@@ -103,6 +160,219 @@ func ValidateProviderProxy(in ProviderProxyInput) (ProviderProxyInput, error) {
 		return out, infraerrors.BadRequest("INVALID_PROXY_PORT", "proxy port must be between 1 and 65535")
 	}
 	return out, nil
+}
+
+// defaultProviderProxyProtocol 是不含协议头的粘贴格式所补的协议。
+//
+// 取 socks5h 而不是 socks5：它是 proxyurl.Parse 对 socks5 的升级目标，DNS 由代理端
+// 解析，不会把目标域名泄漏到本机出口。供号商说的「socks5 格式」实际就是这个。
+const defaultProviderProxyProtocol = "socks5h"
+
+var (
+	// ErrProviderProxyURLRequired 手填模式下没给代理串。
+	ErrProviderProxyURLRequired = infraerrors.BadRequest("PROXY_URL_REQUIRED", "proxy address is required")
+	// ErrProviderProxyURLInvalid 代理串不符合任何一种受支持的写法。
+	//
+	// 错误信息刻意不回显原串：它可能含代理密码，会进日志和前端 toast。
+	ErrProviderProxyURLInvalid = infraerrors.BadRequest("INVALID_PROXY_URL",
+		"proxy address must look like socks5://user:pass@host:port, host:port:user:pass, or user:pass@host:port")
+)
+
+// ParseProviderProxyURL 把供号商粘贴的一行代理串解析成结构化字段。
+//
+// 支持三种写法，因为供号商手上拿到的代理格式很杂，逐字段填写体验太差：
+//
+//	scheme://[user:pass@]host:port   标准 URL，scheme 走 proxyurl 的白名单
+//	[user:pass@]host:port            缺协议头，补 defaultProviderProxyProtocol
+//	host:port[:user:pass]            代理商常见的导出格式，同样补默认协议
+//
+// IPv6 只在带方括号时受支持（[::1]:1080 或标准 URL 形式）；冒号分隔的四段格式与
+// IPv6 语法天然冲突，无法表达带认证的 IPv6 地址。
+//
+// 解析结果统一交给 ValidateProviderProxy 做最终校验，协议白名单、host 净化和
+// 端口区间只保留一份规则。
+func ParseProviderProxyURL(raw string) (ProviderProxyInput, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ProviderProxyInput{}, ErrProviderProxyURLRequired
+	}
+
+	var (
+		in  ProviderProxyInput
+		err error
+	)
+	switch {
+	case strings.Contains(s, "://"):
+		in, err = parseProviderProxyStandardURL(s)
+	case strings.Contains(s, "@"):
+		in, err = parseProviderProxyCredentialForm(s)
+	default:
+		in, err = parseProviderProxyColonForm(s)
+	}
+	if err != nil {
+		return ProviderProxyInput{}, err
+	}
+	return ValidateProviderProxy(in)
+}
+
+// parseProviderProxyStandardURL 处理 scheme://[user:pass@]host:port。
+func parseProviderProxyStandardURL(s string) (ProviderProxyInput, error) {
+	// 复用 proxyurl.Parse：它是本项目唯一被允许解析代理 URL 的入口，
+	// 自带协议白名单，并把 socks5 升级成 socks5h 防 DNS 泄漏。
+	_, parsed, err := proxyurl.Parse(s)
+	if err != nil || parsed == nil {
+		return ProviderProxyInput{}, ErrProviderProxyURLInvalid
+	}
+	port, err := parseProviderProxyPort(parsed.Port())
+	if err != nil {
+		return ProviderProxyInput{}, err
+	}
+	in := ProviderProxyInput{
+		Protocol: parsed.Scheme,
+		Host:     parsed.Hostname(),
+		Port:     port,
+	}
+	if parsed.User != nil {
+		in.Username = parsed.User.Username()
+		in.Password, _ = parsed.User.Password()
+	}
+	return in, nil
+}
+
+// parseProviderProxyCredentialForm 处理 user:pass@host:port（无协议头）。
+func parseProviderProxyCredentialForm(s string) (ProviderProxyInput, error) {
+	// 从最后一个 @ 切：代理密码里出现 @ 并不罕见，用第一个 @ 会把密码截断。
+	at := strings.LastIndex(s, "@")
+	credentials, hostPort := s[:at], s[at+1:]
+	if credentials == "" {
+		return ProviderProxyInput{}, ErrProviderProxyURLInvalid
+	}
+	host, port, err := splitProviderProxyHostPort(hostPort)
+	if err != nil {
+		return ProviderProxyInput{}, err
+	}
+	in := ProviderProxyInput{
+		Protocol: defaultProviderProxyProtocol,
+		Host:     host,
+		Port:     port,
+	}
+	// 反过来，用户名不允许含冒号，所以凭据用第一个冒号切，密码可以含冒号。
+	if colon := strings.Index(credentials, ":"); colon >= 0 {
+		in.Username = credentials[:colon]
+		in.Password = credentials[colon+1:]
+	} else {
+		in.Username = credentials
+	}
+	return in, nil
+}
+
+// parseProviderProxyColonForm 处理 host:port 与 host:port:user:pass。
+func parseProviderProxyColonForm(s string) (ProviderProxyInput, error) {
+	// 先试 host:port。net.SplitHostPort 认识 IPv6 的方括号写法，
+	// 所以 [::1]:1080 这种无认证地址在这条分支上也能过。
+	if host, port, err := splitProviderProxyHostPort(s); err == nil {
+		return ProviderProxyInput{
+			Protocol: defaultProviderProxyProtocol,
+			Host:     host,
+			Port:     port,
+		}, nil
+	}
+
+	// 否则只接受严格四段。三段（host:port:user）语义歧义太大，直接拒绝，
+	// 让供号商补全而不是让我们猜。SplitN 留 4 段是为了让密码能含冒号。
+	parts := strings.SplitN(s, ":", 4)
+	if len(parts) != 4 {
+		return ProviderProxyInput{}, ErrProviderProxyURLInvalid
+	}
+	port, err := parseProviderProxyPort(parts[1])
+	if err != nil {
+		return ProviderProxyInput{}, err
+	}
+	return ProviderProxyInput{
+		Protocol: defaultProviderProxyProtocol,
+		Host:     parts[0],
+		Port:     port,
+		Username: parts[2],
+		Password: parts[3],
+	}, nil
+}
+
+func splitProviderProxyHostPort(s string) (string, int, error) {
+	host, rawPort, err := net.SplitHostPort(strings.TrimSpace(s))
+	if err != nil || host == "" {
+		return "", 0, ErrProviderProxyURLInvalid
+	}
+	port, err := parseProviderProxyPort(rawPort)
+	if err != nil {
+		return "", 0, err
+	}
+	return host, port, nil
+}
+
+func parseProviderProxyPort(raw string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, ErrProviderProxyURLInvalid
+	}
+	return port, nil
+}
+
+// ErrNoAutoAssignableProxy 平台侧当前没有可分配的出口。
+//
+// 触发原因有两类：管理员一条代理都没开放，或者所有开放的代理都到了绑定上限。
+// 对外文案不区分这两者——池子规模属于内部信息，不下发到供号商侧。
+var ErrNoAutoAssignableProxy = infraerrors.Conflict("AUTO_PROXY_UNAVAILABLE",
+	"no platform IP is currently available")
+
+// SelectAutoAssignProxy 从候选里挑一个绑定账号最少的平台代理。
+//
+// 入选条件：平台自有（ProviderUserID 为空）、管理员已勾选开放、active 且未过期，
+// 且当前绑定账号数没到 maxAccounts 封顶。供号商自带的代理永远不参与——把一家自费
+// 的出口分给另一家，两家账号还会共用同一个出口 IP。
+//
+// 并列时按 ID 升序，保证确定性。不做随机：「最少优先」本身就会轮转，被选中的代理
+// 绑定数 +1 后自然排到后面去。
+//
+// 已知且被接受的竞态：两个供号商同时上号可能选中同一个代理，最终绑定数超出封顶 1 个。
+// 选号必须发生在换票之前（换票就要走这个出口），而锁没法横跨 OAuth 换票这段外部慢
+// IO，所以不加锁。后果只是某个出口多挂一个账号，且下一次分配会自动跳过它。
+func SelectAutoAssignProxy(candidates []ProxyWithAccountCount, maxAccounts int, now time.Time) (*Proxy, error) {
+	if maxAccounts <= 0 {
+		maxAccounts = DefaultProviderAutoProxyMaxAccounts
+	}
+
+	var best *ProxyWithAccountCount
+	for i := range candidates {
+		c := &candidates[i]
+		if c.ProviderUserID != nil || !c.AutoAssignable {
+			continue
+		}
+		if !c.IsActive() || c.IsExpired(now) {
+			continue
+		}
+		if c.AccountCount >= int64(maxAccounts) {
+			continue
+		}
+		if best == nil ||
+			c.AccountCount < best.AccountCount ||
+			(c.AccountCount == best.AccountCount && c.ID < best.ID) {
+			best = c
+		}
+	}
+	if best == nil {
+		return nil, ErrNoAutoAssignableProxy
+	}
+	selected := best.Proxy
+	return &selected, nil
+}
+
+// HasAutoAssignableProxy 报告当前是否还有可分配的平台出口。
+//
+// 供上号页在渲染前判断要不要给出「由平台提供 IP」这个选项，只回布尔值，
+// 不回可用数量：代理池规模属于平台内部信息。
+func HasAutoAssignableProxy(candidates []ProxyWithAccountCount, maxAccounts int, now time.Time) bool {
+	_, err := SelectAutoAssignProxy(candidates, maxAccounts, now)
+	return err == nil
 }
 
 // ResolveProviderAccountPriority 决定新供号商账号的调度优先级。

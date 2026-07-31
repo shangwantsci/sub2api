@@ -12,6 +12,12 @@ import (
 var (
 	ErrProxyNotFound = infraerrors.NotFound("PROXY_NOT_FOUND", "proxy not found")
 	ErrProxyInUse    = infraerrors.Conflict("PROXY_IN_USE", "proxy is in use by accounts")
+	// ErrProxyProviderOwnedNotAssignable 守住一条不变量：供号商自带的代理不进共享池。
+	// 放进去等于把一家自费的出口分给另一家，两家账号还会共用同一个出口 IP。
+	ErrProxyProviderOwnedNotAssignable = infraerrors.BadRequest(
+		"PROXY_PROVIDER_OWNED_NOT_ASSIGNABLE",
+		"provider-owned proxy cannot be added to the auto-assign pool",
+	)
 )
 
 type ProxyRepository interface {

@@ -68,6 +68,11 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	if input.ExpiryWarnDays < 0 {
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
 	}
+	// 供号商自带的代理绝不能进自动分配池：那会把一家自费的出口分给另一家，
+	// 两家账号还会共用同一个出口 IP。
+	if input.ProviderUserID != nil && input.AutoAssignable {
+		return nil, ErrProxyProviderOwnedNotAssignable
+	}
 
 	proxy := &Proxy{
 		Name:           input.Name,
@@ -81,6 +86,8 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		FallbackMode:   mode,
 		BackupProxyID:  input.BackupProxyID,
 		ExpiryWarnDays: input.ExpiryWarnDays,
+		ProviderUserID: input.ProviderUserID,
+		AutoAssignable: input.AutoAssignable,
 	}
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		return nil, err
@@ -139,6 +146,13 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	proxy.FallbackMode = mode
 	proxy.BackupProxyID = input.BackupProxyID
 	proxy.ExpiryWarnDays = input.ExpiryWarnDays
+	// AutoAssignable 是 *bool：nil 表示本次不改该字段，保留库里的原值。
+	if input.AutoAssignable != nil {
+		if *input.AutoAssignable && proxy.ProviderUserID != nil {
+			return nil, ErrProxyProviderOwnedNotAssignable
+		}
+		proxy.AutoAssignable = *input.AutoAssignable
+	}
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
 		return nil, err

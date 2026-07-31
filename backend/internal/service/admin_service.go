@@ -352,6 +352,11 @@ type CreateAccountInput struct {
 	ProviderUserID *int64
 	// ProviderTier records the capacity tier picked at provider onboarding.
 	ProviderTier *string
+	// Status 与 Schedulable 允许调用方显式指定初始状态，供备份恢复还原「已停用」
+	// 「已暂停调度」这类人工决定。留空 / nil 时按默认建成 active + 可调度，
+	// 既有调用方行为不变。
+	Status      string
+	Schedulable *bool
 }
 
 // ShadowOptions is the input for CreateShadow.
@@ -467,6 +472,9 @@ type CreateProxyInput struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	// ProviderUserID 非空表示这条代理归某个供号商所有（上号时自带），永不进自动分配池。
+	ProviderUserID *int64
+	AutoAssignable bool
 }
 
 type UpdateProxyInput struct {
@@ -481,6 +489,12 @@ type UpdateProxyInput struct {
 	FallbackMode   string
 	BackupProxyID  *int64
 	ExpiryWarnDays int
+	// AutoAssignable 必须是指针：这个字段的零值 false 是有意义的取值，
+	// 用 bool 会让「关闭开关」与「本次不改该字段」无法区分——前者永远关不掉，
+	// 或者每次只改名字的 PUT 都把开关重置成 false。
+	// ProviderUserID 刻意不可更新：归属只在创建时确定，不允许把供号商的代理
+	// 改成平台代理后再开放给别人共用。
+	AutoAssignable *bool
 }
 
 type GenerateRedeemCodesInput struct {

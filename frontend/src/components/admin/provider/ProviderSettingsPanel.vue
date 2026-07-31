@@ -83,6 +83,44 @@
             </p>
           </div>
 
+          <div>
+            <label class="input-label" for="ps-proxy-policy">
+              {{ t('admin.providerSettings.proxyModePolicy') }}
+            </label>
+            <select id="ps-proxy-policy" v-model="settings.proxy_mode_policy" class="input">
+              <option value="both">{{ t('admin.providerSettings.proxyModePolicyBoth') }}</option>
+              <option value="auto_only">
+                {{ t('admin.providerSettings.proxyModePolicyAutoOnly') }}
+              </option>
+              <option value="manual_only">
+                {{ t('admin.providerSettings.proxyModePolicyManualOnly') }}
+              </option>
+            </select>
+            <p class="mt-1 text-xs text-gray-400">
+              {{ t('admin.providerSettings.proxyModePolicyHint') }}
+            </p>
+          </div>
+
+          <div>
+            <label class="input-label" for="ps-auto-proxy-cap">
+              {{ t('admin.providerSettings.autoProxyMaxAccounts') }}
+            </label>
+            <input
+              id="ps-auto-proxy-cap"
+              v-model.number="settings.auto_proxy_max_accounts"
+              type="number"
+              min="1"
+              :max="MAX_AUTO_PROXY_ACCOUNTS"
+              class="input"
+            />
+            <p class="mt-1 text-xs text-gray-400">
+              {{ t('admin.providerSettings.autoProxyMaxAccountsHint') }}
+            </p>
+            <p v-if="errors.auto_proxy_max_accounts" class="mt-1 text-xs text-red-500">
+              {{ errors.auto_proxy_max_accounts }}
+            </p>
+          </div>
+
           <!--
             调度优先级不再手工配置：上号时自动取目标托管分组内现有账号的最小 priority。
             priority 在调度里是硬门槛而非权重，只有分组内数值最小的那批账号会被选中，
@@ -451,6 +489,8 @@ import type {
 const { t } = useI18n()
 
 // 与后端 provider_settings.go 的护栏保持一致。两边都校验，前端只是提前反馈。
+// 与后端 providerMaxAutoProxyMaxAccounts 一致。
+const MAX_AUTO_PROXY_ACCOUNTS = 50
 const MAX_CONCURRENCY = 50
 const MAX_SESSIONS = 50
 const MAX_RPM = 500
@@ -566,6 +606,12 @@ function validate(): boolean {
   // 与后端 provider_settings.go 的区间保持一致。
   if (s.settlement_cooldown_seconds < 60 || s.settlement_cooldown_seconds > 86400) {
     next.settlement_cooldown_seconds = t('admin.providerSettings.cooldownRange')
+  }
+
+  if (s.auto_proxy_max_accounts < 1 || s.auto_proxy_max_accounts > MAX_AUTO_PROXY_ACCOUNTS) {
+    next.auto_proxy_max_accounts = t('admin.providerSettings.autoProxyMaxAccountsRange', {
+      max: MAX_AUTO_PROXY_ACCOUNTS
+    })
   }
 
   let anyTierEnabled = false

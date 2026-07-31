@@ -111,6 +111,16 @@ export default {
     settlementCooldownHint:
       '用量是异步落库的，封账终点会从当前时刻往回退这段时间，让还没提交完的记录先落定。默认 600 秒。',
     cooldownRange: '冷却期需在 60 到 86400 秒之间',
+    proxyModePolicy: '供号商可用的 IP 来源',
+    proxyModePolicyBoth: '两者皆可',
+    proxyModePolicyAutoOnly: '仅平台 IP',
+    proxyModePolicyManualOnly: '仅供号商自带',
+    proxyModePolicyHint:
+      '决定上号页给出哪些选项，后端同步硬校验。平台 IP 不够用时可临时切到「仅供号商自带」，免得供号商反复撞到无可用 IP。',
+    autoProxyMaxAccounts: '单个平台 IP 最多绑定账号数',
+    autoProxyMaxAccountsHint:
+      '自动分配按绑定最少优先挑选，到顶的 IP 不再参与；已开放的 IP 全部到顶时供号商就无法用平台 IP 上号。同一出口 IP 上挂太多账号会让这些账号彼此关联，建议保持较小值。默认 2。',
+    autoProxyMaxAccountsRange: '请填写 1 到 {max} 之间的数字',
     accountPriority: '账号调度优先级（自动）',
     accountPriorityHint:
       '上号时自动取该托管分组内现有账号的最小优先级，与组内正在跑的账号保持一致，无需手工设置。调度里优先级是硬门槛不是权重：只有数值最小的那批账号会被选中，取值不一致会让另一批完全拿不到流量。',

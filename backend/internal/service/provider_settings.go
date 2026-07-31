@@ -84,6 +84,10 @@ type ProviderSettings struct {
 	SettlementCooldownSeconds int `json:"settlement_cooldown_seconds"`
 	// AccountPriority 供号商账号的调度优先级。硬门槛语义，见 DefaultProviderAccountPriority。
 	AccountPriority int `json:"account_priority"`
+	// AutoProxyMaxAccounts 单个平台代理最多绑定多少个供号商账号。
+	AutoProxyMaxAccounts int `json:"auto_proxy_max_accounts"`
+	// ProxyModePolicy 供号商上号允许的代理来源：both | auto_only | manual_only。
+	ProxyModePolicy string `json:"proxy_mode_policy"`
 }
 
 // DefaultProviderCapacityTiers 返回 1-5 档的种子值。
@@ -136,6 +140,32 @@ const (
 // 数值大的那一边会被永久饿死且没有任何报错。
 const DefaultProviderAccountPriority = 1
 
+// 供号商上号时允许的代理来源策略。
+const (
+	ProviderProxyPolicyBoth       = "both"
+	ProviderProxyPolicyAutoOnly   = "auto_only"
+	ProviderProxyPolicyManualOnly = "manual_only"
+)
+
+// 单次上号请求声明的代理来源。
+const (
+	ProviderProxyModeAuto   = "auto"
+	ProviderProxyModeManual = "manual"
+)
+
+// DefaultProviderProxyModePolicy 是代理来源策略的种子值：两种都开放。
+const DefaultProviderProxyModePolicy = ProviderProxyPolicyBoth
+
+// DefaultProviderAutoProxyMaxAccounts 是单个平台代理可绑定的供号商账号数种子值。
+//
+// 取 2 是伪装侧的保守值：同一出口 IP 上挂两个 Anthropic 账号还能解释成一台机器上
+// 的两个身份，再多就开始像账号农场，直接冲撞本 fork「每个账号看起来像独立真人」
+// 的核心目标。代理池扩容后可在设置页调大。
+const DefaultProviderAutoProxyMaxAccounts = 2
+
+// providerMaxAutoProxyMaxAccounts 是该设置项的上限护栏。
+const providerMaxAutoProxyMaxAccounts = 50
+
 func defaultProviderSettings() ProviderSettings {
 	return ProviderSettings{
 		PortalEnabled:             false,
@@ -148,6 +178,8 @@ func defaultProviderSettings() ProviderSettings {
 		SettlementTimezone:        DefaultProviderSettlementTimezone,
 		SettlementCooldownSeconds: int(DefaultProviderSettlementCooldown / time.Second),
 		AccountPriority:           DefaultProviderAccountPriority,
+		AutoProxyMaxAccounts:      DefaultProviderAutoProxyMaxAccounts,
+		ProxyModePolicy:           DefaultProviderProxyModePolicy,
 	}
 }
 
@@ -174,6 +206,8 @@ func (s *SettingService) GetProviderSettings(ctx context.Context) (ProviderSetti
 		SettingKeyProviderSettlementTimezone,
 		SettingKeyProviderSettlementCooldownSeconds,
 		SettingKeyProviderAccountPriority,
+		SettingKeyProviderAutoProxyMaxAccounts,
+		SettingKeyProviderProxyModePolicy,
 	})
 	if err != nil {
 		return out, err
@@ -223,6 +257,14 @@ func (s *SettingService) GetProviderSettings(ctx context.Context) (ProviderSetti
 		if v, convErr := strconv.Atoi(strings.TrimSpace(raw)); convErr == nil {
 			out.AccountPriority = v
 		}
+	}
+	if raw, ok := values[SettingKeyProviderAutoProxyMaxAccounts]; ok && strings.TrimSpace(raw) != "" {
+		if v, convErr := strconv.Atoi(strings.TrimSpace(raw)); convErr == nil && v > 0 {
+			out.AutoProxyMaxAccounts = v
+		}
+	}
+	if raw, ok := values[SettingKeyProviderProxyModePolicy]; ok && strings.TrimSpace(raw) != "" {
+		out.ProxyModePolicy = strings.TrimSpace(raw)
 	}
 
 	sort.SliceStable(out.HostingTypes, func(i, j int) bool {
@@ -318,6 +360,8 @@ func (s *SettingService) SaveProviderSettings(ctx context.Context, in ProviderSe
 		SettingKeyProviderSettlementTimezone:        normalized.SettlementTimezone,
 		SettingKeyProviderSettlementCooldownSeconds: strconv.Itoa(normalized.SettlementCooldownSeconds),
 		SettingKeyProviderAccountPriority:           strconv.Itoa(normalized.AccountPriority),
+		SettingKeyProviderAutoProxyMaxAccounts:      strconv.Itoa(normalized.AutoProxyMaxAccounts),
+		SettingKeyProviderProxyModePolicy:           normalized.ProxyModePolicy,
 	})
 }
 
@@ -498,6 +542,27 @@ func ValidateProviderSettings(in ProviderSettings) (ProviderSettings, error) {
 	if out.AccountPriority < 0 || out.AccountPriority > providerMaxAccountPriority {
 		return out, infraerrors.BadRequest("INVALID_ACCOUNT_PRIORITY",
 			fmt.Sprintf("account priority must be between 0 and %d", providerMaxAccountPriority))
+	}
+
+	// ---- 自动分配代理 ----
+	// 与结算冷却期一致：<=0 视为「没填」而回落种子值，不报错。
+	if out.AutoProxyMaxAccounts <= 0 {
+		out.AutoProxyMaxAccounts = DefaultProviderAutoProxyMaxAccounts
+	}
+	if out.AutoProxyMaxAccounts > providerMaxAutoProxyMaxAccounts {
+		return out, infraerrors.BadRequest("INVALID_AUTO_PROXY_MAX_ACCOUNTS",
+			fmt.Sprintf("auto proxy max accounts must be between 1 and %d", providerMaxAutoProxyMaxAccounts))
+	}
+
+	out.ProxyModePolicy = strings.TrimSpace(out.ProxyModePolicy)
+	if out.ProxyModePolicy == "" {
+		out.ProxyModePolicy = DefaultProviderProxyModePolicy
+	}
+	switch out.ProxyModePolicy {
+	case ProviderProxyPolicyBoth, ProviderProxyPolicyAutoOnly, ProviderProxyPolicyManualOnly:
+	default:
+		return out, infraerrors.BadRequest("INVALID_PROXY_MODE_POLICY",
+			"proxy mode policy must be one of both, auto_only, manual_only")
 	}
 
 	return out, nil
