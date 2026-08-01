@@ -103,11 +103,12 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 截至 2026-07-31 供号商代理自动分配与结算缺陷修复上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-aba0a308`
-- 镜像 digest：`sha256:2eef1b6d78340aeb0231023faf2af0b5df8d1380f587a9cffc6cb2ad28a5eb0f`
-- 应用 commit：`aba0a308`（功能主体在 `4d3ff165`，`aba0a308` 是紧随其后的归属回填迁移）
-- 应用版本：`0.1.156`，二进制 built `2026-07-31T17:34:50Z`
-- GitHub Actions run：`30651632725`（`custom-image` success）；功能主体那轮为 `30650654467`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-a6948086`
+- 应用 commit：`a6948086`（本轮共三次部署：功能主体 `4d3ff165` → 归属回填迁移
+  `aba0a308` → 上号页白屏热修 `a6948086`）
+- 应用版本：`0.1.156`，二进制 built `2026-08-01T15:58:03Z`
+- GitHub Actions run：`30707022376`（`custom-image` success）；
+  前两轮为 `30650654467` 与 `30651632725`
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -137,9 +138,15 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-aba0a308   # = 4d3ff165 的镜像
-sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像，回到本轮之前用这个
+sub2api-rollback:pre-a6948086   # = aba0a308 的镜像（该版本上号页白屏，别回滚到它）
+sub2api-rollback:pre-aba0a308   # = 4d3ff165 的镜像（同样白屏）
+sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像，要回到本轮之前用这个
 ```
+
+**本轮出过一次生产事故**：`4d3ff165` 上线后 `/provider/onboard` 整页白屏，
+`aba0a308` 未修复，`a6948086` 才修好。原因是 i18n 文案里的裸 `@` 被 vue-i18n 当成
+linked message 语法，编译失败让整页渲染不出来 —— 详见 4.6，那一节记录了
+「为什么两轮测试都没抓到」，是本次最值得记住的部分。
 
 本轮验证：
 
@@ -310,12 +317,31 @@ Vue I18n 会把裸 `{ ... }` 当作 placeholder 表达式，并抛出：
 SyntaxError: Invalid token in placeholder: '"schema_version":'
 ```
 
+2026-07-31 又栽了一次，这次是 `@`：供号商上号页的
+`socks5://用户名:密码@1.2.3.4:1080` 让 `/provider/onboard` 整页白屏。
+`@` 在 vue-i18n 里是 linked message 语法（`@:key`），后面不跟合法 key 就编译失败。
+
+**为什么两轮测试都没抓到**（这才是真正要记住的）：
+
+1. **编译失败不抛异常**，只往 console 打一条 `Message compilation error`，然后返回
+   一个渲染不出来的结果。任何 `expect(...).not.toThrow()` 式的断言都测不出来 ——
+   必须去抓 console 输出。
+2. **测试环境与生产的 i18n 编译模式不一致**：`vite.config.ts` 有
+   `__INTLIFY_JIT_COMPILATION__: true`（配 runtime-only 版本，避开 CSP unsafe-eval），
+   而 `vitest.config.ts` 当时没有这个 define，简单字符串被原样返回，语法有问题的
+   文案在测试里根本不会报错。已补齐，两边现在一致。
+3. `providerI18nKeys.spec.ts` 只检查 key 在不在，源码文本断言只看有没有敏感词，
+   都覆盖不到渲染期。
+
 处理规则：
 
-- i18n 文案中不要直接放原始 JSON 花括号；
-- 示例改为不带花括号的普通文本，例如
-  `profile JSON: schema_version=1, cli_version=2.1.212, …`；
-- `claudeCodeMimicryProfileLocales.spec.ts` 必须断言该 placeholder 不含 `{}`；
+- i18n 文案里**不要出现裸 `{`、`}`、`@`、`|`**。要展示它们就写成字面量插值：
+  `{'@'}`、`{'{'}`、`{'}'}`。`admin/resources.ts` 的代理格式说明与
+  `admin/settings.ts` 的邮箱后缀说明是既有的正确写法；
+- `src/i18n/__tests__/messageCompilation.spec.ts` 会遍历 zh/en 全部文案、抓 console
+  编译错误，**新增文案必须让它保持绿色**；
+- 页面级改动要有挂载测试（`ProviderOnboard.mount.spec.ts` 是模板），源码文本断言
+  抓不到渲染期异常；
 - 设置页相关改动除组件测试外，发布前必须跑生产 frontend build。
 
 ### 4.7 Claude for Chrome Cookie OAuth

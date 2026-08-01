@@ -14,12 +14,16 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-07-31 已按本流程部署 `0.1.156-aba0a308`，GitHub Actions
-> run `30651632725`；供号商上号新增「由平台提供 IP」、自带代理改为粘贴连接串，
-> 并修掉数处会静默算错钱的问题。**本轮含两个数据库迁移（182 / 183）**，
-> 其中 183 会回填历史供号商代理的归属。功能主体在 `4d3ff165`（run `30650654467`）。
-> 上一轮为 2026-07-29 的 `0.1.156-0832ab07`（run `30416049073`，金额显示改自适应
-> 小数位）。
+> 最近验证：2026-08-01 已按本流程部署 `0.1.156-a6948086`，GitHub Actions
+> run `30707022376`。本轮共三次部署：功能主体 `4d3ff165`（供号商上号新增
+> 「由平台提供 IP」、自带代理改为粘贴连接串，并修掉数处会静默算错钱的问题，
+> **含迁移 182**）→ `aba0a308`（**迁移 183**，回填历史供号商代理归属）→
+> `a6948086`（热修 `/provider/onboard` 白屏）。
+>
+> **前两个版本的上号页是白的，回滚不要停在它们身上**，要回到本轮之前请用
+> `sub2api-rollback:pre-4d3ff165`。白屏原因见 `FORK_PROJECT_MEMORY.md` 4.6。
+>
+> 上一轮为 2026-07-29 的 `0.1.156-0832ab07`（run `30416049073`）。
 
 当前生产状态、Persona/自动标定架构、GitHub Actions 运行情况和后续优化路线见：
 
@@ -492,6 +496,28 @@ FROM proxies WHERE deleted_at IS NULL AND name ~ '^provider-\d+-' ORDER BY id;
   页面只显示「当前无法上号」，**不应同时露出自带代理的输入框**；
 - 手工用量清理对覆盖未结算区间的时间范围返回
   `USAGE_CLEANUP_RANGE_COVERS_UNSETTLED`，且删除条件已排除供号商账号的行。
+
+2026-08-01 `a6948086` 热修（`/provider/onboard` 白屏）：
+
+```text
+GitHub Actions run: 30707022376 (custom-image success)
+容器: 8 秒转 healthy
+版本: Sub2API 0.1.156 (commit: a6948086, built: 2026-08-01T15:58:03Z)
+本机 /health 与公网 https://lumos7.cc/health: 均 200
+无新迁移
+
+事故：4d3ff165 上线后 /provider/onboard 整页白屏，aba0a308 未修复。
+后端全程正常 —— chunk 200、options 接口 200、零 ERROR 日志，纯前端渲染崩溃。
+根因是 i18n 文案里的 socks5://用户名:密码@1.2.3.4:1080：@ 在 vue-i18n 里是
+linked message 语法，编译失败让整页渲染不出来。改成 {'@'} 字面量插值。
+
+产物验证: 生产二进制里已是 {'@'} 转义，裸 @ 写法计数为 0
+
+新增两道防线（见 FORK_PROJECT_MEMORY.md 4.6）：
+  src/i18n/__tests__/messageCompilation.spec.ts    遍历 zh/en 全部文案并抓 console 编译错误
+  src/views/provider/__tests__/ProviderOnboard.mount.spec.ts   挂载整页，覆盖 7 种策略×库存组合
+  vitest.config.ts 补上 __INTLIFY_JIT_COMPILATION__，与 vite.config.ts 对齐
+```
 
 2026-07-31 `aba0a308` 生产验证：
 
