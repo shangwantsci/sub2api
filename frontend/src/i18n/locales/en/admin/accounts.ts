@@ -594,7 +594,8 @@ export default {
         addRow: 'Add Header',
         fillTemplate: 'Fill Template',
         importJson: 'Import JSON',
-        importJsonPlaceholder: '{"user-agent": "my-client/1.0", "x-relay-token": "..."}',
+        // A bare brace is parsed as interpolation syntax; the block fails to render.
+        importJsonPlaceholder: `{'{'}"user-agent": "my-client/1.0", "x-relay-token": "..."{'}'}`,
         importJsonApply: 'Parse & Fill',
         importJsonCancel: 'Cancel',
         importJsonHint: 'Paste a flat JSON object (header name → value). Parsing replaces the current rows.',

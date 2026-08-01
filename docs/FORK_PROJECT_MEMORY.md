@@ -310,12 +310,31 @@ Vue I18n 会把裸 `{ ... }` 当作 placeholder 表达式，并抛出：
 SyntaxError: Invalid token in placeholder: '"schema_version":'
 ```
 
+2026-07-31 又栽了一次，这次是 `@`：供号商上号页的
+`socks5://用户名:密码@1.2.3.4:1080` 让 `/provider/onboard` 整页白屏。
+`@` 在 vue-i18n 里是 linked message 语法（`@:key`），后面不跟合法 key 就编译失败。
+
+**为什么两轮测试都没抓到**（这才是真正要记住的）：
+
+1. **编译失败不抛异常**，只往 console 打一条 `Message compilation error`，然后返回
+   一个渲染不出来的结果。任何 `expect(...).not.toThrow()` 式的断言都测不出来 ——
+   必须去抓 console 输出。
+2. **测试环境与生产的 i18n 编译模式不一致**：`vite.config.ts` 有
+   `__INTLIFY_JIT_COMPILATION__: true`（配 runtime-only 版本，避开 CSP unsafe-eval），
+   而 `vitest.config.ts` 当时没有这个 define，简单字符串被原样返回，语法有问题的
+   文案在测试里根本不会报错。已补齐，两边现在一致。
+3. `providerI18nKeys.spec.ts` 只检查 key 在不在，源码文本断言只看有没有敏感词，
+   都覆盖不到渲染期。
+
 处理规则：
 
-- i18n 文案中不要直接放原始 JSON 花括号；
-- 示例改为不带花括号的普通文本，例如
-  `profile JSON: schema_version=1, cli_version=2.1.212, …`；
-- `claudeCodeMimicryProfileLocales.spec.ts` 必须断言该 placeholder 不含 `{}`；
+- i18n 文案里**不要出现裸 `{`、`}`、`@`、`|`**。要展示它们就写成字面量插值：
+  `{'@'}`、`{'{'}`、`{'}'}`。`admin/resources.ts` 的代理格式说明与
+  `admin/settings.ts` 的邮箱后缀说明是既有的正确写法；
+- `src/i18n/__tests__/messageCompilation.spec.ts` 会遍历 zh/en 全部文案、抓 console
+  编译错误，**新增文案必须让它保持绿色**；
+- 页面级改动要有挂载测试（`ProviderOnboard.mount.spec.ts` 是模板），源码文本断言
+  抓不到渲染期异常；
 - 设置页相关改动除组件测试外，发布前必须跑生产 frontend build。
 
 ### 4.7 Claude for Chrome Cookie OAuth

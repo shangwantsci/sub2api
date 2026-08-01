@@ -687,7 +687,8 @@ export default {
         addRow: '添加请求头',
         fillTemplate: '填入模板',
         importJson: 'JSON 导入',
-        importJsonPlaceholder: '{"user-agent": "my-client/1.0", "x-relay-token": "..."}',
+        // 裸花括号会被 vue-i18n 当成插值语法，编译失败会让整块渲染不出来（见 4.6）。
+        importJsonPlaceholder: `{'{'}"user-agent": "my-client/1.0", "x-relay-token": "..."{'}'}`,
         importJsonApply: '解析并填入',
         importJsonCancel: '取消',
         importJsonHint: '粘贴扁平 JSON 对象（请求头名 → 值），解析后将整体替换当前列表。',

@@ -81,9 +81,11 @@ export default {
     proxyBlocked:
       'Onboarding is unavailable: no platform IP is free and self-supplied proxies are turned off. Please contact the administrator.',
     proxyUrl: 'Proxy address',
-    proxyUrlPlaceholder: 'socks5://user:pass@1.2.3.4:1080',
+    // A bare @ is parsed as vue-i18n's linked-message syntax; a compilation failure
+    // blanks the whole page. It must be written as the {'@'} literal.
+    proxyUrlPlaceholder: "socks5://user:pass{'@'}1.2.3.4:1080",
     proxyUrlHint:
-      'Paste the whole line. Accepted forms: socks5://user:pass@host:port, host:port:user:pass, and user:pass@host:port. Without a scheme it is treated as SOCKS5 (socks5h). Wrap IPv6 addresses in brackets.',
+      "Paste the whole line. Accepted forms: socks5://user:pass{'@'}host:port, host:port:user:pass, and user:pass{'@'}host:port. Without a scheme it is treated as SOCKS5 (socks5h). Wrap IPv6 addresses in brackets.",
     proxyPreview: 'Will use {address}',
     proxyPreviewAuth: ' (with credentials)',
     proxyUrlInvalid: 'That address could not be recognised — please check the format.',

@@ -78,9 +78,11 @@ export default {
     proxyAutoUnavailable: '平台当前没有可分配的 IP，请改用自己的代理。',
     proxyBlocked: '当前无法上号：平台没有可分配的 IP，也未开放自带代理，请联系管理员。',
     proxyUrl: '代理地址',
-    proxyUrlPlaceholder: 'socks5://用户名:密码@1.2.3.4:1080',
+    // 裸 @ 会被 vue-i18n 当成 linked message 语法去解析，编译失败会让整页白屏。
+    // 必须写成 {'@'} 字面量插值（与 admin/resources.ts 里的代理格式说明同一写法）。
+    proxyUrlPlaceholder: "socks5://用户名:密码{'@'}1.2.3.4:1080",
     proxyUrlHint:
-      '粘贴一整行即可。支持 socks5://用户名:密码@主机:端口、主机:端口:用户名:密码、用户名:密码@主机:端口 三种写法；不写协议时按 SOCKS5（socks5h）处理。IPv6 地址请加方括号。',
+      "粘贴一整行即可。支持 socks5://用户名:密码{'@'}主机:端口、主机:端口:用户名:密码、用户名:密码{'@'}主机:端口 三种写法；不写协议时按 SOCKS5（socks5h）处理。IPv6 地址请加方括号。",
     proxyPreview: '将使用 {address}',
     proxyPreviewAuth: '（含账号密码）',
     proxyUrlInvalid: '无法识别这个地址，请检查格式。',
