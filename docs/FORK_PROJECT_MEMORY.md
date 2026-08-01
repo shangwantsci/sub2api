@@ -103,11 +103,12 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 截至 2026-07-31 供号商代理自动分配与结算缺陷修复上线：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-aba0a308`
-- 镜像 digest：`sha256:2eef1b6d78340aeb0231023faf2af0b5df8d1380f587a9cffc6cb2ad28a5eb0f`
-- 应用 commit：`aba0a308`（功能主体在 `4d3ff165`，`aba0a308` 是紧随其后的归属回填迁移）
-- 应用版本：`0.1.156`，二进制 built `2026-07-31T17:34:50Z`
-- GitHub Actions run：`30651632725`（`custom-image` success）；功能主体那轮为 `30650654467`
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-a6948086`
+- 应用 commit：`a6948086`（本轮共三次部署：功能主体 `4d3ff165` → 归属回填迁移
+  `aba0a308` → 上号页白屏热修 `a6948086`）
+- 应用版本：`0.1.156`，二进制 built `2026-08-01T15:58:03Z`
+- GitHub Actions run：`30707022376`（`custom-image` success）；
+  前两轮为 `30650654467` 与 `30651632725`
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -137,9 +138,15 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
-sub2api-rollback:pre-aba0a308   # = 4d3ff165 的镜像
-sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像，回到本轮之前用这个
+sub2api-rollback:pre-a6948086   # = aba0a308 的镜像（该版本上号页白屏，别回滚到它）
+sub2api-rollback:pre-aba0a308   # = 4d3ff165 的镜像（同样白屏）
+sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像，要回到本轮之前用这个
 ```
+
+**本轮出过一次生产事故**：`4d3ff165` 上线后 `/provider/onboard` 整页白屏，
+`aba0a308` 未修复，`a6948086` 才修好。原因是 i18n 文案里的裸 `@` 被 vue-i18n 当成
+linked message 语法，编译失败让整页渲染不出来 —— 详见 4.6，那一节记录了
+「为什么两轮测试都没抓到」，是本次最值得记住的部分。
 
 本轮验证：
 
