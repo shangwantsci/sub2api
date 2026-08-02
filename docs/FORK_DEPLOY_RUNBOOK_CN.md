@@ -14,9 +14,27 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-08-02 已按本流程部署 `0.1.156-047f4fb9`（供号商账号管理面板：
-> 批量上号、二次编辑、账号邮箱与额度用量），GitHub Actions run `30744920471`。
-> **本轮无数据库迁移**，回滚只需切回镜像。
+> 最近验证：2026-08-02 已按本流程部署 `0.1.156-8035f77a`（档位标签按实际参数反推、
+> 开放自定义档编辑、修 priority 对齐口径、管理端改分组提示），
+> GitHub Actions run `30747110860`。**本轮无数据库迁移**，回滚只需切回镜像。
+>
+> ```text
+> immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-8035f77a
+> digest:          sha256:828de409e41a3b5394357f48d7759802ece2ebfdcaeca06e31ba6bfac79c66ac
+> env backup:      backups/.env.20260802-121100.before-8035f77a
+> rollback tag:    sub2api-rollback:pre-8035f77a
+> ```
+>
+> 容器 6 秒转 healthy，panic/fatal 为 0，新路由
+> `GET /admin/groups/scheduling-priorities` 无凭证返回 401。
+>
+> **生产数据验证了这轮的核心修复**：两个被管理员改过参数的账号
+> （供号商 45，存的档位分别是 3 和 5，实际参数一个是并发 1000、
+> 一个是并发1/会话3/rpm80）标签已从撒谎的「3 档」「5 档」变成「自定义」；
+> 参数确实标准的账号仍正确显示原档位名。
+>
+> 上一轮为同日的 `0.1.156-047f4fb9`（供号商账号管理面板：批量上号、二次编辑、
+> 账号邮箱与额度用量），GitHub Actions run `30744920471`：
 >
 > ```text
 > immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-047f4fb9
@@ -25,11 +43,10 @@
 > rollback tag:    sub2api-rollback:pre-047f4fb9
 > ```
 >
-> 容器 6 秒转 healthy，启动窗口 panic/fatal 为 0。三个新路由无凭证均返回 401
-> （**不是 404** —— 这条区分很重要：404 说明路由压根没注册上）：
-> `GET /provider/accounts/:id/usage`、`PATCH /provider/accounts/:id`、
-> `POST /provider/accounts/:id/auth-url`。浏览器实拉 `/provider/accounts`
-> 渲染正常、无白屏，邮箱列与额度用量列均正确显示。
+> 那轮三个新路由无凭证均返回 401（**不是 404** —— 这条区分很重要：
+> 404 说明路由压根没注册上）：`GET /provider/accounts/:id/usage`、
+> `PATCH /provider/accounts/:id`、`POST /provider/accounts/:id/auth-url`。
+> 浏览器实拉 `/provider/accounts` 渲染正常、无白屏。
 >
 > 上一轮为 2026-08-01 的 `0.1.156-a6948086`，GitHub Actions
 > run `30707022376`。那轮共三次部署：功能主体 `4d3ff165`（供号商上号新增
