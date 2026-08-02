@@ -14,8 +14,25 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-08-01 已按本流程部署 `0.1.156-a6948086`，GitHub Actions
-> run `30707022376`。本轮共三次部署：功能主体 `4d3ff165`（供号商上号新增
+> 最近验证：2026-08-02 已按本流程部署 `0.1.156-047f4fb9`（供号商账号管理面板：
+> 批量上号、二次编辑、账号邮箱与额度用量），GitHub Actions run `30744920471`。
+> **本轮无数据库迁移**，回滚只需切回镜像。
+>
+> ```text
+> immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-047f4fb9
+> digest:          sha256:23502d7bc5abffbe08aeb555a468c7ce5112a10ba41f69929f78325aeeb554ae
+> env backup:      backups/.env.20260802-110822.before-047f4fb9
+> rollback tag:    sub2api-rollback:pre-047f4fb9
+> ```
+>
+> 容器 6 秒转 healthy，启动窗口 panic/fatal 为 0。三个新路由无凭证均返回 401
+> （**不是 404** —— 这条区分很重要：404 说明路由压根没注册上）：
+> `GET /provider/accounts/:id/usage`、`PATCH /provider/accounts/:id`、
+> `POST /provider/accounts/:id/auth-url`。浏览器实拉 `/provider/accounts`
+> 渲染正常、无白屏，邮箱列与额度用量列均正确显示。
+>
+> 上一轮为 2026-08-01 的 `0.1.156-a6948086`，GitHub Actions
+> run `30707022376`。那轮共三次部署：功能主体 `4d3ff165`（供号商上号新增
 > 「由平台提供 IP」、自带代理改为粘贴连接串，并修掉数处会静默算错钱的问题，
 > **含迁移 182**）→ `aba0a308`（**迁移 183**，回填历史供号商代理归属）→
 > `a6948086`（热修 `/provider/onboard` 白屏）。
