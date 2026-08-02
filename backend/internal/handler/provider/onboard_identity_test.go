@@ -117,8 +117,10 @@ func TestAccountViewHandlesPreExistingAccounts(t *testing.T) {
 	require.Equal(t, "老账号", view.Name)
 	require.Equal(t, "legacy@example.com", view.Email, "邮箱要能从 credentials 回落读出来")
 	require.Equal(t, "active", view.Status)
-	require.Empty(t, view.Tier, "档位为空是允许的，编辑时供号商自己选一个")
 	require.True(t, view.PeriodCost.IsZero())
+	// 参数凑不齐任何标准档 → 反推成自定义，label 留空交给前端 i18n。
+	require.Equal(t, "custom", view.Tier)
+	require.Empty(t, view.TierLabel)
 
 	// 去重也要能认出这个号，否则同一个 Anthropic 账号会被重复上一遍。
 	require.Equal(t, "legacy-uuid", providerAccountUUID(legacy))

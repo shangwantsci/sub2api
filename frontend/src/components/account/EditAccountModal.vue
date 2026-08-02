@@ -2629,6 +2629,20 @@
         data-tour="account-form-groups"
       />
 
+      <!--
+        改分组时提示优先级门槛。
+        priority 在调度里是硬门槛（只有分组内数值最小的那批账号能拿到请求），
+        而改分组**不会**自动重算它 —— 搬过去以后账号要么独占新分组、要么一个请求
+        都拿不到，两种后果都完全静默。列表里 priority 列默认还是隐藏的，
+        所以这里必须把目标分组的门槛直接摆出来。
+      -->
+      <div
+        v-if="groupPriorityWarning"
+        class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300"
+      >
+        {{ groupPriorityWarning }}
+      </div>
+
     </form>
 
     <template #footer>
@@ -2771,6 +2785,42 @@ const authStore = useAuthStore()
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
+
+// 每个分组当前的调度优先级门槛，打开弹窗时拉一次。
+const groupSchedulingPriorities = ref<Record<string, number>>({})
+
+/**
+ * 改分组时的优先级提示。
+ *
+ * priority 在调度里是硬门槛：filterByMinPriority 只保留分组内数值最小的那批账号，
+ * 其余一个请求都拿不到。而改分组**不会**自动重算 priority，所以搬过去以后：
+ * 账号 priority 比目标分组门槛小 → 独占整个分组，把原有账号全挤出去；
+ * 比门槛大 → 一个请求都收不到，状态显示正常、用量恒为 0，没有任何报错。
+ *
+ * 只在真的改了分组、且门槛与本账号 priority 不一致时才出现。
+ */
+const groupPriorityWarning = computed(() => {
+  if (!props.account) return ''
+  const original = [...(props.account.group_ids || [])].sort().join(',')
+  const current = [...form.group_ids].sort().join(',')
+  if (original === current || form.group_ids.length === 0) return ''
+
+  const targetID = form.group_ids[0]
+  const target = props.groups.find((g) => g.id === targetID)
+  const threshold = groupSchedulingPriorities.value[String(targetID)]
+  const name = target?.name || String(targetID)
+
+  // 目标分组还没有在跑的账号：搬过去它就是唯一的账号，怎么填都不会互相挤。
+  if (threshold === undefined) {
+    return t('admin.accounts.groupPriorityEmptyTarget', { group: name })
+  }
+  if (threshold === form.priority) return ''
+  return t('admin.accounts.groupPriorityMismatch', {
+    group: name,
+    threshold,
+    current: form.priority
+  })
+})
 
 // Platform-specific hint for Base URL
 const baseUrlHint = computed(() => {
@@ -3705,10 +3755,24 @@ watch(
     if (!wasShow || newAccount !== previousAccount) {
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
+      loadGroupSchedulingPriorities()
     }
   },
   { immediate: true }
 )
+
+/**
+ * 拉每个分组当前的调度优先级门槛，供改分组时提示。
+ *
+ * 失败就静默留空 —— 少一条提示不该挡住编辑账号这件事本身。
+ */
+async function loadGroupSchedulingPriorities() {
+  try {
+    groupSchedulingPriorities.value = await adminAPI.groups.getSchedulingPriorities()
+  } catch {
+    groupSchedulingPriorities.value = {}
+  }
+}
 
 // Model mapping helpers
 const addModelMapping = () => {

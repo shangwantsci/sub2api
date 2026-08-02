@@ -10,6 +10,15 @@ export default {
         '下方账号设置会应用到本次导入的 setup-token 账号。代理留空时将自动分配；分组、并发、限额、会话伪装等设置都会随导入保存。',
       anthropicSessionAutoNamePlaceholder: '导入后自动按邮箱 + 订阅类型命名',
       anthropicSessionAutoNameHint: '批量导入会自动命名，单个账号名称无需手填。',
+      // 改分组不会自动重算优先级，而优先级在调度里是硬门槛，只有分组内数值
+      // 最小的那批账号能拿到请求。搬过去以后不匹配的后果是完全静默的。
+      groupPriorityMismatch:
+        '注意：「{group}」当前的调度门槛是优先级 {threshold}，而这个账号是 {current}。'
+        + '调度只把请求给分组内优先级数值最小的那批账号，'
+        + '数值更小会独占该分组、更大则一个请求都收不到，两种情况都不会报错。'
+        + '改分组不会自动调整优先级，请一并确认上方的优先级设置。',
+      groupPriorityEmptyTarget:
+        '「{group}」当前没有在跑的账号，这个账号搬过去后将独自承接该分组的请求。',
       autoRefresh: '自动刷新',
       enableAutoRefresh: '启用自动刷新',
       refreshInterval5s: '5 秒',

@@ -75,7 +75,7 @@
                 {{ account.hosting_type_label || '-' }}
               </td>
               <td class="px-4 py-3 text-sm text-gray-600 dark:text-dark-300">
-                {{ account.tier_label || '-' }}
+                {{ tierText(account) }}
               </td>
               <td class="px-4 py-3 text-sm">
                 <div v-if="usageState[account.id]?.loading" class="space-y-1.5">
@@ -233,18 +233,117 @@
               </p>
             </label>
 
+            <label
+              v-if="options?.custom_tier.enabled"
+              class="cursor-pointer rounded-lg border p-3 transition-colors"
+              :class="
+                editForm.tier === 'custom'
+                  ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10'
+                  : 'border-gray-200 hover:border-gray-300 dark:border-dark-700'
+              "
+            >
+              <div class="flex items-center gap-2">
+                <input v-model="editForm.tier" type="radio" value="custom" />
+                <span class="text-sm font-medium text-gray-900 dark:text-dark-100">
+                  {{ t('provider.onboard.customTier') }}
+                </span>
+              </div>
+              <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                {{ t('provider.onboard.customTierHint') }}
+              </p>
+            </label>
           </div>
 
           <!--
-            这里刻意不给自定义档：自定义档的并发/会话数/RPM 不下发到供号商侧，
-            弹窗只能预填成默认值，供号商一保存就把自己原本填的参数静默重置了。
-            要换成自定义档得回上号流程，或者让管理员调。
+            这个号当前的参数不属于任何标准档位时说清楚。多半是管理员在管理端单独调过，
+            供号商在这里一改档位就会把那份调整覆盖掉 —— 得让他看见自己要改掉的是什么。
           -->
           <p
-            v-if="editTarget?.tier === 'custom'"
+            v-if="editTarget && editTarget.tier === 'custom'"
             class="mt-2 text-xs text-amber-600 dark:text-amber-400"
           >
-            {{ t('provider.accounts.customTierLocked') }}
+            {{
+              t('provider.accounts.currentParamsNonStandard', {
+                concurrency: editTarget.concurrency,
+                sessions: editTarget.max_sessions,
+                rpm: editTarget.base_rpm,
+                window: editTarget.window_cost_limit,
+              })
+            }}
+          </p>
+        </div>
+
+        <!-- 自定义档参数。预填账号当前真实取值，不是默认值 —— 填错了会静默覆盖。 -->
+        <div
+          v-if="editForm.tier === 'custom' && options"
+          class="grid gap-3 rounded-lg bg-gray-50 p-3 sm:grid-cols-2 dark:bg-dark-800"
+        >
+          <div>
+            <label class="input-label" for="edit-concurrency">
+              {{ t('provider.onboard.concurrency') }}
+              <span class="text-xs text-gray-400">
+                ({{ t('provider.onboard.max') }} {{ options.custom_tier.concurrency }})
+              </span>
+            </label>
+            <input
+              id="edit-concurrency"
+              v-model.number="editForm.custom.concurrency"
+              type="number"
+              min="1"
+              :max="options.custom_tier.concurrency"
+              class="input"
+            />
+          </div>
+          <div>
+            <label class="input-label" for="edit-sessions">
+              {{ t('provider.onboard.maxSessions') }}
+              <span class="text-xs text-gray-400">
+                ({{ t('provider.onboard.max') }} {{ options.custom_tier.max_sessions }})
+              </span>
+            </label>
+            <input
+              id="edit-sessions"
+              v-model.number="editForm.custom.max_sessions"
+              type="number"
+              min="1"
+              :max="options.custom_tier.max_sessions"
+              class="input"
+            />
+          </div>
+          <div>
+            <label class="input-label" for="edit-rpm">
+              {{ t('provider.onboard.baseRpm') }}
+              <span class="text-xs text-gray-400">
+                ({{ t('provider.onboard.max') }} {{ options.custom_tier.base_rpm }})
+              </span>
+            </label>
+            <input
+              id="edit-rpm"
+              v-model.number="editForm.custom.base_rpm"
+              type="number"
+              min="1"
+              :max="options.custom_tier.base_rpm"
+              class="input"
+            />
+          </div>
+          <div>
+            <label class="input-label" for="edit-window">
+              {{ t('provider.onboard.windowCostLimit') }}
+              <span class="text-xs text-gray-400">
+                ({{ t('provider.onboard.max') }} {{ options.custom_tier.window_cost_limit }})
+              </span>
+            </label>
+            <input
+              id="edit-window"
+              v-model.number="editForm.custom.window_cost_limit"
+              type="number"
+              min="1"
+              :max="options.custom_tier.window_cost_limit"
+              class="input"
+            />
+          </div>
+          <p class="text-xs text-gray-500 sm:col-span-2 dark:text-dark-400">
+            {{ t('provider.accounts.customTierZeroHint') }}
           </p>
         </div>
 
@@ -392,7 +491,19 @@ const dialogError = ref('')
 
 const editOpen = ref(false)
 const editTarget = ref<ProviderAccount | null>(null)
-const editForm = reactive({ name: '', notes: '', tier: '' })
+const editForm = reactive({
+  name: '',
+  notes: '',
+  tier: '',
+  custom: { concurrency: 1, max_sessions: 1, base_rpm: 10, window_cost_limit: 20 },
+})
+/** 打开弹窗时的自定义档预填快照，用来判断供号商到底有没有动过这几个输入框。 */
+const editCustomSnapshot = reactive({
+  concurrency: 1,
+  max_sessions: 1,
+  base_rpm: 10,
+  window_cost_limit: 20,
+})
 
 // 档位选项只有编辑时才需要，页面加载时不去拉。
 const options = ref<ProviderOnboardOptions | null>(null)
@@ -420,6 +531,19 @@ function statusClass(status: string): string {
     default:
       return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-dark-300'
   }
+}
+
+/**
+ * 档位文案。
+ *
+ * 后端按账号实际参数反推：匹配上某个固定档就回那个档的 label（管理员自己填的文案），
+ * 匹配不上回空 label + tier='custom'，「自定义」这三个字由这里按 i18n 出，
+ * 否则英文界面的供号商会看到中文。
+ */
+function tierText(account: ProviderAccount): string {
+  if (account.tier_label) return account.tier_label
+  if (account.tier === 'custom') return t('provider.onboard.customTier')
+  return '-'
 }
 
 function formatDateTime(value?: string | null): string {
@@ -571,6 +695,14 @@ async function openEdit(account: ProviderAccount) {
   editForm.name = account.name
   editForm.notes = account.notes || ''
   editForm.tier = account.tier
+  // 自定义档参数一律用账号当前真实取值预填。填默认值的话，供号商只想改个名字、
+  // 一保存就把自己原本设的参数覆盖成 1/1/10/20 了，而且没有任何提示。
+  // 护栏要求四项都 > 0（0 在运行时表示「不启用该限制」），所以 0 值回落到 1。
+  editForm.custom.concurrency = account.concurrency || 1
+  editForm.custom.max_sessions = account.max_sessions || 1
+  editForm.custom.base_rpm = account.base_rpm || 10
+  editForm.custom.window_cost_limit = account.window_cost_limit || 20
+  Object.assign(editCustomSnapshot, editForm.custom)
   dialogError.value = ''
   editOpen.value = true
 
@@ -602,13 +734,24 @@ async function handleSaveEdit() {
   saving.value = true
   dialogError.value = ''
   try {
+    // 档位没动就不发：换档会重写 extra 并重新入队调度快照，没必要白跑一趟。
+    // 自定义档要额外比对四个参数 —— 档位标识没变但参数被改了，同样得发。
+    // 比对的是打开弹窗时的预填快照而不是账号原值：预填把 0 规整成了合法下限
+    // （护栏要求四项都 > 0），拿原值比会把「没动过」误判成「改过」。
+    const isCustom = editForm.tier === 'custom'
+    const customTouched =
+      isCustom &&
+      (['concurrency', 'max_sessions', 'base_rpm', 'window_cost_limit'] as const).some(
+        (k) => editForm.custom[k] !== editCustomSnapshot[k]
+      )
+    const tierChanged = editForm.tier !== target.tier
+
     await updateAccount(target.id, {
       name,
       // 空串是「清空备注」，与不传不同 —— 这里恰好就是要这个语义。
       notes: editForm.notes,
-      // 档位没变就不发：换档会重写 extra 并重新入队调度快照，没必要白跑一趟。
-      // 编辑只在固定档之间切换，所以永远不带 custom_tier。
-      tier: editForm.tier !== target.tier ? editForm.tier : undefined,
+      tier: tierChanged || customTouched ? editForm.tier : undefined,
+      custom_tier: (tierChanged || customTouched) && isCustom ? { ...editForm.custom } : null,
     })
     closeEdit()
     await load()

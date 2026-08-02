@@ -956,7 +956,7 @@ func (r *accountRepository) ListByProviderPaged(
 	return out, paginationResultFromTotal(int64(total), params), nil
 }
 
-// MinPriorityByGroup 返回每个分组内当前最小的 priority。
+// MinPriorityByGroup 返回每个分组内**当前可调度**账号的最小 priority。
 //
 // 供号商上号时据此对齐：调度的 filterByMinPriority 只保留分组内 priority 数值
 // 最小的那批账号，其余一个请求都拿不到。新账号取该分组的最小值，就能与当前真正
@@ -964,12 +964,22 @@ func (r *accountRepository) ListByProviderPaged(
 //
 // 与 DistinctNonProviderPrioritiesByGroup 不同，这里**包含**供号商账号：
 // 我们要对齐的是分组里实际生效的调度门槛，不区分账号归属。
+//
+// **`status='active' AND schedulable` 这两个条件不能去掉。** 调度里的
+// filterByMinPriority 是从**已经过状态过滤的可调度候选**里取最小值的，这里必须
+// 用同一个口径。只按 deleted_at 过滤的话：分组里有个 priority=1 的账号被暂停了
+// （供号商自己点的 pause，或 status=error），在跑的账号全是 priority=5，新号就会
+// 对齐到 1 —— 于是它成为分组内唯一的 priority=1 可调度账号，独吞该分组全部流量，
+// 其余账号被静默饿死，没有任何报错。而这是可以被主动构造的：先 pause 一个号，
+// 再上新号。
 func (r *accountRepository) MinPriorityByGroup(ctx context.Context) (map[int64]int, error) {
 	const query = `
 		SELECT ag.group_id, MIN(a.priority)
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
 		WHERE a.deleted_at IS NULL
+		  AND a.status = 'active'
+		  AND a.schedulable = true
 		GROUP BY ag.group_id
 	`
 	rows, err := r.sql.QueryContext(ctx, query)

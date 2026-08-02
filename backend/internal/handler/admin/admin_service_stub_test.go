@@ -541,6 +541,11 @@ func (s *stubAdminService) ListAccountsByProvider(ctx context.Context, providerU
 	return nil, nil
 }
 
+// 空 map = 每个分组都还没有可调度账号，改分组时不给门槛提示。
+func (s *stubAdminService) MinSchedulablePriorityByGroup(ctx context.Context) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
 func (s *stubAdminService) ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]service.Proxy, int64, error) {
 	s.lastListProxies.protocol = protocol
 	s.lastListProxies.status = status

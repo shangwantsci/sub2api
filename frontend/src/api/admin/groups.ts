@@ -329,6 +329,19 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+/**
+ * 每个分组当前的调度优先级门槛（分组内可调度账号的最小 priority）。
+ *
+ * 改账号分组时用来提示：priority 在调度里是硬门槛，只有数值最小的那批账号能拿到
+ * 请求，而改分组不会自动重算它。分组里没有在跑的账号时该分组不会出现在结果里。
+ */
+export async function getSchedulingPriorities(): Promise<Record<string, number>> {
+  const { data } = await apiClient.get<{ min_priority_by_group: Record<string, number> }>(
+    '/admin/groups/scheduling-priorities'
+  )
+  return data.min_priority_by_group || {}
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -350,7 +363,8 @@ export const groupsAPI = {
   batchSetGroupRPMOverrides,
   updateSortOrder,
   getUsageSummary,
-  getCapacitySummary
+  getCapacitySummary,
+  getSchedulingPriorities
 }
 
 export default groupsAPI

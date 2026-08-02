@@ -99,6 +99,14 @@ type AdminService interface {
 	CountProviderAccountsByTier(ctx context.Context, tier string) (int, error)
 	// ListAccountsByProvider 返回某供号商名下的账号，供管理端按供号商筛选。
 	ListAccountsByProvider(ctx context.Context, providerUserID int64) ([]Account, error)
+	// MinSchedulablePriorityByGroup 返回每个分组当前的调度优先级门槛，
+	// 即分组内**可调度**账号的最小 priority。
+	//
+	// 给管理端「改账号分组」时做提示：priority 在调度里是硬门槛
+	// （filterByMinPriority 只保留分组内数值最小的那批账号，其余一个请求都拿不到），
+	// 而 UpdateAccount 改分组时**不会**重算它。把账号搬到门槛不同的分组，
+	// 它要么独占该分组、要么彻底拿不到流量，两种后果都完全静默。
+	MinSchedulablePriorityByGroup(ctx context.Context) (map[int64]int, error)
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
 	// 若账号不存在返回 ErrAccountNotFound；若账号存在但不在 fallback 状态，返回 ErrAccountNotInFallback。
 	RevertAccountProxyFallback(ctx context.Context, id int64) error

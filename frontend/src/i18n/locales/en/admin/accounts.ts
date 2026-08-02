@@ -10,6 +10,16 @@ export default {
         'The account settings below will be applied to imported setup-token accounts. Leave proxy empty for automatic assignment; groups, concurrency, quota controls, session masking, and other settings are saved with the import.',
       anthropicSessionAutoNamePlaceholder: 'Accounts will be named by email + subscription type',
       anthropicSessionAutoNameHint: 'Bulk import auto-names accounts, so no account name is required here.',
+      // Changing groups does not recompute priority, and priority is a hard gate in
+      // scheduling: only the lowest-numbered accounts in a group receive any traffic.
+      // A mismatch after the move fails completely silently.
+      groupPriorityMismatch:
+        'Heads up: "{group}" currently gates at priority {threshold}, but this account is {current}. '
+        + 'Scheduling only sends requests to the lowest-numbered accounts in a group, so a lower number '
+        + 'takes over the whole group and a higher one receives nothing at all — neither raises an error. '
+        + 'Changing the group does not adjust priority, so please confirm the priority field above.',
+      groupPriorityEmptyTarget:
+        '"{group}" has no accounts currently serving traffic, so this account will handle the group on its own.',
       autoRefresh: 'Auto Refresh',
       enableAutoRefresh: 'Enable auto refresh',
       refreshInterval5s: '5 seconds',

@@ -146,7 +146,9 @@ export default {
     editTitle: '编辑账号',
     editFailed: '保存失败',
     nameRequired: '账号名称不能为空',
-    customTierLocked: '这个账号用的是自定义档。选择上面任一档位可以切换过去，自定义参数本身需要联系管理员调整。',
+    currentParamsNonStandard:
+      '这个账号当前的参数不属于任何标准档位：并发 {concurrency}、会话 {sessions}、每分钟请求 {rpm}、5 小时额度 {window}。改档位会覆盖这些值。',
+    customTierZeroHint: '四项都必须大于 0。填 0 在系统里表示「不启用该限制」，不是「限为 0」。',
     reauth: '重新授权',
     reauthTitle: '重新授权',
     reauthHint: '为「{name}」换一份新的凭据。出口 IP、托管类型与档位都保持不变。',

@@ -60,8 +60,27 @@ export interface ProviderAccount {
   status: ProviderAccountStatus
   /** 托管类型的对外文案，不是分组名。 */
   hosting_type_label: string
+  /**
+   * 速率档位。
+   *
+   * **按账号实际生效的参数反推**，不是存的那一列的直译 —— 管理员在管理端改过账号
+   * 的并发/RPM 之后，存的档位标识不会跟着变，只有反推才能保证标签不撒谎。
+   *
+   * tier_label 为空且 tier 为 'custom' 时，表示不属于任何标准档位，
+   * 前端按 i18n 渲染成「自定义」（后端不回硬编码中文）。
+   */
   tier_label: string
   tier: string
+
+  /**
+   * 当前生效的四个档位参数，供编辑弹窗预填。
+   *
+   * 0 表示「不启用该限制」（既有约定，最高档的 5h 上限就是 0），不是「限为 0」。
+   */
+  concurrency: number
+  max_sessions: number
+  base_rpm: number
+  window_cost_limit: number
   expires_at?: string | null
   last_used_at?: string | null
   created_at: string

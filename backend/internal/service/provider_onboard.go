@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -518,6 +519,11 @@ func (s *adminServiceImpl) ListAccountsByProvider(ctx context.Context, providerU
 	return s.accountRepo.ListByProvider(ctx, providerUserID)
 }
 
+// MinSchedulablePriorityByGroup 返回每个分组当前的调度优先级门槛。
+func (s *adminServiceImpl) MinSchedulablePriorityByGroup(ctx context.Context) (map[int64]int, error) {
+	return s.accountRepo.MinPriorityByGroup(ctx)
+}
+
 // ProviderAccountDisplayStatus 把内部账号状态压成供号商看得懂的四态。
 //
 // 内部的 rate limit / overload / temp unschedulable 等调度细节不下发，
@@ -538,7 +544,50 @@ func ProviderAccountDisplayStatus(a *Account) string {
 	}
 }
 
+// ResolveProviderAccountTier 根据账号**实际生效的参数**反推档位标识与对外文案。
+//
+// 刻意不再单纯读 provider_tier 列。那一列只有两条写入路径（建号、供号商自己换档），
+// 管理端**既没有改它的 API 也没有 UI**；而管理员在管理端编辑账号时改的并发 /
+// 会话数 / RPM / 5 小时上限，恰好就是档位映射的同一组参数。结果是：管理员把一个
+// 「3 档」账号的并发从 3 改成 1000，provider_tier 仍写着 3，供号商页面上也仍然
+// 显示「3 档」—— 标签与这个号实际生效的参数完全是两回事。
+//
+// 改成按实际参数反推之后，标签在任何情况下都不会撒谎，也不关心这些参数是谁改的。
+//
+// 返回的 label 为空表示「不属于任何标准档位」，由前端用 i18n 渲染成「自定义」——
+// 固定档的 label 是管理员自己填的文案（不走 i18n），但「自定义」这三个字原先是
+// 硬编码中文，英文界面的供号商也会看到中文。
+//
+// 比对全量 CapacityTiers 而不是 EnabledTiers：档位被管理员停用后，已经在用它的
+// 账号参数并没有变，显示原档位名仍然是准确的（停用只影响能不能**换到**该档）。
+func ResolveProviderAccountTier(settings ProviderSettings, a *Account) (tier string, label string) {
+	if a == nil {
+		return "", ""
+	}
+	for _, t := range settings.CapacityTiers {
+		if providerTierMatchesAccount(t, a) {
+			return t.Tier, t.Label
+		}
+	}
+	return ProviderTierCustom, ""
+}
+
+// providerTierMatchesAccount 判断账号当前参数是否与某个固定档完全一致。
+//
+// 四项都要匹配：并发在 accounts.concurrency 列上，其余三项在 extra 里。
+// 任何一项对不上就不算这个档 —— 宁可显示「自定义」，也不能给一个只对了一半的标签。
+func providerTierMatchesAccount(t ProviderCapacityTier, a *Account) bool {
+	return a.Concurrency == t.Concurrency &&
+		a.GetMaxSessions() == t.MaxSessions &&
+		a.GetBaseRPM() == t.BaseRPM &&
+		// 金额是 float64，JSON 里 60 与 60.0 都可能出现，用容差比而不是 ==。
+		math.Abs(a.GetWindowCostLimit()-t.WindowCostLimit) < 1e-9
+}
+
 // ProviderTierLabel 从设置里找档位显示名，找不到就回落档位标识本身。
+//
+// 已不用于账号视图（那里改用 ResolveProviderAccountTier 按实际参数反推），
+// 保留给仍然需要「按档位标识查文案」的场景。
 func ProviderTierLabel(settings ProviderSettings, tier *string) string {
 	if tier == nil {
 		return ""

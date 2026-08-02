@@ -47,9 +47,11 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 			"persona_timezone":           "America/New_York",
 			"enable_tls_fingerprint":     true,
 			"session_id_masking_enabled": true,
-			"base_rpm":                   30,
-			"window_cost_limit":          60,
-			"privacy_mode":               "on",
+			// 这四项凑齐正好等于 3 档，用来验证标签能正确反推到固定档。
+			"max_sessions":      3,
+			"base_rpm":          30,
+			"window_cost_limit": 60,
+			"privacy_mode":      "on",
 		},
 		ProxyID:        &proxyID,
 		Concurrency:    3,
@@ -92,9 +94,14 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 		"enable_tls_fingerprint", "session_id_masking",
 		"intercept_warmup_requests", "privacy_mode",
 		"extra",
-		// 代理与调度
+		// 代理与调度。
+		//
+		// 档位参数（concurrency / max_sessions / base_rpm / window_cost_limit）
+		// 曾经也在这份名单里，现在有意放开：上号页选档时这四个值一直明着展示给
+		// 供号商看（CapacityTierView），不给账号当前的取值反而让用自定义档的人
+		// 编辑时只能盲填、一保存就把自己的参数覆盖掉。
+		// 其余调度参数仍然不下发。
 		"proxy", "load_factor", "pool_weight", "priority", "rate_multiplier",
-		"concurrency", "base_rpm", "window_cost_limit",
 		// 分组与内部错误细节
 		"group_ids", "content_review_policy", "claude_oauth_system_prompt_policy",
 		"error_message", "upstream 429",
@@ -117,6 +124,12 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 	// 邮箱要能下发：供号商靠它对照手上哪些号已经上了。这条 extra 里没有、
 	// credentials 里有，同时锁住了对存量账号的回落读取。
 	require.Equal(t, "supplier@example.com", view.Email)
+
+	// 四个档位参数要如实下发，供编辑弹窗预填。
+	require.Equal(t, 3, view.Concurrency)
+	require.Equal(t, 3, view.MaxSessions)
+	require.Equal(t, 30, view.BaseRPM)
+	require.Equal(t, float64(60), view.WindowCostLimit)
 
 	// 金额必须序列化成十进制字符串并保住全部有效位。序列化成 JSON 数字的话，
 	// JS 侧解析成 float64 就当场丢精度，对账时两边对不上。

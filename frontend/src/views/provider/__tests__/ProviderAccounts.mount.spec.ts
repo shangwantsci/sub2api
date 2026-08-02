@@ -219,7 +219,8 @@ describe('ProviderAccounts 编辑', () => {
         { tier: '3', label: '3 档', concurrency: 3, max_sessions: 3, base_rpm: 30, window_cost_limit: 60 }
       ],
       default_tier: '3',
-      custom_tier: { enabled: false, concurrency: 10, max_sessions: 10, base_rpm: 100, window_cost_limit: 200 },
+      // 线上站点是开着自定义档的，而且绝大多数供号商账号用的就是它。
+      custom_tier: { enabled: true, concurrency: 10, max_sessions: 10, base_rpm: 100, window_cost_limit: 200 },
       proxy_mode_policy: 'both',
       auto_proxy_available: true
     })
@@ -261,43 +262,50 @@ describe('ProviderAccounts 编辑', () => {
   })
 
   /**
-   * 编辑里绝不能出现自定义档。
+   * 自定义档必须能编辑，而且输入框要预填账号**当前的真实参数**。
    *
-   * 自定义档的并发/会话数/RPM 不下发到供号商侧，弹窗只能把输入框预填成默认值 ——
-   * 供号商本来只想改个名字，一保存就把自己原先填的参数静默重置了，而且没有任何提示。
-   * 站点设置里开着自定义档（custom_tier.enabled = true）也不例外。
+   * 线上 26 个在跑的供号商账号里 21 个是自定义档 —— 关掉这个入口等于绝大多数号
+   * 改不了档位。预填默认值同样不行：供号商本来只想改个名字，一保存就把自己原先
+   * 设的参数覆盖成 1/1/10/20 了，而且没有任何提示。
    */
-  it('即使站点开着自定义档，编辑里也不给这个选项', async () => {
-    getOnboardOptionsMock.mockResolvedValue({
-      hosting_types: [{ id: 11, label: '稳健型', description: '寿命最长' }],
-      default_hosting_type_id: 11,
-      tiers: [
-        { tier: '3', label: '3 档', concurrency: 3, max_sessions: 3, base_rpm: 30, window_cost_limit: 60 }
-      ],
-      default_tier: '3',
-      custom_tier: { enabled: true, concurrency: 10, max_sessions: 10, base_rpm: 100, window_cost_limit: 200 },
-      proxy_mode_policy: 'both',
-      auto_proxy_available: true
-    })
-    const wrapper = await openEditDialog()
-
-    expect(wrapper.find('input[value="custom"]').exists()).toBe(false)
-    expect(wrapper.find('#edit-concurrency').exists()).toBe(false)
-    expect(wrapper.find('#edit-rpm').exists()).toBe(false)
-  })
-
-  // 自定义档的号不动档位直接保存时，不能把它顶到某个固定档上去。
-  it('自定义档账号不改档位时不发 tier', async () => {
+  it('自定义档可编辑，且用账号真实参数预填', async () => {
     listAccountsMock.mockResolvedValue({
-      items: [account({ tier: 'custom', tier_label: '自定义' })],
+      items: [
+        account({
+          tier: 'custom',
+          tier_label: '',
+          concurrency: 4,
+          max_sessions: 6,
+          base_rpm: 25,
+          window_cost_limit: 150
+        })
+      ],
       total: 1,
       page: 1,
       page_size: 20,
       pages: 1
     })
     const wrapper = await openEditDialog()
-    // 弹窗里要说清楚为什么没有自定义档可选，否则供号商只会以为档位列表少了一项。
-    expect(wrapper.text()).toContain(zh.provider.accounts.customTierLocked)
+
+    expect(wrapper.find('input[value="custom"]').exists()).toBe(true)
+    expect((wrapper.find('#edit-concurrency').element as HTMLInputElement).value).toBe('4')
+    expect((wrapper.find('#edit-sessions').element as HTMLInputElement).value).toBe('6')
+    expect((wrapper.find('#edit-rpm').element as HTMLInputElement).value).toBe('25')
+    expect((wrapper.find('#edit-window').element as HTMLInputElement).value).toBe('150')
+  })
+
+  // 只改名字的时候不能顺手把档位也发一遍 —— 换档会重写 extra 并重新入队调度快照。
+  it('自定义档账号只改名字时不发 tier', async () => {
+    listAccountsMock.mockResolvedValue({
+      items: [
+        account({ tier: 'custom', tier_label: '', concurrency: 4, max_sessions: 6, base_rpm: 25, window_cost_limit: 150 })
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    const wrapper = await openEditDialog()
 
     await wrapper.find('#edit-name').setValue('只改名字')
     const saveButton = wrapper.findAll('button').find((b) => b.text() === zh.common.save)
@@ -305,7 +313,53 @@ describe('ProviderAccounts 编辑', () => {
     await flushPromises()
 
     const [, payload] = updateAccountMock.mock.calls[0]
+    expect(payload.name).toBe('只改名字')
     expect(payload.tier).toBeUndefined()
+    expect(payload.custom_tier).toBeNull()
+  })
+
+  // 动了参数就必须发，否则供号商改了半天没生效。
+  it('改了自定义参数时带上 tier 与 custom_tier', async () => {
+    listAccountsMock.mockResolvedValue({
+      items: [
+        account({ tier: 'custom', tier_label: '', concurrency: 4, max_sessions: 6, base_rpm: 25, window_cost_limit: 150 })
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    const wrapper = await openEditDialog()
+
+    await wrapper.find('#edit-rpm').setValue(40)
+    const saveButton = wrapper.findAll('button').find((b) => b.text() === zh.common.save)
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    const [, payload] = updateAccountMock.mock.calls[0]
+    expect(payload.tier).toBe('custom')
+    expect(payload.custom_tier).toMatchObject({
+      concurrency: 4,
+      max_sessions: 6,
+      base_rpm: 40,
+      window_cost_limit: 150
+    })
+  })
+
+  // 参数不属于任何标准档时要把当前值摆出来，供号商才知道自己要改掉的是什么。
+  it('非标准参数的账号在弹窗里列出当前取值', async () => {
+    listAccountsMock.mockResolvedValue({
+      items: [
+        account({ tier: 'custom', tier_label: '', concurrency: 1000, max_sessions: 0, base_rpm: 0, window_cost_limit: 0 })
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    const wrapper = await openEditDialog()
+
+    expect(wrapper.text()).toContain('1000')
   })
 
   it('名称清空时挡下来而不是发一个空名字', async () => {

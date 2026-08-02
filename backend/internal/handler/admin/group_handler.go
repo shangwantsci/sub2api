@@ -201,6 +201,26 @@ type UpdateGroupRequest struct {
 
 // List handles listing all groups with pagination
 // GET /api/v1/admin/groups
+// GetSchedulingPriorities 返回每个分组当前的调度优先级门槛。
+// GET /api/v1/admin/groups/scheduling-priorities
+//
+// 编辑账号改分组时拿来提示管理员。priority 在调度里是硬门槛
+// （filterByMinPriority 只保留分组内数值最小的那批账号，其余一个请求都拿不到），
+// 而 UpdateAccount 改分组时不会重算它 —— 把账号搬到门槛不同的分组，它要么独占
+// 该分组、要么彻底拿不到流量，两种后果都没有任何报错。
+//
+// 之所以要下发这个值而不是只写一句提示：管理端账号列表的 priority 列默认隐藏，
+// 管理员根本无从判断该填什么。
+func (h *GroupHandler) GetSchedulingPriorities(c *gin.Context) {
+	byGroup, err := h.adminService.MinSchedulablePriorityByGroup(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	// 分组里一个可调度账号都没有时该分组不出现在 map 里，前端据此显示「暂无在跑的账号」。
+	response.Success(c, gin.H{"min_priority_by_group": byGroup})
+}
+
 func (h *GroupHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")

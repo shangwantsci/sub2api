@@ -148,8 +148,10 @@ export default {
     editTitle: 'Edit account',
     editFailed: 'Failed to save',
     nameRequired: 'Account name cannot be empty',
-    customTierLocked:
-      'This account is on a custom tier. Pick any tier above to switch to it; changing the custom values themselves needs an administrator.',
+    currentParamsNonStandard:
+      "This account's current settings don't match any standard tier: {concurrency} concurrent, {sessions} sessions, {rpm} req/min, {window} per 5 hours. Changing the tier will overwrite them.",
+    customTierZeroHint:
+      'All four must be greater than 0. A 0 means "this limit is off", not "limited to zero".',
     reauth: 'Re-authorize',
     reauthTitle: 'Re-authorize',
     reauthHint:

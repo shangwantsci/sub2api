@@ -21,8 +21,10 @@ import (
 // credentials / credentials_status、type、platform、extra、proxy / proxy_id、
 // priority / pool_weight / load_factor / rate_multiplier、oauth_client、
 // content_review_policy、claude_oauth_system_prompt_policy、
-// concurrency / base_rpm / window_cost_limit 等调度与限流参数、
 // scheduler score、group_ids。
+//
+// 档位参数（concurrency / max_sessions / base_rpm / window_cost_limit）是**有意
+// 下发**的例外：上号页选档时这四个值一直就是明着给供号商看的，见 CapacityTierView。
 //
 // 账号自己在 Anthropic 那边的额度用量不在这个视图里，走单独的
 // GET /provider/accounts/:id/usage，见 AccountUsageView。
@@ -41,11 +43,29 @@ type AccountView struct {
 	// HostingTypeLabel 是托管类型的对外文案，不是分组名，更不是底层策略。
 	HostingTypeLabel string `json:"hosting_type_label"`
 	// TierLabel 是速率档位的对外文案。
+	//
+	// **按账号实际生效的参数反推，不是 provider_tier 列的直译**，见
+	// service.ResolveProviderAccountTier。为空表示不属于任何标准档位，
+	// 由前端按 i18n 渲染成「自定义」。
 	TierLabel  string     `json:"tier_label"`
 	Tier       string     `json:"tier"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
+
+	// 当前生效的四个档位参数。
+	//
+	// 与上号页 OnboardOptionsView.Tiers 下发的四项完全一致 —— 那里每个档位的这四个
+	// 值一直是明着展示给供号商看的（他就是照着这个选档的），所以下发账号当前的取值
+	// 不构成新的信息泄露。不给这四个值的话，用自定义档的供号商在编辑时只能盲填，
+	// 一保存就把自己原先设的参数覆盖成默认值。
+	//
+	// 0 的语义：max_sessions / base_rpm / window_cost_limit 的 0 表示「不启用该限制」
+	// （既有约定，最高档的 5h 上限就是 0）；并发的 0 同样是不限。
+	Concurrency     int     `json:"concurrency"`
+	MaxSessions     int     `json:"max_sessions"`
+	BaseRPM         int     `json:"base_rpm"`
+	WindowCostLimit float64 `json:"window_cost_limit"`
 
 	// 本结算周期内该账号的 1 倍率用量。
 	// 金额用 decimal 并序列化成字符串，避免 JSON 数字在 JS 侧退化为二进制浮点。
@@ -142,6 +162,8 @@ func AccountViewFromService(
 	if a == nil {
 		return AccountView{}
 	}
+	// 档位按账号实际参数反推，不读 provider_tier 列 —— 管理员改过参数后那一列不会跟着变。
+	tier, tierLabel := service.ResolveProviderAccountTier(settings, a)
 	out := AccountView{
 		ID:               a.ID,
 		Name:             a.Name,
@@ -149,14 +171,16 @@ func AccountViewFromService(
 		Email:            providerAccountEmail(a),
 		Status:           service.ProviderAccountDisplayStatus(a),
 		HostingTypeLabel: service.ProviderHostingLabel(settings, a.GroupIDs),
-		TierLabel:        service.ProviderTierLabel(settings, a.ProviderTier),
+		Tier:             tier,
+		TierLabel:        tierLabel,
 		ExpiresAt:        a.ExpiresAt,
 		LastUsedAt:       a.LastUsedAt,
 		CreatedAt:        a.CreatedAt,
 		PeriodCost:       decimal.Zero,
-	}
-	if a.ProviderTier != nil {
-		out.Tier = *a.ProviderTier
+		Concurrency:      a.Concurrency,
+		MaxSessions:      a.GetMaxSessions(),
+		BaseRPM:          a.GetBaseRPM(),
+		WindowCostLimit:  a.GetWindowCostLimit(),
 	}
 	if usage != nil {
 		out.PeriodRequests = usage.Requests
