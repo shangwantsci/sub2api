@@ -23,6 +23,10 @@ func (m *openAIWSFailoverHandlerAccountRepoStub) UpdateProviderTierParams(contex
 	return nil
 }
 
+func (m *openAIWSFailoverHandlerAccountRepoStub) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}
+
 func (m *openAIWSUsageHandlerAccountRepoStub) ListByProvider(context.Context, int64) ([]service.Account, error) {
 	return nil, nil
 }
@@ -33,6 +37,10 @@ func (m *openAIWSUsageHandlerAccountRepoStub) CountByProviderTier(context.Contex
 	return 0, nil
 }
 func (m *openAIWSUsageHandlerAccountRepoStub) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
+	return nil
+}
+
+func (m *openAIWSUsageHandlerAccountRepoStub) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
 }
 

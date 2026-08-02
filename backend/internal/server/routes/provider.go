@@ -48,8 +48,14 @@ func RegisterProviderRoutes(
 		{
 			accounts.GET("", h.Provider.ListAccounts)
 			accounts.GET("/:id/stats", h.Provider.GetAccountStats)
+			// 账号在 Anthropic 侧的额度用量。默认 source=passive（读被动采样、零外部调用），
+			// source=active 才真的去问一次上游。
+			accounts.GET("/:id/usage", h.Provider.GetAccountUsage)
+			accounts.PATCH("/:id", h.Provider.UpdateAccount)
 			accounts.POST("/:id/pause", h.Provider.PauseAccount)
 			accounts.POST("/:id/resume", h.Provider.ResumeAccount)
+			// 重新授权链接按账号原有类型生成，与上号时的 /onboard/auth-url 分开。
+			accounts.POST("/:id/auth-url", h.Provider.GenerateReauthURL)
 			accounts.POST("/:id/reauth", h.Provider.Reauth)
 			accounts.DELETE("/:id", h.Provider.OfflineAccount)
 		}

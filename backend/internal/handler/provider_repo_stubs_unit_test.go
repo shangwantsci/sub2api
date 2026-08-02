@@ -24,6 +24,10 @@ func (m *grokCredentialHandlerRepo) UpdateProviderTierParams(context.Context, in
 	return nil
 }
 
+func (m *grokCredentialHandlerRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}
+
 func (m *userHandlerRepoStub) ListProviders(context.Context) ([]service.User, error) {
 	return nil, nil
 }

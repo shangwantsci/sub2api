@@ -84,6 +84,12 @@ type AccountRepository interface {
 	// UpdateProviderTierParams 回填档位参数。extra 由调用方增量合并后整体传入，
 	// 调用方必须保证未被档位触碰的键原样保留。
 	UpdateProviderTierParams(ctx context.Context, id int64, concurrency, loadFactor int, extra map[string]any) error
+	// UpdateProviderAccountTier 改单个账号所属档位，同时写 provider_tier 列。
+	//
+	// 与上一条的区别：上一条是管理端「应用到存量」，账号仍在原档位、只刷新参数；
+	// 这一条是供号商自己换档，档位标识本身要变。provider_tier 不在通用 Update 的
+	// builder 里，换档只能走这条定向更新。extra 同样由调用方增量合并后整体传入。
+	UpdateProviderAccountTier(ctx context.Context, id int64, tier string, concurrency, loadFactor int, extra map[string]any) error
 
 	UpdateLastUsed(ctx context.Context, id int64) error
 	BatchUpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error

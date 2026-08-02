@@ -79,7 +79,9 @@ type CustomTierPayload struct {
 //   - SessionKey 非空       → Cookie 授权
 //   - SessionID + Code 非空 → 手动授权码
 type OnboardRequest struct {
-	Name  string  `json:"name" binding:"required"`
+	// Name 允许留空：批量上号时供号商一次粘贴多行 session key，逐个手填名字不现实。
+	// 留空时按换票返回的邮箱自动命名，见 resolveOnboardAccountName。
+	Name  string  `json:"name"`
 	Notes *string `json:"notes"`
 	// Method 决定账号 type：oauth 或 setup-token。
 	Method string `json:"method" binding:"required,oneof=oauth setup-token"`
@@ -156,6 +158,28 @@ func (h *Handler) Onboard(c *gin.Context) {
 		return
 	}
 
+	// 同一个 Anthropic 账号不能上两次。
+	//
+	// 这不是「顺手做个校验」：前端 axios 超时是 30 秒，而 CookieAuth 内部要串行打三次
+	// claude.ai、最坏 180 秒，于是「前端已超时报错、后端仍然把号建成了」是常态，
+	// 供号商看到失败必然重试。不去重的话同一个 Anthropic 账号会变成两条账号记录各自
+	// 参与调度，共用一份上游配额互相打架，结算时也会把同一份用量算成两个号。
+	existing, err := h.findOnboardedAccount(ctx, providerID, tokenInfo)
+	if err != nil {
+		cleanup("duplicate lookup failed")
+		response.ErrorFrom(c, err)
+		return
+	}
+	if existing != nil {
+		// 已下线（软删除）的账号查不到，所以下线后重新上同一个号仍然走正常创建流程。
+		cleanup("account already onboarded")
+		response.Success(c, OnboardResultView{
+			Account:   AccountViewFromService(existing, settings, nil),
+			Duplicate: true,
+		})
+		return
+	}
+
 	// 调度优先级与目标托管分组对齐。priority 是硬门槛，取值与分组内在跑的账号
 	// 不一致会让其中一边永久拿不到流量，所以这里按分组现值自动决定，不让人配。
 	hostingGroupID := req.HostingTypeID
@@ -172,7 +196,7 @@ func (h *Handler) Onboard(c *gin.Context) {
 	credentials := buildCredentials(tokenInfo)
 	input, err := service.BuildProviderAccountInput(settings, service.ProviderOnboardInput{
 		ProviderUserID: providerID,
-		Name:           req.Name,
+		Name:           resolveOnboardAccountName(req.Name, tokenInfo),
 		Notes:          req.Notes,
 		AccountType:    req.Method,
 		Credentials:    credentials,
@@ -196,7 +220,59 @@ func (h *Handler) Onboard(c *gin.Context) {
 	}
 
 	// 只回脱敏视图，不回 tokenInfo。
-	response.Success(c, AccountViewFromService(account, settings, nil))
+	response.Success(c, OnboardResultView{Account: AccountViewFromService(account, settings, nil)})
+}
+
+// resolveOnboardAccountName 决定落库的账号名。
+//
+// 供号商自己填了就用他填的；批量上号时留空，按换票拿到的邮箱命名 —— 这正是供号商
+// 用来对照「手上哪些号已经上了」的标识，比 `账号1/账号2` 有用得多。
+// 邮箱也拿不到时退回账号 UUID 前 8 位，仍然为空则交给 BuildProviderAccountInput 报
+// NAME_REQUIRED，不编造一个无从对照的名字。
+func resolveOnboardAccountName(name string, t *service.TokenInfo) string {
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		return trimmed
+	}
+	if t == nil {
+		return ""
+	}
+	if email := strings.TrimSpace(t.EmailAddress); email != "" {
+		return email
+	}
+	if uuid := strings.TrimSpace(t.AccountUUID); len(uuid) >= 8 {
+		return "Anthropic " + uuid[:8]
+	}
+	return ""
+}
+
+// findOnboardedAccount 在该供号商名下按 Anthropic 账号 UUID 找已上过的号。
+//
+// 只认 account_uuid：名称由供号商自填可以重复，邮箱在部分换票结果里为空，
+// 都不足以判定「是同一个 Anthropic 账号」。
+// 已下线的账号被 Ent 软删除拦截器过滤掉，所以下线后重新上同一个号不会被误判成重复。
+func (h *Handler) findOnboardedAccount(
+	ctx context.Context,
+	providerID int64,
+	t *service.TokenInfo,
+) (*service.Account, error) {
+	if t == nil {
+		return nil, nil
+	}
+	uuid := strings.TrimSpace(t.AccountUUID)
+	if uuid == "" {
+		return nil, nil
+	}
+	accounts, err := h.accountRepo.ListByProvider(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range accounts {
+		acc := &accounts[i]
+		if strings.EqualFold(providerAccountUUID(acc), uuid) {
+			return acc, nil
+		}
+	}
+	return nil, nil
 }
 
 // resolveOnboardProxy 定出本次上号使用的出口代理。
@@ -383,6 +459,40 @@ func toServiceCustomTier(in *CustomTierPayload) *service.ProviderCustomTierInput
 		WindowCostLimit: in.WindowCostLimit,
 		IdleTimeoutMin:  in.IdleTimeoutMin,
 	}
+}
+
+// GenerateReauthURL 为已有账号生成重新授权链接。
+// POST /api/v1/provider/accounts/:id/auth-url
+//
+// 与上号时的 /onboard/auth-url 分成两个端点，是因为链接类型必须与账号原有类型一致：
+// Setup Token 的号拿 OAuth 链接换回来的凭据 scope 对不上账号类型。而账号是 oauth
+// 还是 setup-token 属于内部处理方式、不下发给供号商，前端没有这个信息也不该有，
+// 所以只能由后端按账号自己定，不接受请求参数。
+func (h *Handler) GenerateReauthURL(c *gin.Context) {
+	providerID, ok := currentProviderID(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	account, ok := h.ownedAccount(ctx, c, providerID)
+	if !ok {
+		return
+	}
+
+	var (
+		result *service.GenerateAuthURLResult
+		err    error
+	)
+	if account.Type == service.AccountTypeSetupToken {
+		result, err = h.oauthService.GenerateSetupTokenURL(ctx, nil)
+	} else {
+		result, err = h.oauthService.GenerateAuthURL(ctx, nil)
+	}
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 // ReauthRequest 是重新授权。

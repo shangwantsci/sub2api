@@ -25,6 +25,10 @@ func (m *accountRepoStub) UpdateProviderTierParams(context.Context, int64, int, 
 	return nil
 }
 
+func (m *accountRepoStub) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}
+
 func (m *publicBatchImageAccountRepo) ListByProvider(context.Context, int64) ([]Account, error) {
 	return nil, nil
 }
@@ -35,6 +39,10 @@ func (m *publicBatchImageAccountRepo) CountByProviderTier(context.Context, strin
 	return 0, nil
 }
 func (m *publicBatchImageAccountRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
+	return nil
+}
+
+func (m *publicBatchImageAccountRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
 }
 
@@ -51,6 +59,10 @@ func (m *mockAccountRepoForPlatform) UpdateProviderTierParams(context.Context, i
 	return nil
 }
 
+func (m *mockAccountRepoForPlatform) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}
+
 func (m *mockAccountRepoForGemini) ListByProvider(context.Context, int64) ([]Account, error) {
 	return nil, nil
 }
@@ -61,6 +73,10 @@ func (m *mockAccountRepoForGemini) CountByProviderTier(context.Context, string) 
 	return 0, nil
 }
 func (m *mockAccountRepoForGemini) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
+	return nil
+}
+
+func (m *mockAccountRepoForGemini) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
 }
 
@@ -77,6 +93,10 @@ func (m *batchAccountQueryRepo) UpdateProviderTierParams(context.Context, int64,
 	return nil
 }
 
+func (m *batchAccountQueryRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}
+
 func (m *fullRebuildAccountRepo) ListByProvider(context.Context, int64) ([]Account, error) {
 	return nil, nil
 }
@@ -87,6 +107,10 @@ func (m *fullRebuildAccountRepo) CountByProviderTier(context.Context, string) (i
 	return 0, nil
 }
 func (m *fullRebuildAccountRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
+	return nil
+}
+
+func (m *fullRebuildAccountRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
 }
 

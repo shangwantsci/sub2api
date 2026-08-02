@@ -22,7 +22,17 @@
           </h2>
           <div>
             <label class="input-label" for="onboard-name">{{ t('provider.onboard.name') }}</label>
-            <input id="onboard-name" v-model.trim="form.name" type="text" required class="input" />
+            <input
+              id="onboard-name"
+              v-model.trim="form.name"
+              type="text"
+              :required="!isBatch"
+              :disabled="isBatch"
+              class="input disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-dark-800"
+            />
+            <p v-if="isBatch" class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('provider.onboard.batchAutoName') }}
+            </p>
           </div>
           <div>
             <label class="input-label" for="onboard-notes">{{ t('provider.onboard.notes') }}</label>
@@ -290,10 +300,16 @@
             <textarea
               id="session-key"
               v-model.trim="form.sessionKey"
-              rows="3"
+              rows="6"
               class="input font-mono text-xs"
               :placeholder="t('provider.onboard.sessionKeyPlaceholder')"
             ></textarea>
+            <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('provider.onboard.sessionKeyHint') }}
+            </p>
+            <p v-if="isBatch" class="mt-1 text-xs text-indigo-600 dark:text-indigo-400">
+              {{ t('provider.onboard.batchDetected', { count: sessionKeys.length }) }}
+            </p>
           </div>
 
           <div v-else class="space-y-3">
@@ -322,13 +338,85 @@
           </div>
         </section>
 
+        <!-- 批量进度。页面不能关：剩下的 key 由这个页面逐条发出去，走的是单账号接口。 -->
+        <section v-if="batchItems.length" class="card space-y-3 p-5">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold text-gray-900 dark:text-dark-100">
+              {{ t('provider.onboard.batchProgress') }}
+            </h2>
+            <span class="text-sm text-gray-500 dark:text-dark-400">
+              {{ batchDone }} / {{ batchItems.length }}
+            </span>
+          </div>
+
+          <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-700">
+            <div
+              class="h-full rounded-full bg-indigo-500 transition-all duration-300"
+              :style="{ width: `${batchPercent}%` }"
+            ></div>
+          </div>
+
+          <p class="text-sm text-gray-600 dark:text-dark-300">
+            {{
+              t('provider.onboard.batchSummary', {
+                created: batchCreated,
+                duplicate: batchDuplicate,
+                failed: batchFailed,
+              })
+            }}
+          </p>
+
+          <ul class="max-h-64 space-y-1 overflow-y-auto">
+            <li
+              v-for="item in batchItems"
+              :key="item.index"
+              class="flex items-start justify-between gap-3 rounded px-2 py-1 text-sm odd:bg-gray-50 dark:odd:bg-dark-800/60"
+            >
+              <span class="shrink-0 font-mono text-xs text-gray-500 dark:text-dark-400">
+                #{{ item.index }} {{ item.hint }}
+              </span>
+              <span class="text-right">
+                <span :class="batchStatusClass(item.status)">
+                  {{ t(`provider.onboard.batchStatus.${item.status}`) }}
+                </span>
+                <span v-if="item.name" class="ml-2 text-gray-700 dark:text-dark-200">
+                  {{ item.name }}
+                </span>
+                <span v-if="item.message" class="block text-xs text-red-500 dark:text-red-400">
+                  {{ item.message }}
+                </span>
+              </span>
+            </li>
+          </ul>
+
+          <div v-if="batchFinished" class="flex flex-wrap gap-3">
+            <button
+              v-if="batchFailed > 0"
+              type="button"
+              class="btn-secondary"
+              @click="retryFailed"
+            >
+              {{ t('provider.onboard.batchRetryFailed', { count: batchFailed }) }}
+            </button>
+            <RouterLink to="/provider/accounts" class="btn-primary">
+              {{ t('provider.onboard.batchGoToAccounts') }}
+            </RouterLink>
+          </div>
+        </section>
+
         <p v-if="errorMessage" class="text-sm text-red-600 dark:text-red-400">{{ errorMessage }}</p>
         <p v-if="successMessage" class="text-sm text-emerald-600 dark:text-emerald-400">
           {{ successMessage }}
         </p>
 
         <button type="submit" class="btn-primary w-full" :disabled="submitting || !proxyReady">
-          {{ submitting ? t('provider.onboard.submitting') : t('provider.onboard.submit') }}
+          {{
+            submitting
+              ? t('provider.onboard.submitting')
+              : isBatch
+                ? t('provider.onboard.submitBatch', { count: sessionKeys.length })
+                : t('provider.onboard.submit')
+          }}
         </button>
       </form>
     </div>
@@ -338,10 +426,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import ProviderLayout from '@/components/layout/ProviderLayout.vue'
 import { generateAuthURL, getOnboardOptions, onboard } from '@/api/provider'
-import type { ProviderOnboardOptions, ProviderProxyMode } from '@/api/provider'
+import type { ProviderOnboardOptions, ProviderOnboardPayload, ProviderProxyMode } from '@/api/provider'
 import { describeParsedProxy, parseProxyUrl } from '@/utils/proxyUrl'
 import { resolveProviderProxyModeState } from '@/utils/providerProxyMode'
 
@@ -402,6 +490,93 @@ const proxyReady = computed(() =>
   form.proxyMode === 'auto' ? autoProxyAvailable.value : manualProxyAllowed.value && !!parsedProxy.value
 )
 
+/** 批量上号中每一条的状态。duplicate 不是失败：这个号之前就上过，本次没有重复建。 */
+type BatchItemStatus = 'pending' | 'running' | 'created' | 'duplicate' | 'failed'
+
+interface BatchItem {
+  index: number
+  /** 原始 key，只用于失败重试，不渲染到界面上。 */
+  key: string
+  /** 脱敏后的显示串。 */
+  hint: string
+  status: BatchItemStatus
+  /** 落库的账号名，通常就是该号的邮箱。 */
+  name: string
+  message: string
+}
+
+const batchItems = ref<BatchItem[]>([])
+
+/**
+ * 一行一个 session key。
+ *
+ * 供号商手上的 key 本来就是一行一条，逐条填一遍表单不现实 —— 之前只能整段当成
+ * 一个 key 提交，必然换票失败。
+ */
+const sessionKeys = computed(() =>
+  form.sessionKey
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+)
+
+// 授权链接方式一个授权码只能换一个账号，天然不支持批量。
+const isBatch = computed(() => authMode.value === 'cookie' && sessionKeys.value.length > 1)
+
+const batchDone = computed(
+  () => batchItems.value.filter((i) => i.status !== 'pending' && i.status !== 'running').length
+)
+const batchCreated = computed(() => batchItems.value.filter((i) => i.status === 'created').length)
+const batchDuplicate = computed(() => batchItems.value.filter((i) => i.status === 'duplicate').length)
+const batchFailed = computed(() => batchItems.value.filter((i) => i.status === 'failed').length)
+const batchPercent = computed(() =>
+  batchItems.value.length === 0 ? 0 : Math.round((batchDone.value / batchItems.value.length) * 100)
+)
+const batchFinished = computed(() => batchItems.value.length > 0 && !submitting.value)
+
+/**
+ * 只显示头尾各几位。
+ *
+ * 整串贴在界面上，一次截图或录屏就把凭据带出去了 —— 而供号商本来就是在
+ * 「一次粘贴几十条」的场景下用这个页面。
+ */
+function maskSessionKey(key: string): string {
+  if (key.length <= 12) {
+    return `${key.slice(0, 4)}…`
+  }
+  return `${key.slice(0, 8)}…${key.slice(-4)}`
+}
+
+function batchStatusClass(status: BatchItemStatus): string {
+  switch (status) {
+    case 'created':
+      return 'text-emerald-600 dark:text-emerald-400'
+    case 'duplicate':
+      return 'text-amber-600 dark:text-amber-400'
+    case 'failed':
+      return 'text-red-600 dark:text-red-400'
+    case 'running':
+      return 'text-indigo-600 dark:text-indigo-400'
+    default:
+      return 'text-gray-400'
+  }
+}
+
+/** 除凭据以外的公共字段，批量时每条共用。 */
+function basePayload(): ProviderOnboardPayload {
+  return {
+    notes: form.notes || null,
+    method: form.method,
+    proxy_mode: form.proxyMode,
+    // 发原串而不是前端解析结果：解析规则以后端为准，两边一旦漂移，
+    // 前端预览错了顶多显示不准，落库的才是对的。
+    proxy_url: form.proxyMode === 'manual' ? form.proxyUrl : undefined,
+    hosting_type_id: form.hostingTypeID,
+    tier: form.tier,
+    custom_tier: form.tier === 'custom' ? { ...form.custom } : null,
+  }
+}
+
 onMounted(async () => {
   try {
     const data = await getOnboardOptions()
@@ -434,25 +609,31 @@ async function handleGenerateURL() {
 }
 
 async function handleSubmit() {
+  if (isBatch.value) {
+    await submitBatch(sessionKeys.value)
+    return
+  }
+  await submitSingle()
+}
+
+async function submitSingle() {
   submitting.value = true
   errorMessage.value = ''
   successMessage.value = ''
   try {
-    await onboard({
-      name: form.name,
-      notes: form.notes || null,
-      method: form.method,
-      session_key: authMode.value === 'cookie' ? form.sessionKey : undefined,
+    const result = await onboard({
+      ...basePayload(),
+      name: form.name || undefined,
+      session_key: authMode.value === 'cookie' ? sessionKeys.value[0] : undefined,
       session_id: authMode.value === 'manual' ? form.sessionID : undefined,
       code: authMode.value === 'manual' ? form.code : undefined,
-      proxy_mode: form.proxyMode,
-      // 发原串而不是前端解析结果：解析规则以后端为准，两边一旦漂移，
-      // 前端预览错了顶多显示不准，落库的才是对的。
-      proxy_url: form.proxyMode === 'manual' ? form.proxyUrl : undefined,
-      hosting_type_id: form.hostingTypeID,
-      tier: form.tier,
-      custom_tier: form.tier === 'custom' ? { ...form.custom } : null,
     })
+    if (result.duplicate) {
+      // 不跳转：这个号本来就在列表里，直接跳走的话供号商只会以为自己又上了一个，
+      // 得让他看见「这条是重复的」。
+      successMessage.value = t('provider.onboard.duplicate', { name: result.account.name })
+      return
+    }
     successMessage.value = t('provider.onboard.success')
     router.push('/provider/accounts')
   } catch (error) {
@@ -460,5 +641,54 @@ async function handleSubmit() {
   } finally {
     submitting.value = false
   }
+}
+
+/**
+ * 逐条串行提交。
+ *
+ * 串行不是为了省事：auto 代理模式下平台按「当前绑定最少」选出口，只有等上一条
+ * 落库、绑定数 +1，下一条才会挑到别的 IP；并发发出去的话整批号会全挤在同一个出口上。
+ * 换票打的又是 claude.ai，同 IP 高频请求本身也容易被风控。
+ */
+async function submitBatch(keys: string[]) {
+  submitting.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  batchItems.value = keys.map((key, i) => ({
+    index: i + 1,
+    key,
+    hint: maskSessionKey(key),
+    status: 'pending' as BatchItemStatus,
+    name: '',
+    message: '',
+  }))
+  for (const item of batchItems.value) {
+    await runBatchItem(item)
+  }
+  submitting.value = false
+}
+
+async function runBatchItem(item: BatchItem) {
+  item.status = 'running'
+  item.message = ''
+  try {
+    const result = await onboard({ ...basePayload(), session_key: item.key })
+    item.status = result.duplicate ? 'duplicate' : 'created'
+    item.name = result.account.name || result.account.email || ''
+  } catch (error) {
+    item.status = 'failed'
+    item.message = (error as { message?: string })?.message || t('provider.onboard.failed')
+  }
+}
+
+/** 只重跑失败项。成功与重复的不再动，避免把已经建好的号又走一遍换票。 */
+async function retryFailed() {
+  submitting.value = true
+  for (const item of batchItems.value) {
+    if (item.status === 'failed') {
+      await runBatchItem(item)
+    }
+  }
+  submitting.value = false
 }
 </script>

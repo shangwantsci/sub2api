@@ -19,10 +19,44 @@ export type MoneyString = string
 /** 账号状态的压缩四态，内部调度细节不下发。 */
 export type ProviderAccountStatus = 'active' | 'paused' | 'error' | 'unknown'
 
+/**
+ * 一个额度窗口的用量。
+ *
+ * utilization 是 Anthropic 自己给出的百分比（0-100+，可能超过 100），
+ * 也就是「这个号在这个窗口里用掉了多少额度」，与平台设的任何限额无关。
+ *
+ * 刻意没有任何金额字段：后端 AccountUsageWindowView 就不下发，
+ * 那些金额含平台倍率或是向客户收的价。
+ */
+export interface ProviderUsageWindow {
+  utilization: number
+  resets_at?: string | null
+  remaining_seconds?: number
+  requests?: number
+  tokens?: number
+}
+
+/** 账号在 Anthropic 侧的额度用量。 */
+export interface ProviderAccountUsage {
+  /** passive = 请求时顺带采集的响应头（可能不是最新）；active = 刚主动查过上游。 */
+  source?: 'passive' | 'active'
+  updated_at?: string | null
+  five_hour?: ProviderUsageWindow | null
+  seven_day?: ProviderUsageWindow | null
+  seven_day_sonnet?: ProviderUsageWindow | null
+  seven_day_fable?: ProviderUsageWindow | null
+}
+
 export interface ProviderAccount {
   id: number
   name: string
   notes?: string | null
+  /**
+   * 该账号对应的 Anthropic 登录邮箱，来自上号时的换票结果。
+   *
+   * 供号商靠它对照「手上哪些号已经上了」。极早期上号且未重新授权过的账号可能为空。
+   */
+  email?: string
   status: ProviderAccountStatus
   /** 托管类型的对外文案，不是分组名。 */
   hosting_type_label: string
@@ -35,6 +69,19 @@ export interface ProviderAccount {
   period_tokens: number
   /** 本结算周期内该账号的 1 倍率金额。见 MoneyString。 */
   period_cost: MoneyString
+}
+
+/**
+ * 账号编辑请求。
+ *
+ * 三项都是可选的，**不传表示不改这一项**。注意 notes 传空字符串是清空备注，
+ * 与不传不是一回事。
+ */
+export interface ProviderAccountUpdatePayload {
+  name?: string
+  notes?: string | null
+  tier?: string
+  custom_tier?: ProviderCustomTierPayload | null
 }
 
 export interface ProviderHostingType {
@@ -97,7 +144,13 @@ export interface ProviderCustomTierPayload {
 }
 
 export interface ProviderOnboardPayload {
-  name: string
+  /**
+   * 留空时由后端按换票拿到的邮箱自动命名。
+   *
+   * 批量上号（一次粘贴多行 session key）就是靠这个：逐个手填名字不现实，
+   * 而邮箱正是供号商用来对照「手上哪些号已经上了」的标识。
+   */
+  name?: string
   notes?: string | null
   /** 只有 oauth 与 setup-token 两种。 */
   method: 'oauth' | 'setup-token'
@@ -120,6 +173,18 @@ export interface ProviderOnboardPayload {
 export interface ProviderAuthURLResult {
   auth_url: string
   session_id: string
+}
+
+/**
+ * 上号提交的结果。
+ *
+ * duplicate 为 true 时 account 是**已存在**的那条账号，本次没有新建 —— 后端按
+ * Anthropic 账号 UUID 判重。这不是错误：前端请求超时后供号商重试是常态，
+ * 批量上号里重复粘贴同一批 key 也很常见，界面上要和「新建成功」区分开显示。
+ */
+export interface ProviderOnboardResult {
+  account: ProviderAccount
+  duplicate: boolean
 }
 
 export interface ProviderAccountUsage {

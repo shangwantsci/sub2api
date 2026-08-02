@@ -23,6 +23,8 @@ type Handler struct {
 	accountRepo       service.AccountRepository
 	usageReader       service.ProviderUsageReader
 	userReader        service.ProviderUserReader
+	// accountUsageService 供「账号在 Anthropic 侧的额度用量」使用，与结算无关。
+	accountUsageService *service.AccountUsageService
 }
 
 func NewHandler(
@@ -34,16 +36,18 @@ func NewHandler(
 	accountRepo service.AccountRepository,
 	usageReader service.ProviderUsageReader,
 	userReader service.ProviderUserReader,
+	accountUsageService *service.AccountUsageService,
 ) *Handler {
 	return &Handler{
-		authService:       authService,
-		oauthService:      oauthService,
-		adminService:      adminService,
-		settingService:    settingService,
-		settlementService: settlementService,
-		accountRepo:       accountRepo,
-		usageReader:       usageReader,
-		userReader:        userReader,
+		authService:         authService,
+		oauthService:        oauthService,
+		adminService:        adminService,
+		settingService:      settingService,
+		settlementService:   settlementService,
+		accountRepo:         accountRepo,
+		usageReader:         usageReader,
+		userReader:          userReader,
+		accountUsageService: accountUsageService,
 	}
 }
 

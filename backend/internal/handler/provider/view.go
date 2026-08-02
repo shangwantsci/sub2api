@@ -8,6 +8,7 @@
 package provider
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -20,11 +21,20 @@ import (
 // credentials / credentials_status、type、platform、extra、proxy / proxy_id、
 // priority / pool_weight / load_factor / rate_multiplier、oauth_client、
 // content_review_policy、claude_oauth_system_prompt_policy、
-// session 窗口内部状态、scheduler score、group_ids。
+// concurrency / base_rpm / window_cost_limit 等调度与限流参数、
+// scheduler score、group_ids。
+//
+// 账号自己在 Anthropic 那边的额度用量不在这个视图里，走单独的
+// GET /provider/accounts/:id/usage，见 AccountUsageView。
 type AccountView struct {
 	ID    int64   `json:"id"`
 	Name  string  `json:"name"`
 	Notes *string `json:"notes,omitempty"`
+	// Email 是这个账号对应的 Anthropic 登录邮箱，来自换票结果。
+	//
+	// 供号商手上通常有一批号，名称可以随便填也可以重复，只有邮箱能让他对上
+	// 「哪些已经上了、哪些还没上」。这是他自己的账号信息，不是平台的内部处理。
+	Email string `json:"email,omitempty"`
 	// Status 是压缩过的四态：active / paused / error / unknown。
 	// 内部的 rate limit、overload、temp unschedulable 等调度细节一律不下发。
 	Status string `json:"status"`
@@ -44,9 +54,86 @@ type AccountView struct {
 	PeriodCost     decimal.Decimal `json:"period_cost"`
 }
 
+// AccountUsageWindowView 是一个额度窗口的对外视图。
+//
+// Utilization 是 Anthropic 自己给出的用量百分比（0-100+），也就是「这个号在这个窗口
+// 里用掉了多少额度」，与平台设的任何限额无关。
+//
+// **刻意不含任何金额**：UsageInfo.WindowStats 里的 Cost 含账号倍率、UserCost 是向
+// 客户收的价，两者都会泄露平台定价；StandardCost 虽然与结算同口径，但账号列表里
+// 已经有「本期金额」，再放一个区间不同的金额只会让人以为对账对不上。
+type AccountUsageWindowView struct {
+	Utilization      float64    `json:"utilization"`
+	ResetsAt         *time.Time `json:"resets_at,omitempty"`
+	RemainingSeconds int        `json:"remaining_seconds,omitempty"`
+	// 窗口内的本地请求数与 token 数，供号商用来对照「这段时间跑了多少量」。
+	Requests int64 `json:"requests,omitempty"`
+	Tokens   int64 `json:"tokens,omitempty"`
+}
+
+// AccountUsageView 是账号在 Anthropic 侧的额度用量。
+//
+// 与 AccountView 一样是显式白名单：service.UsageInfo 上挂着 Grok/Gemini/Antigravity
+// 的一大堆字段和各种金额，直接透传出去迟早出事。供号商账号强制 PlatformAnthropic，
+// 这里只取四个窗口。
+type AccountUsageView struct {
+	// Source 为 passive 表示数据来自请求时顺带采集的响应头（可能不是最新的），
+	// active 表示刚从 Anthropic 主动查过。
+	Source    string     `json:"source,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+
+	FiveHour       *AccountUsageWindowView `json:"five_hour,omitempty"`
+	SevenDay       *AccountUsageWindowView `json:"seven_day,omitempty"`
+	SevenDaySonnet *AccountUsageWindowView `json:"seven_day_sonnet,omitempty"`
+	SevenDayFable  *AccountUsageWindowView `json:"seven_day_fable,omitempty"`
+}
+
+// AccountUsageViewFromService 把内部用量结构收敛成供号商视图。
+func AccountUsageViewFromService(info *service.UsageInfo) AccountUsageView {
+	if info == nil {
+		return AccountUsageView{}
+	}
+	return AccountUsageView{
+		Source:         info.Source,
+		UpdatedAt:      info.UpdatedAt,
+		FiveHour:       usageWindowView(info.FiveHour),
+		SevenDay:       usageWindowView(info.SevenDay),
+		SevenDaySonnet: usageWindowView(info.SevenDaySonnet),
+		SevenDayFable:  usageWindowView(info.SevenDayFable),
+	}
+}
+
+func usageWindowView(p *service.UsageProgress) *AccountUsageWindowView {
+	if p == nil {
+		return nil
+	}
+	out := &AccountUsageWindowView{
+		Utilization:      p.Utilization,
+		ResetsAt:         p.ResetsAt,
+		RemainingSeconds: p.RemainingSeconds,
+	}
+	// 只搬请求数与 token 数。WindowStats 里的三个金额一个都不能带出去。
+	if p.WindowStats != nil {
+		out.Requests = p.WindowStats.Requests
+		out.Tokens = p.WindowStats.Tokens
+	}
+	return out
+}
+
+// OnboardResultView 是上号提交的结果。
+//
+// 比起直接回 AccountView 多一个 Duplicate：批量上号时供号商需要分清
+// 「这条新建成功」和「这个号之前就上过、这次没有重复建」，
+// 两者都不是错误，但前端要显示成不同的结果。
+type OnboardResultView struct {
+	Account AccountView `json:"account"`
+	// Duplicate 为 true 时 Account 是**已存在**的那条账号，本次没有新建。
+	Duplicate bool `json:"duplicate"`
+}
+
 // AccountViewFromService 构造供号商账号视图。
 //
-// 只读取显式列出的字段。usage 为 nil 时用量归零。
+// 只读取显式列出的字段。usage 为 nil 时本期用量归零。
 func AccountViewFromService(
 	a *service.Account,
 	settings service.ProviderSettings,
@@ -59,6 +146,7 @@ func AccountViewFromService(
 		ID:               a.ID,
 		Name:             a.Name,
 		Notes:            a.Notes,
+		Email:            providerAccountEmail(a),
 		Status:           service.ProviderAccountDisplayStatus(a),
 		HostingTypeLabel: service.ProviderHostingLabel(settings, a.GroupIDs),
 		TierLabel:        service.ProviderTierLabel(settings, a.ProviderTier),
@@ -76,6 +164,42 @@ func AccountViewFromService(
 		out.PeriodCost = usage.StandardCost
 	}
 	return out
+}
+
+// providerAccountEmail 取账号对应的 Anthropic 登录邮箱。
+//
+// 先读 extra：上号时 MirrorProviderIdentityToExtra 会把身份字段从 credentials 复刻过去，
+// 网关也只认 extra 里的那份。回落 credentials 是为了照顾该机制上线之前建的存量账号 ——
+// 它们 extra 里没有这个键，但 credentials 里一直有。
+func providerAccountEmail(a *service.Account) string {
+	if a == nil {
+		return ""
+	}
+	if v := strings.TrimSpace(a.GetExtraString("email_address")); v != "" {
+		return v
+	}
+	return credentialString(a.Credentials, "email_address")
+}
+
+// providerAccountUUID 取账号对应的 Anthropic 账号 UUID，用于判定是否为同一个号。
+func providerAccountUUID(a *service.Account) string {
+	if a == nil {
+		return ""
+	}
+	if v := strings.TrimSpace(a.GetExtraString("account_uuid")); v != "" {
+		return v
+	}
+	return credentialString(a.Credentials, "account_uuid")
+}
+
+func credentialString(creds map[string]any, key string) string {
+	if creds == nil {
+		return ""
+	}
+	if s, ok := creds[key].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 // HostingTypeView 是供号商可选的托管类型。

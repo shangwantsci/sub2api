@@ -28,3 +28,9 @@ func (m *sessionWindowMockRepo) ListByProviderPaged(context.Context, int64, pagi
 func (m *sessionWindowMockRepo) MinPriorityByGroup(context.Context) (map[int64]int, error) {
 	return nil, nil
 }
+
+// UpdateProviderAccountTier 的空实现（换档位）。
+// 同类型的 UpdateProviderTierParams 在 ratelimit_session_window_test.go 里。
+func (m *sessionWindowMockRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}

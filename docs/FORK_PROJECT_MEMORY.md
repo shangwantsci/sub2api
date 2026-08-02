@@ -908,7 +908,115 @@ CSV 公式注入：账号名由供号商自填，可能以 `=` `+` `-` `@` 开�
 （DNS 由代理端解析，不把目标域名从本机出口漏出去）。解析以后端
 `ParseProviderProxyURL` 为准，前端 `utils/proxyUrl.ts` 只做即时预览；IPv6 必须带方括号。
 
-### 4.14.2 已知未决问题
+### 4.14.2 账号管理面板：批量上号、二次编辑、5 小时额度
+
+「我的账号」从一张只读列表变成供号商侧的账号管理面板。四项改动互相咬合，
+起因都是同一件事：供号商手上有一批号，但页面上既看不出哪些已经上了、也改不动。
+
+**账号邮箱下发。** `AccountView.Email` 取自 `extra.email_address`
+（上号时 `MirrorProviderIdentityToExtra` 从 credentials 复刻过去的那份），
+读不到时回落 `credentials` —— 该机制上线之前建的存量账号 extra 里没有这个键。
+名称由供号商自填、可以重复也可以乱填，只有邮箱能让他把列表和手上的号单对上。
+
+**批量上号：前端按行拆分、逐条串行调用现有的单账号接口。**
+
+刻意不复用管理端那套 `account_anthropic_session_import.go`：它的逻辑全在
+`handler/admin` 包内（provider 包 import 不到）、有全进程单任务锁（多个供号商并发
+上号互相 409）、job 查询没有归属校验（凭 job id 能读到别人的邮箱与代理名），
+而且整条路径绕开了 `AssertProviderProxyModeAllowed`、`BuildProviderAccountInput`
+的档位与 priority 对齐、`ApplyProviderForcedCredentials`、extra 白名单。
+复用等于把这些一起搬过来。走单账号接口则所有护栏原封不动。
+
+**串行不是图省事**：auto 代理模式下 `SelectAutoAssignProxy` 按「当前绑定最少」选
+出口，只有等上一条落库、绑定数 +1，下一条才会挑到别的 IP；并发发出去整批号会全
+挤在同一个出口上。换票打的又是 claude.ai，同 IP 高频本身也容易被风控。
+
+**去重是必需项而不是锦上添花。** `CookieAuth` 内部串行打三次 claude.ai、最坏 180 秒，
+而前端 axios 默认超时 30 秒 —— 「前端已报错、后端仍把号建成了」是常态，供号商看到
+失败必然重试。所以：`/provider/onboard/submit` 拿到 tokenInfo 后按
+**`account_uuid`** 在该供号商名下查一遍，命中就回既有账号并置
+`OnboardResultView.Duplicate=true`，不重复建；同时 `api/provider/index.ts` 把这个
+请求的 timeout 单独放宽到 200 秒。只认 `account_uuid`：名称可重复，邮箱在部分换票
+结果里为空，都不足以判定「是同一个 Anthropic 账号」。已下线的账号被软删除拦截器
+滤掉，所以下线后重新上同一个号仍走正常创建。
+
+不去重的后果是同一个 Anthropic 账号变成两条账号记录各自参与调度，共用一份上游配额
+互相打架，结算时同一份用量算成两个号。
+
+`OnboardRequest.Name` 因此去掉了 `binding:"required"`：留空时按换票拿到的邮箱命名，
+邮箱也没有才退到 `Anthropic <uuid 前 8 位>`，仍然为空就交给
+`BuildProviderAccountInput` 报 `NAME_REQUIRED` —— 不编造一个无从对照的占位名。
+
+**二次编辑：`PATCH /provider/accounts/:id`，只开放名称、备注、速率档位。**
+
+- 名称与备注走 `UpdateAccountInput{Name, Notes}`，**其余字段必须全部留零值/nil**。
+  这是唯一安全的调用形态，`buildProfileUpdateInput` 拆成纯函数就是为了让
+  `account_update_test.go` 能逐个字段钉住它：`Extra` 非 nil 即整体覆盖，会把
+  `enable_tls_fingerprint`、`session_id_masking_enabled`、`account_uuid` 一起清掉，
+  而伪装失效完全静默；`Priority` 传 0 是最高优先级，该账号会独占整个分组；
+  `GroupIDs` 非 nil 是全量替换，空切片直接解绑所有分组。
+- `Name` 传空串在 `UpdateAccountInput` 里表示「不改」，所以显式传空名字必须报错，
+  否则是一次没有任何提示的静默失败。`Notes` 传空串则确实是「清空备注」。
+- 改档位**用不了 `UpdateAccount`**：`provider_tier` 列只在 `Create` 的 builder 里。
+  新增了 `UpdateProviderAccountTier`（定向更新，同时写 tier / concurrency /
+  load_factor / extra），与管理端「应用到存量」的 `UpdateProviderTierParams` 是两条：
+  后者账号仍留在原档位、只刷新参数，前者是换档、档位标识本身要变。
+  extra 一律走 `ApplyProviderTierToExtra(account.Extra, tier)` 增量合并 —— 落库是
+  整列覆盖，构造一个只含档位键的 map 会清掉 `persona_*`、`window_cost_sticky_reserve`
+  与身份字段。新增接口方法照例要在 5 个 `provider_repo_stubs*_test.go` 里补空实现。
+- **不开放托管类型与出口代理**：改分组必须同步重算 priority（硬门槛，取值不对会让
+  账号被静默饿死或反过来独占分组），换代理要处理旧私有代理的回收与同参数去重。
+  两件事各自需要单独设计。
+- **编辑里不给自定义档**：自定义档的并发/会话数/RPM 不下发到供号商侧，弹窗只能把
+  输入框预填成默认值，供号商本来只想改个名字、一保存就把自己原先填的参数静默重置了。
+  自定义档的号可以切到任一固定档，改自定义参数本身仍需管理员。
+- 重新授权链接单独走 `POST /provider/accounts/:id/auth-url` 而不复用
+  `/onboard/auth-url`：链接类型必须与账号原有类型一致（Setup Token 的号拿 OAuth
+  链接换回来的凭据 scope 对不上），而账号是 oauth 还是 setup-token 属于内部处理方式、
+  不下发给供号商，前端没有这个信息也不该有，只能由后端按账号自己定。
+  后端 `Reauth` 换票时用的一直是 `account.Type`。
+
+**账号额度用量：`GET /provider/accounts/:id/usage`。**
+
+供号商要看的是**这个号在 Anthropic 那边用掉了多少额度**，与管理端账号管理里那一栏
+是同一套数据，前端也直接复用了 `components/account/UsageProgressBar.vue`：
+标签徽章 + 进度条 + 百分比 + 重置倒计时，`5h` / `7d` / `7d S` / `7d F` 四个窗口，
+配色与管理端一致 —— 同一个号在两边不该看出不同结论。
+
+**别和平台自设的 `window_cost_limit` 混为一谈**，那是两套完全独立的「5 小时」：
+
+| | 账号额度（这里下发的） | 平台费用窗口（不下发） |
+|---|---|---|
+| 数据 | Anthropic 响应头 `anthropic-ratelimit-unified-5h-*` | 本地 `usage_logs` 金额聚合 |
+| 单位 | utilization 百分比 | 美元 |
+| 用途 | 号本身还剩多少余量 | 平台档位限流的调度准入 |
+
+曾经错做成后者：在账号列表里显示 `$12.34 / $60`（已用金额 / 档位上限）。
+那是平台对账号做的限流处理，既不是供号商想知道的，也把档位参数暴露了出去。
+`AccountView` 的 `window_cost_*` 字段、`ProviderUsageReader` 上的批量聚合方法、
+`view_test.go` 白名单里对 `window_cost_limit` 的放开**全部已回退**，
+该禁止子串仍在名单里。
+
+实现约束：
+
+- 响应走 `AccountUsageView` 白名单收敛，**绝不透传 `service.UsageInfo`**：后者挂着
+  Grok / Gemini / Antigravity 各平台的一大堆字段，以及三种口径的金额 ——
+  `WindowStats.Cost` 含账号倍率、`UserCost` 是向客户收的价，漏任何一个都等于把平台
+  定价告诉供号商。窗口视图只搬 `utilization` / `resets_at` / `remaining_seconds` /
+  `requests` / `tokens`，**一个金额都不带**。
+  `StandardCost` 虽然与结算同口径也不带：列表里已经有「本期金额」，
+  再放一个区间不同的金额只会让人以为对账对不上。
+- 默认 `source=passive`，走 `AccountUsageService.GetPassiveUsage` —— 它只读账号 extra
+  里的被动采样值（网关每次请求顺带采回来的响应头），**零外部调用**，列表页逐行拉也
+  不会打爆什么。`source=active` 才真的问一次 Anthropic，只在供号商手动点刷新时用。
+- 上游没给某个窗口时该窗口保持 nil，前端整条不渲染。补一个 0% 会被读成
+  「这个号完全没用过」。
+- 前端逐账号拉、限并发 4，且**不阻塞表格渲染**（`void loadUsage(...)`）；
+  单个账号取用量失败只让那一格留白，不把整张表打成错误状态 —— 账号本身的信息还是好的。
+- `provider.Handler` 因此新注入了 `*service.AccountUsageService`
+  （`NewHandler` 参数与 `cmd/server/wire_gen.go` 的构造调用同步改了）。
+
+### 4.14.3 已知未决问题
 
 以下问题在代码审查中被识别，**上线前必须评估**：
 

@@ -114,6 +114,10 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 	require.Equal(t, "3 档", view.TierLabel)
 	require.Equal(t, int64(10), view.PeriodRequests)
 
+	// 邮箱要能下发：供号商靠它对照手上哪些号已经上了。这条 extra 里没有、
+	// credentials 里有，同时锁住了对存量账号的回落读取。
+	require.Equal(t, "supplier@example.com", view.Email)
+
 	// 金额必须序列化成十进制字符串并保住全部有效位。序列化成 JSON 数字的话，
 	// JS 侧解析成 float64 就当场丢精度，对账时两边对不上。
 	require.Equal(t, "1.2345678901", view.PeriodCost.String())

@@ -24,6 +24,10 @@ func (m *stubAccountRepo) UpdateProviderTierParams(context.Context, int64, int, 
 	return nil
 }
 
+func (m *stubAccountRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
+	return nil
+}
+
 func (m *stubUserRepo) ListProviders(context.Context) ([]service.User, error) { return nil, nil }
 
 // DistinctNonProviderPrioritiesByGroup 的空实现。返回空 map 表示「没有已有账号」，

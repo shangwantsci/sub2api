@@ -1070,6 +1070,41 @@ func (r *accountRepository) UpdateProviderTierParams(
 	return nil
 }
 
+// UpdateProviderAccountTier 改单个供号商账号所属的速率档位。
+//
+// 与 UpdateProviderTierParams 的差别只有一处，但很关键：这里**同时写 provider_tier 列**。
+// 那一条是管理端「把档位参数应用到存量账号」用的，账号还留在原档位上，只是参数被刷新；
+// 这一条是供号商自己换档，档位标识本身必须跟着变，否则下次管理员改该档参数时
+// 这个账号会被按旧档回填。
+//
+// provider_tier 不在通用 Update 的 builder 里（那是有意的：常规更新不该动供号商归属），
+// 所以换档只能走这条定向更新。
+//
+// extra 同样是整列覆盖，必须由调用方先 ApplyProviderTierToExtra 基于账号现有 extra
+// 增量合并，否则会清掉 persona_* 、伪装开关与身份字段。
+func (r *accountRepository) UpdateProviderAccountTier(
+	ctx context.Context,
+	id int64,
+	tier string,
+	concurrency, loadFactor int,
+	extra map[string]any,
+) error {
+	err := r.client.Account.UpdateOneID(id).
+		SetProviderTier(tier).
+		SetConcurrency(concurrency).
+		SetLoadFactor(loadFactor).
+		SetExtra(normalizeJSONMap(extra)).
+		Exec(ctx)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue provider tier change failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error {
 	now := time.Now()
 	_, err := r.client.Account.Update().
