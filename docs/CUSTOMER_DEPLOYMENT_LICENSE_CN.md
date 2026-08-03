@@ -23,7 +23,12 @@
 | A5 | 用 `customer_id=<客户>` 触发构建，产出私有客户镜像 | GitHub | §4 |
 | A6 | 确认新 GHCR package 是 Private | GitHub | §4 |
 | A7 | 建一个只读 PAT，只授权这一个 package，交给客户 | GitHub | §4 |
-| A8 | 调 `/admin/activations` 生成一次性激活码（只显示一次） | 你的服务器 | §3 |
+| A8 | 打开管理台 `https://<域名>/console`，新建客户并生成激活码（只显示一次） | 浏览器 | §3 |
+
+> **日常运维用管理台，不用记 curl。** 授权中心内置了一个网页管理台：
+> 浏览器打开 `https://<你的授权域名>/console`，粘贴 `ADMIN_TOKEN` 即可查看所有客户
+> 实例的授权状态、机器指纹、版本与用量，勾选功能开关，一键吊销/恢复，上传标定
+> profile。本文里所有 `curl` 都只是等价写法，方便脚本化。
 
 ### B. 拿到客户服务器之后
 
@@ -40,7 +45,11 @@
 
 ### 按客户开关功能（不需要单独分支或单独构建）
 
-客户能用哪些受管功能，由 lease 里的 `features` 决定，在**创建激活码时**指定：
+客户能用哪些受管功能，由 lease 里的 `features` 决定。**最简单的方式是在管理台
+`https://<域名>/console` 的「客户与功能开关」里点勾选框**——勾上就是开，取消就是关，
+改完立刻保存。
+
+等价的 API 写法（创建激活码时指定，或事后 `PATCH /admin/customers/{id}` 修改）：
 
 ```json
 {"customer_id": "customer-a", "features": ["gateway"]}
