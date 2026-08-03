@@ -241,13 +241,57 @@ rollback tag:    sub2api-rollback:pre-a16045ee
 >
 > 完整小白手册：`docs/CUSTOMER_DEPLOYMENT_LICENSE_CN.md`。
 
+### 授权中心线上实况（2026-08-03 部署完成）
+
+授权中心与生产号池**同机**运行在 `lumos7.cc` 那台（4C/3.8G，Ubuntu 24.04），
+互不影响：独立 compose project、独立容器、独立 Postgres。
+
+```text
+部署目录    /opt/sub2api-license
+容器        sub2api-license-server（127.0.0.1:3900）
+            sub2api-license-postgres-1（postgres:16-alpine，独立于生产的 postgres:18）
+对外域名    https://license.lumos7.cc      Caddy 站点已配置并签发证书
+管理台      https://license.lumos7.cc/console
+签名公钥    9l9Pi3CnVBW8IuTS/OqjIOvdkCXMgZmY9XYvnX4qWqI
+私钥        /opt/sub2api-license/signing.key（属主 65532:65532，600）
+备份        /opt/sub2api-license-backup-<时间戳>/（.env、signing.key、override）
+```
+
+`docker-compose.override.yml` 把 license-server 同时接入 `openstaryu-internal`
+网络，Caddy 才能按容器名反代；该文件是本机专属、不入库。
+
+**服务器上没有 GitHub 私有仓库凭证**，`git pull` 会失败。更新代码用 git bundle：
+
+```bash
+# 本地
+cd ../sub2api-license-server && git bundle create /tmp/license.bundle main
+scp -P 9646 /tmp/license.bundle root@<服务器>:/tmp/
+
+# 服务器
+cd /opt/sub2api-license
+cp -p .env signing.key docker-compose.override.yml /opt/sub2api-license-backup-$(date +%Y%m%d-%H%M%S)/
+git pull /tmp/license.bundle main
+docker compose build && docker compose up -d
+rm -f /tmp/license.bundle
+```
+
+`signing.key`、`.env`、`docker-compose.override.yml` 都不在 git 里，更新不会覆盖它们；
+Postgres 数据在 volume 中，重建 license-server 容器不影响已激活实例。
+
+**升级后必须核对公钥没变**：`docker compose logs license-server | grep public_key`
+的值要与 GitHub 变量 `DEPLOYMENT_LICENSE_PUBLIC_KEY` 一致，否则所有客户镜像会拒绝
+新签发的 lease。
+
 ### 前置检查
 
-1. 独立授权中心 `../sub2api-license-server/` 已上线且 HTTPS 正常；
-2. GitHub Repository Variable `DEPLOYMENT_LICENSE_PUBLIC_KEY` 已设置为授权中心公钥；
-3. 客户 ID 已确定，例如 `customer-a`；
-4. 授权中心已为该客户创建一次性 activation code；
-5. 已确认 LGPL 商业交付边界。
+| 项 | 状态 |
+|---|---|
+| 授权中心 HTTPS 正常 | 已完成，`https://license.lumos7.cc/health` 返回 ok |
+| 仓库变量 `DEPLOYMENT_LICENSE_PUBLIC_KEY` | 已设置，且与线上私钥匹配 |
+| 仓库密钥 `DEPLOYMENT_LICENSE_SERVER_URL` / `_ADMIN_TOKEN` | 已设置（标定 profile 自动下发用） |
+| 客户 ID 已确定 | 每次交付前确定，例如 `customer-a` |
+| 已为该客户创建一次性 activation code | 在管理台「新建客户并生成激活码」 |
+| 已确认 LGPL 商业交付边界 | **未解决，交付前必须确认** |
 
 ### 构建客户专属 package
 

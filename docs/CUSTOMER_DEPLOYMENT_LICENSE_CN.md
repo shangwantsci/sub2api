@@ -7,7 +7,29 @@
 > - 你可以在自己的授权中心查看、续期或吊销实例；
 > - 授权续租不进入 AI 请求链路，不改变 Claude 伪装和 TTFT。
 
-## 0. 执行顺序（先看这个）
+## 0. 当前进度（2026-08-03）
+
+A 段（不依赖客户服务器的准备工作）**已全部完成**：
+
+| 步 | 状态 |
+|---|---|
+| A1 生成 Ed25519 密钥对 | 完成，私钥在 `/opt/sub2api-license/signing.key` |
+| A2 部署授权中心 + Postgres | 完成，与生产号池同机、互不影响 |
+| A3 HTTPS 反代 | 完成，`https://license.lumos7.cc` 证书有效 |
+| A4 仓库变量 `DEPLOYMENT_LICENSE_PUBLIC_KEY` | 完成，且与线上私钥核对一致 |
+| A5 仓库密钥 `DEPLOYMENT_LICENSE_SERVER_URL` / `_ADMIN_TOKEN` | 完成 |
+| A6 发布标定 profile | **未做**，客户会先用镜像内置常量 |
+| A7 构建客户镜像 | 拿到客户 ID 后执行 |
+| A8 只读 PAT 交给客户 | 拿到客户信息后执行 |
+| A9 新建客户并生成激活码 | 在管理台点按钮 |
+
+**管理台**：<https://license.lumos7.cc/console>，粘贴 `ADMIN_TOKEN` 即可。
+查看实例、切换功能开关、吊销/恢复、发布 profile 都在这里点，不用命令行。
+
+数据库里目前有一条 `smoke-test` 客户（部署时的冒烟测试，无实例），可以忽略；
+管理台暂时没有删除客户的按钮，要清理得直接操作数据库。
+
+## 0.1 执行顺序（完整流程备查）
 
 **授权中心必须先上线，客户实例才能激活。** 下面 A 段全部不依赖客户服务器，务必在拿到
 客户机器之前做完；拿到客户服务器后只剩 B 段。
@@ -18,15 +40,15 @@
 |---|---|---|---|
 | A1 | 生成 Ed25519 密钥对，私钥只留在授权服务器 | 你的服务器 | §3 |
 | A2 | 部署授权中心 + Postgres，前面挂 HTTPS 反代 | 你的服务器 | §3 |
-| A3 | 确认 `https://<域名>/health` 返回 `{"status":"ok"}` | 任意 | §3 |
+| A3 | 确认 `https://license.lumos7.cc/health` 返回 `{"status":"ok"}` | 任意 | §3 |
 | A4 | 设置 GitHub 仓库变量 `DEPLOYMENT_LICENSE_PUBLIC_KEY` | GitHub | §4 |
 | A5 | 用 `customer_id=<客户>` 触发构建，产出私有客户镜像 | GitHub | §4 |
 | A6 | 确认新 GHCR package 是 Private | GitHub | §4 |
 | A7 | 建一个只读 PAT，只授权这一个 package，交给客户 | GitHub | §4 |
-| A8 | 打开管理台 `https://<域名>/console`，新建客户并生成激活码（只显示一次） | 浏览器 | §3 |
+| A8 | 打开管理台 `https://license.lumos7.cc/console`，新建客户并生成激活码（只显示一次） | 浏览器 | §3 |
 
 > **日常运维用管理台，不用记 curl。** 授权中心内置了一个网页管理台：
-> 浏览器打开 `https://<你的授权域名>/console`，粘贴 `ADMIN_TOKEN` 即可查看所有客户
+> 浏览器打开 `https://license.lumos7.cc/console`，粘贴 `ADMIN_TOKEN` 即可查看所有客户
 > 实例的授权状态、机器指纹、版本与用量，勾选功能开关，一键吊销/恢复，上传标定
 > profile。本文里所有 `curl` 都只是等价写法，方便脚本化。
 
@@ -46,7 +68,7 @@
 ### 按客户开关功能（不需要单独分支或单独构建）
 
 客户能用哪些受管功能，由 lease 里的 `features` 决定。**最简单的方式是在管理台
-`https://<域名>/console` 的「客户与功能开关」里点勾选框**——勾上就是开，取消就是关，
+`https://license.lumos7.cc/console` 的「客户与功能开关」里点勾选框**——勾上就是开，取消就是关，
 改完立刻保存。
 
 等价的 API 写法（创建激活码时指定，或事后 `PATCH /admin/customers/{id}` 修改）：

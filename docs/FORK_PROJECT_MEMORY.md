@@ -1176,7 +1176,13 @@ backend/migrations/183_backfill_provider_proxy_owner.sql
 金额/周期 CHECK 约束、`(provider_user_id, period_end) WHERE status='settled'` 的
 partial unique index，以及明细快照表 `provider_settlement_items`。
 
-### 4.15 客户服务器部署授权（未部署，代码验收中）
+### 4.15 客户服务器部署授权（授权中心已上线，等客户服务器）
+
+**2026-08-03 状态**：授权中心已部署在生产同机，`https://license.lumos7.cc` 证书有效，
+管理台 `/console` 可用；GitHub 变量与密钥均已配置且公钥与线上私钥核对一致。
+尚未发布标定 profile，尚无客户实例。生产号池 community 构建不受影响（有测试锁定）。
+部署细节与更新方法见 `FORK_DEPLOY_RUNBOOK_CN.md` 的「授权中心线上实况」。
+
 
 2026-08-02 开始实现客户自有 root 服务器的交付保护。目标不是阻止客户复制 Docker
 镜像（root 无法技术上绝对阻止），而是：
