@@ -75,6 +75,10 @@ docs/FORK_PROJECT_MEMORY.md
 - **切换前保留旧 image ID**：必须创建 `sub2api-rollback:pre-<commit>` 本地 tag，并按 commit 命名备份 `.env`。
 - **可变与不可变 tag 必须同镜像**：部署前校验 `<VERSION>` 与 `<VERSION>-<commit>` 的 image ID 一致。
 - **生产构建使用仓库根 `Dockerfile` 或已对齐的 `deploy/Dockerfile`**：两者都应固定 `pnpm@9` 并支持 `VERSION` 注入。
+- **客户授权镜像必须使用独立 GHCR package**：
+  `sub2api-customer-<customer>`；不能只用共用 package 的不同 tag 做隔离。
+- **客户服务器不 clone 仓库、不本地 build**：只 pull 客户专属镜像，并使用
+  `docker-compose.customer.yml` overlay。
 
 ## 本地提交流程
 
@@ -229,6 +233,156 @@ digest:          sha256:47209037118a083d3bb51a004899768e27d119f1be339a4262c4c3ab
 env backup:      backups/.env.20260723-053306.before-a16045ee
 rollback tag:    sub2api-rollback:pre-a16045ee
 ```
+
+## 客户自有服务器部署流程（授权镜像，独立于本机生产）
+
+> 本节只用于客户专属镜像。不要给当前 community 生产构建传非 `community`
+> `customer_id`，也不要把客户 package 写入 `/opt/sub2api-production/.env`。
+>
+> 完整小白手册：`docs/CUSTOMER_DEPLOYMENT_LICENSE_CN.md`。
+
+### 前置检查
+
+1. 独立授权中心 `../sub2api-license-server/` 已上线且 HTTPS 正常；
+2. GitHub Repository Variable `DEPLOYMENT_LICENSE_PUBLIC_KEY` 已设置为授权中心公钥；
+3. 客户 ID 已确定，例如 `customer-a`；
+4. 授权中心已为该客户创建一次性 activation code；
+5. 已确认 LGPL 商业交付边界。
+
+### 构建客户专属 package
+
+```bash
+APP_VERSION="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+CUSTOMER_ID=customer-a
+
+gh workflow run release.yml \
+  --repo shangwantsci/sub2api \
+  --ref custom/prod \
+  -f tag="v${APP_VERSION}" \
+  -f custom_image_only=true \
+  -f source_ref=custom/prod \
+  -f customer_id="${CUSTOMER_ID}" \
+  -f simple_release=true
+
+gh run watch --repo shangwantsci/sub2api
+```
+
+预期镜像：
+
+```text
+ghcr.io/shangwantsci/sub2api-customer-customer-a:<VERSION>
+ghcr.io/shangwantsci/sub2api-customer-customer-a:<VERSION>-<COMMIT>
+```
+
+构建前 workflow 会检查：
+
+- customer ID 格式；
+- 非 community 客户必须存在 `DEPLOYMENT_LICENSE_PUBLIC_KEY`；
+- 二进制注入 `ManagedCustomerID` 和 build-time 公钥；
+- OCI label 注入 customer/build 水印。
+
+### 准备客户交付目录
+
+客户服务器**不 clone Git 仓库**。只交付：
+
+```text
+docker-compose.local.yml
+docker-compose.customer.yml
+.env
+```
+
+`.env` 必须包含：
+
+```text
+SUB2API_CUSTOMER_IMAGE=ghcr.io/shangwantsci/sub2api-customer-customer-a:<VERSION>
+DEPLOYMENT_LICENSE_SERVER_URL=https://<你的授权域名>
+DEPLOYMENT_LICENSE_ACTIVATION_CODE=<一次性激活码>
+DEPLOYMENT_LICENSE_IMAGE_DIGEST=sha256:<实际镜像 digest>
+```
+
+Compose 检查与启动：
+
+```bash
+docker compose \
+  -f docker-compose.local.yml \
+  -f docker-compose.customer.yml \
+  config
+
+docker compose \
+  -f docker-compose.local.yml \
+  -f docker-compose.customer.yml \
+  pull
+
+docker compose \
+  -f docker-compose.local.yml \
+  -f docker-compose.customer.yml \
+  up -d
+```
+
+客户 overlay 会只读挂载：
+
+```text
+/etc/machine-id -> /host/etc/machine-id
+/sys/class/dmi/id -> /host/sys/class/dmi/id
+```
+
+非 community release 若读不到宿主机身份信号会拒绝启动；不要用手填假 machine ID 绕过。
+
+### 首次激活检查
+
+```bash
+docker compose \
+  -f docker-compose.local.yml \
+  -f docker-compose.customer.yml \
+  logs --since=10m sub2api
+```
+
+必须确认：
+
+```text
+deployment_license.renewed
+status = active
+customer_id / managed_customer_id 正确
+host_signal_count > 0
+expires_at 约为当前时间 + 24h
+```
+
+管理员接口：
+
+```text
+GET  /api/v1/admin/deployment-license/status
+POST /api/v1/admin/deployment-license/refresh
+```
+
+首次成功后：
+
+1. 清空 `.env` 的 `DEPLOYMENT_LICENSE_ACTIVATION_CODE`；
+2. 只重建 sub2api；
+3. 再次确认可凭 `data/license/instance-identity.json` 续租；
+4. 备份 `.env` 与授权中心数据库。
+
+### 客户镜像回滚
+
+只能在同一客户 package 内回滚：
+
+```text
+ghcr.io/shangwantsci/sub2api-customer-customer-a:<VERSION>-<OLD_COMMIT>
+```
+
+客户镜像强制禁用应用内在线更新/二进制回滚；回滚必须由运营方切 Docker tag。
+
+### 授权故障判断
+
+```text
+active       正常
+grace        lease 已过期但仍在 6h 宽限；网关继续、管理写操作只读
+expired      超过 lease + 6h；网关 503、管理面保留
+unlicensed   首次激活未完成
+revoked      后台明确吊销
+limit_exceeded 账号/用户数超出授权上限；先删除超额资源
+```
+
+`/health=200` 只说明进程存活，不能替代 deployment license status。
 
 ## 生产部署流程（仅应急：服务器本地构建）
 

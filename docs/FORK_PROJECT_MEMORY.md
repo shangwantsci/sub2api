@@ -1176,6 +1176,206 @@ backend/migrations/183_backfill_provider_proxy_owner.sql
 金额/周期 CHECK 约束、`(provider_user_id, period_end) WHERE status='settled'` 的
 partial unique index，以及明细快照表 `provider_settlement_items`。
 
+### 4.15 客户服务器部署授权（未部署，代码验收中）
+
+2026-08-02 开始实现客户自有 root 服务器的交付保护。目标不是阻止客户复制 Docker
+镜像（root 无法技术上绝对阻止），而是：
+
+1. 客户服务器只有编译镜像，没有 Git 仓库和源码；
+2. 客户专属镜像复制到另一台机器后不能获得有效 lease；
+3. 授权中心由我们控制，可查看、限制和吊销实例；
+4. 授权续租不进入 AI 请求热路径，不触碰 Claude 伪装字节。
+
+#### 架构与仓库边界
+
+- 主仓只放授权**客户端**和客户部署模板；
+- 独立授权中心放在同级私有项目 `../sub2api-license-server/`；
+- Sub2API 是 LGPL-3.0-or-later，商业交付前必须确认对应源码/重新链接义务；
+- 授权中心私钥永不进入本仓、GitHub Actions、客户 `.env` 或客户镜像。
+
+授权中心：
+
+```text
+客户首次启动 -> 一次性 activation code -> 绑定 machine hash + instance Ed25519 公钥
+每小时续租   -> instance 私钥签名 renewal -> 授权中心签 24h lease
+```
+
+客户客户端：
+
+- `backend/internal/deploymentlicense/`：
+  - Ed25519 三段 lease 验签；
+  - 实例 keypair/install ID 持久化；
+  - machine-id + DMI + install identity 指纹；
+  - activation/renew HTTP client；
+  - lease 原子落盘。
+- `DeploymentLicenseService`：
+  - 后台每小时续租；
+  - `atomic.Pointer` 保存运行时状态；
+  - 有效期内 `active`；
+  - lease 过期后再进入最多 6 小时 `grace`（刚续租后断网的总离线时间可接近 30h）；
+  - `expired/unlicensed/revoked` 时停止 gateway，但保留管理和授权恢复入口。
+
+#### 客户镜像不可由环境变量直接关闭
+
+客户镜像由 build-time ldflags 固定：
+
+```text
+main.ManagedCustomerID=<customer>
+main.LicensePublicKey=<Ed25519 public key>
+```
+
+`ManagedCustomerID != community` 时：
+
+- `DEPLOYMENT_LICENSE_ENABLED=false` 被忽略；
+- 配置公钥不能覆盖 build-time 公钥；
+- grace 不能超过 6 小时；
+- 禁止 `DEPLOYMENT_LICENSE_MACHINE_ID` 手工覆盖；
+- release 构建必须至少读到一个宿主机身份信号，否则启动直接失败；
+- `update.disabled` 被强制为 true，不能在线替换成无授权的上游二进制。
+
+**实测结论（2026-08-02）**：entrypoint 用 `su-exec` 降权到 uid 1000，而
+`/sys/class/dmi/id/product_uuid` 与 `board_serial` 在多数发行版上是 `0400 root:root`，
+所以容器内**通常只能读到 `/etc/machine-id`**，`host_signal_count` 实际是 1 而不是 3。
+不要在文档或对外说明里宣称三信号指纹；部署后用
+`GET /api/v1/admin/deployment-license/status` 的 `host_signal_count` 核对实际值。
+
+这只能防普通复制，不能宣称对 root 下专业 patch/内存 dump 绝对安全；高价值客户第二阶段
+需要云实例签名 identity 或 TPM 2.0。
+
+#### 按客户裁剪功能：用 lease features，不开分支
+
+客户版屏蔽功能**不通过新分支实现**。`custom/company` 那套（删代码 + 反向断言测试 +
+独立 workflow）已经是第二条线，再加客户线就是第三份要手工同步的裁剪。
+
+改用运行时能力白名单，复用已有的 lease `features` 字段：
+
+```text
+service.managedCapabilities   受管能力清单（当前只有 chrome_cookie_auth）
+service.HasCapability(name)   community/未启用 → 恒 true；客户镜像 → 看 lease.features
+```
+
+- 不在 `managedCapabilities` 里的名字**永远开放**，不用穷举全部功能面；
+- 客户镜像下，受管能力必须在 lease.features 里显式出现才启用；
+- 无 lease / 已吊销 → 受管能力一律关闭；
+- 后端拦截在 `DeploymentLicenseEnforcement` middleware，前端读
+  `Snapshot().Capabilities`（后端算好，前端不重复推导规则）。
+
+Chrome Cookie 屏蔽的端点**只有**这两个，不要扩大：
+
+```text
+POST /api/v1/admin/accounts/chrome-cookie-auth
+POST /api/v1/admin/accounts/{id}/refresh-cookie-auth   （Chrome 账号专用的轮换刷新）
+```
+
+`/cookie-auth`（普通 Cookie 自动授权）和 `/setup-token-cookie-auth`（setup token）
+是**不同功能**，误拦会砸掉客户的正常上号，有回归测试守着。
+
+前端默认"不隐藏"：能力未知（未加载/请求失败）时照常显示，安全由后端保证。否则接口
+一抖动，自己的生产后台就少功能。
+
+#### 标定 profile 经授权中心下发
+
+客户服务器不跑 cc-calibrate（需要 node + CLI + 源码目录），CI 的 `publish.js` 又只推
+单个 `CC_CALIBRATE_GATEWAY_URL`。客户实例因此收不到 profile 更新，伪装会停在构建时的
+内置常量上逐渐落后——这是 2026-08-02 排查出的运营缺口。
+
+解决方式是复用已有的续租通道，而不是让客户暴露 Admin API：
+
+```text
+CI 标定完成 → POST 授权中心 /admin/calibration-profile
+            → 客户端每小时续租，响应里带独立签名的 profile envelope
+            → 客户端验签 → SettingService.PublishClaudeCalibratedProfile → 热加载
+```
+
+关键约束：
+
+- profile envelope 用同一把私钥**独立签名**，`type` 为 `sub2api-calibration-profile`，
+  与 lease 的 type 不同，两者不可互相冒用（有测试）；
+- 存储和传输都是发布时的**原始字节**，不重新序列化；
+- profile 读取/签名失败**不影响续租**——绝不能因为伪装更新丢掉客户授权；
+- 客户端按 `cli_version` 去重，版本没变不重复写库；
+- 发布失败的 profile 下次续租会重试（不会错误标记为已应用）。
+
+需要的仓库 secret：`DEPLOYMENT_LICENSE_SERVER_URL`、`DEPLOYMENT_LICENSE_ADMIN_TOKEN`。
+
+#### 请求路径与性能约束
+
+全局 license middleware 只读取进程内 snapshot：
+
+```text
+用户请求 -> O(1) 内存状态 -> 原有 API key / 调度 / mimicry / TLS
+```
+
+禁止在以下路径发 license HTTP/DB 请求：
+
+```text
+GatewayHandler.Messages
+SelectAccountWithLoadAwareness
+GetAccessToken
+buildUpstreamRequest
+Claude mimicry guard
+TLS ClientHello
+```
+
+因此 license 不改变 headers、body、betas、billing fingerprint、metadata 或 TLS 指纹。
+
+#### 状态与分级行为
+
+```text
+disabled     community 普通部署，保持历史行为
+active       正常
+grace        已有 gateway 流量继续；管理写操作只读
+expired      gateway 503；管理/授权恢复保留
+unlicensed   首次激活未成功；gateway 503
+revoked      授权中心明确拒绝；gateway 立即关闭
+limit_exceeded 账号/用户数超过 lease 上限；gateway 关闭，管理删除能力保留
+```
+
+管理接口：
+
+```text
+GET  /api/v1/admin/deployment-license/status
+POST /api/v1/admin/deployment-license/refresh
+```
+
+`/health` 仍只做 O(1) liveness，不把授权中心网络依赖塞进 Docker healthcheck。
+
+#### 构建与交付
+
+`release.yml custom_image_only` 新增 `customer_id`：
+
+- `community` 保持原 `ghcr.io/<owner>/sub2api` package/tag；
+- 客户构建使用独立 package
+  `ghcr.io/<owner>/sub2api-customer-<customer>:<VERSION>[-<COMMIT>]`；
+- Repository Variable `DEPLOYMENT_LICENSE_PUBLIC_KEY` 在构建时注入；
+- 客户构建缺公钥时 workflow 直接失败；
+- OCI label 记录 customer/build 水印。
+
+禁止只用同一个 package 的不同 tag 隔离客户：GHCR pull 权限通常按 package 授予，客户若能
+看到 community tag 就能绕过授权。
+
+客户部署文件：
+
+```text
+deploy/docker-compose.customer.yml
+deploy/.env.customer.example
+docs/CUSTOMER_DEPLOYMENT_LICENSE_CN.md
+```
+
+首次激活成功后必须清空 `.env` 的一次性 activation code；实例私钥和 lease 位于
+`data/license/`，权限 0600。换服务器时先吊销旧 instance、生成新激活码，并清空新机的
+`data/license/`。
+
+#### 当前发布状态
+
+截至本节写入时：
+
+- 客户授权功能默认关闭，现有生产/community 镜像行为不变；
+- 无数据库 schema 迁移；
+- 客户授权镜像尚未构建/部署；
+- 独立授权中心与客户端仍需完成端到端联调后才能用于收费客户；
+- 不得把“单元测试通过”写成“生产已验证”。
+
 ## 5. 当前自动标定状态
 
 首次真实标定：
@@ -1434,11 +1634,19 @@ curl -fsS http://127.0.0.1:18080/health
 - GitHub Secret 和生产密码不得写入仓库、日志或本文。
 - Chrome `session_key` 当前按产品决定明文存储，数据库备份与管理接口必须按敏感凭证保护。
 - Chrome OAuth 分布式刷新锁不可用时 fail-closed，避免并发消费旋转 token。
+- 客户部署授权默认关闭；community/现有生产不因该功能改变行为。
+- 客户专属 release 镜像必须内置非 community customer ID 与授权公钥；不能只靠可编辑 env 开关。
+- 授权签名私钥、ADMIN_TOKEN 和真实激活码不得进入主仓、Actions 日志或客户通用模板。
+- `/health` 不依赖授权中心；license readiness 走独立管理员接口。
 
 ## 11. 后续优化优先级
 
 ### P0：上线后观察
 
+- 客户授权功能在首个收费客户前完成 license-server ↔ 客户镜像端到端联调：
+  首次激活、小时续租、复制到第二机拒绝、6h grace、吊销与恢复；
+- 对比授权 middleware 开/关的本地基准，确认只有 O(1) 内存读取、TTFT 无可测回归；
+- 完成 LGPL 商业交付法律复核；当前实现不能替代许可证合规意见；
 - Anthropic 事故恢复后复测 TTFT；
 - 对比 proxy 23 与其它美国代理；
 - 观察新 profile 下 400/401/429/529、cache read/create、账号寿命；
@@ -1598,6 +1806,21 @@ backend/internal/service/gateway_claude_oauth_body.go
 backend/internal/handler/content_safety_helper.go
 backend/internal/handler/content_moderation_helper.go
 frontend/src/views/admin/GroupsView.vue
+```
+
+客户部署授权：
+
+```text
+../sub2api-license-server/
+backend/internal/deploymentlicense/
+backend/internal/service/deployment_license_service.go
+backend/internal/server/middleware/deployment_license.go
+backend/internal/server/routes/admin.go
+deploy/docker-compose.customer.yml
+deploy/.env.customer.example
+docs/CUSTOMER_DEPLOYMENT_LICENSE_CN.md
+.github/workflows/release.yml
+Dockerfile
 ```
 
 部署（生产线 `custom/prod`）：
