@@ -16,8 +16,11 @@ import (
 
 // BuildInfo contains build information
 type BuildInfo struct {
-	Version   string
-	BuildType string
+	Version           string
+	Commit            string
+	BuildType         string
+	LicensePublicKey  string
+	ManagedCustomerID string
 }
 
 // ProvidePricingService creates and initializes PricingService
@@ -31,8 +34,37 @@ func ProvidePricingService(cfg *config.Config, remoteClient PricingRemoteClient)
 }
 
 // ProvideUpdateService creates UpdateService with BuildInfo
-func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo) *UpdateService {
-	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType)
+func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, buildInfo BuildInfo, cfg *config.Config) *UpdateService {
+	managedBuild := buildInfo.ManagedCustomerID != "" && buildInfo.ManagedCustomerID != "community"
+	disabled := managedBuild || (cfg != nil && cfg.Update.Disabled)
+	return NewUpdateService(cache, githubClient, buildInfo.Version, buildInfo.BuildType, disabled)
+}
+
+// ProvideDeploymentLicenseService initializes the optional customer deployment
+// license and starts its background renewal loop. Remote activation failures do
+// not stop the management plane; gateway middleware enforces the state.
+func ProvideDeploymentLicenseService(
+	cfg *config.Config,
+	buildInfo BuildInfo,
+	entClient *dbent.Client,
+	settingService *SettingService,
+) (*DeploymentLicenseService, error) {
+	svc, err := NewDeploymentLicenseService(cfg, buildInfo, entClient)
+	if err != nil {
+		return nil, err
+	}
+	// Customer deployments receive calibrated Claude Code profiles over the
+	// renewal channel; the setting service validates and hot-loads them.
+	svc.SetCalibrationProfilePublisher(settingService)
+	timeout := 10 * time.Second
+	if cfg != nil && cfg.DeploymentLicense.RequestTimeoutSeconds > 0 {
+		timeout = time.Duration(cfg.DeploymentLicense.RequestTimeoutSeconds) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	svc.Initialize(ctx)
+	cancel()
+	svc.Start()
+	return svc, nil
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
@@ -661,6 +693,7 @@ var ProviderSet = wire.NewSet(
 	NewOAuthService,
 	ProvideOpenAIOAuthService,
 	NewGrokOAuthService,
+	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),
 	NewGeminiOAuthService,
 	NewGeminiQuotaService,
 	NewCompositeTokenCacheInvalidator,
@@ -702,6 +735,7 @@ var ProviderSet = wire.NewSet(
 	NewIdentityService,
 	NewCRSSyncService,
 	ProvideUpdateService,
+	ProvideDeploymentLicenseService,
 	ProvideTokenRefreshService,
 	wire.Bind(new(GrokOAuthReconciler), new(*TokenRefreshService)),
 	ProvideAccountExpiryService,

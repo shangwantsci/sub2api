@@ -6,7 +6,7 @@ import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
 import { resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
-import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
+import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore, useDeploymentLicenseStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 
 const router = useRouter()
@@ -16,6 +16,7 @@ const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
+const deploymentLicenseStore = useDeploymentLicenseStore()
 const adminSettingsStore = useAdminSettingsStore()
 
 function updateDocumentTitle() {
@@ -87,6 +88,10 @@ watch(
         adminComplianceStore.fetchStatus().catch((error) => {
           console.error('Failed to fetch admin compliance status:', error)
         })
+        // Managed customer deployments hide capabilities their lease withholds.
+        deploymentLicenseStore.fetchStatus().catch((error) => {
+          console.error('Failed to fetch deployment license status:', error)
+        })
       }
 
       // User logged in: preload subscriptions and start polling
@@ -111,6 +116,7 @@ watch(
       subscriptionStore.clear()
       announcementStore.reset()
       adminComplianceStore.reset()
+      deploymentLicenseStore.reset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   },

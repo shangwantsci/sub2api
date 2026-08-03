@@ -66,6 +66,9 @@ type Handlers struct {
 
 // BuildInfo contains build-time information
 type BuildInfo struct {
-	Version   string
-	BuildType string // "source" for manual builds, "release" for CI builds
+	Version           string
+	Commit            string
+	BuildType         string // "source" for manual builds, "release" for CI builds
+	LicensePublicKey  string // build-time pinned Ed25519 key for customer images
+	ManagedCustomerID string // non-community values make deployment licensing mandatory
 }

@@ -73,6 +73,10 @@ func ProvideProviderUserReader(repo service.UserRepository) service.ProviderUser
 	return repo
 }
 
+func ProvideProviderSettlementRetentionGuard(repo service.ProviderSettlementRepository) service.ProviderSettlementRetentionGuard {
+	return repo
+}
+
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
@@ -89,6 +93,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementReadRepository,
 	NewUsageLogRepository,
 	NewProviderSettlementRepository,
+	ProvideProviderSettlementRetentionGuard,
 	ProvideProviderUsageReader,
 	ProvideProviderUserReader,
 	NewUsageBillingRepository,

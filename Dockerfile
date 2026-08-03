@@ -50,6 +50,8 @@ FROM ${GOLANG_IMAGE} AS backend-builder
 ARG VERSION=
 ARG COMMIT=docker
 ARG DATE
+ARG LICENSE_PUBLIC_KEY=
+ARG CUSTOMER_ID=community
 ARG GOPROXY
 ARG GOSUMDB
 
@@ -78,7 +80,7 @@ RUN VERSION_VALUE="${VERSION}" && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=0 GOOS=linux go build \
     -tags embed \
-    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
+    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release -X main.LicensePublicKey=${LICENSE_PUBLIC_KEY} -X main.ManagedCustomerID=${CUSTOMER_ID}" \
     -trimpath \
     -o /app/sub2api \
     ./cmd/server
@@ -93,10 +95,15 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
 
+ARG CUSTOMER_ID=community
+ARG COMMIT=unknown
+
 # Labels
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="Sub2API - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
+LABEL com.sub2api.deployment.customer="${CUSTOMER_ID}"
+LABEL com.sub2api.deployment.build="${COMMIT}"
 
 # Install runtime dependencies
 RUN apk add --no-cache \

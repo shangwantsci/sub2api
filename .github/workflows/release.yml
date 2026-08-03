@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: 'custom/prod'
+      customer_id:
+        description: 'Customer image watermark/tag (community keeps existing production tags)'
+        required: false
+        type: string
+        default: 'community'
       calibrate_only:
         description: 'Run real Claude Code calibration and publish profile; do not build a release'
         required: false
@@ -50,6 +55,10 @@ jobs:
     env:
       GATEWAY_URL: ${{ secrets.CC_CALIBRATE_GATEWAY_URL }}
       ADMIN_API_KEY: ${{ secrets.CC_CALIBRATE_ADMIN_API_KEY }}
+      # Customer deployments pull the profile from the license server on their
+      # hourly renewal, so they never expose an inbound admin API.
+      LICENSE_SERVER_URL: ${{ secrets.DEPLOYMENT_LICENSE_SERVER_URL }}
+      LICENSE_ADMIN_TOKEN: ${{ secrets.DEPLOYMENT_LICENSE_ADMIN_TOKEN }}
     steps:
       - name: Checkout calibration source
         uses: actions/checkout@v6
@@ -95,6 +104,22 @@ jobs:
           PROFILE="$(ls "${{ runner.temp }}"/cc-calibrate-out/profile-*.json | head -1)"
           node tools/cc-calibrate/publish.js "$PROFILE" "$GATEWAY_URL" "$ADMIN_API_KEY"
 
+      # One push here reaches every customer instance; each picks the profile up
+      # on its next renewal. Failing this must not fail the calibration run.
+      - name: Publish calibrated profile to license server
+        if: ${{ env.LICENSE_SERVER_URL != '' && env.LICENSE_ADMIN_TOKEN != '' }}
+        continue-on-error: true
+        run: |
+          PROFILE="$(ls "${{ runner.temp }}"/cc-calibrate-out/profile-*.json | head -1)"
+          STATUS="$(curl -sS -o /tmp/license-publish.out -w '%{http_code}' \
+            -X POST "${LICENSE_SERVER_URL%/}/admin/calibration-profile" \
+            -H "Authorization: Bearer $LICENSE_ADMIN_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary "@$PROFILE")"
+          echo "license server responded HTTP $STATUS"
+          cat /tmp/license-publish.out
+          test "$STATUS" = "200"
+
       - name: Calibration summary
         if: always()
         run: |
@@ -104,6 +129,7 @@ jobs:
             echo "- Runs on GitHub-hosted Linux x64; production CPU/RAM is untouched."
             echo "- Raw capture + profile retained as a 14-day artifact."
             echo "- Publish requires repository secrets CC_CALIBRATE_GATEWAY_URL and CC_CALIBRATE_ADMIN_API_KEY."
+            echo "- Customer fan-out requires DEPLOYMENT_LICENSE_SERVER_URL and DEPLOYMENT_LICENSE_ADMIN_TOKEN."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Fork production path: build remotely on GitHub Actions without creating a new
@@ -122,6 +148,8 @@ jobs:
       - name: Resolve official version and source commit
         id: metadata
         shell: bash
+        env:
+          LICENSE_PUBLIC_KEY: ${{ vars.DEPLOYMENT_LICENSE_PUBLIC_KEY }}
         run: |
           VERSION="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
@@ -130,10 +158,30 @@ jobs:
           fi
           COMMIT="$(git rev-parse --short=8 HEAD)"
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          CUSTOMER_ID="$(echo '${{ github.event.inputs.customer_id }}' | tr '[:upper:]' '[:lower:]')"
+          CUSTOMER_ID="${CUSTOMER_ID:-community}"
+          if ! [[ "$CUSTOMER_ID" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]]; then
+            echo "Invalid customer_id: $CUSTOMER_ID" >&2
+            exit 1
+          fi
+          if [ "$CUSTOMER_ID" = community ]; then
+            IMAGE="ghcr.io/$OWNER/sub2api"
+          else
+            if [ -z "$LICENSE_PUBLIC_KEY" ]; then
+              echo "Repository variable DEPLOYMENT_LICENSE_PUBLIC_KEY is required for customer images" >&2
+              exit 1
+            fi
+            IMAGE="ghcr.io/$OWNER/sub2api-customer-$CUSTOMER_ID"
+          fi
+          MUTABLE_TAG="$IMAGE:$VERSION"
+          IMMUTABLE_TAG="$IMAGE:$VERSION-$COMMIT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/$OWNER/sub2api" >> "$GITHUB_OUTPUT"
-          echo "Building $OWNER/sub2api version=$VERSION commit=$COMMIT"
+          echo "customer_id=$CUSTOMER_ID" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "mutable_tag=$MUTABLE_TAG" >> "$GITHUB_OUTPUT"
+          echo "immutable_tag=$IMMUTABLE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Building $OWNER/sub2api version=$VERSION commit=$COMMIT customer=$CUSTOMER_ID"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -153,11 +201,13 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.version }}
-            ${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.version }}-${{ steps.metadata.outputs.commit }}
+            ${{ steps.metadata.outputs.mutable_tag }}
+            ${{ steps.metadata.outputs.immutable_tag }}
           build-args: |
             VERSION=${{ steps.metadata.outputs.version }}
             COMMIT=${{ steps.metadata.outputs.commit }}
+            CUSTOMER_ID=${{ steps.metadata.outputs.customer_id }}
+            LICENSE_PUBLIC_KEY=${{ vars.DEPLOYMENT_LICENSE_PUBLIC_KEY }}
           cache-from: type=gha,scope=sub2api-custom-amd64
           cache-to: type=gha,mode=max,scope=sub2api-custom-amd64
           provenance: false
@@ -169,9 +219,10 @@ jobs:
             echo ""
             echo "- Source: \`${{ github.event.inputs.source_ref }}\`"
             echo "- Commit: \`${{ steps.metadata.outputs.commit }}\`"
+            echo "- Customer: \`${{ steps.metadata.outputs.customer_id }}\`"
             echo "- Official app version: \`${{ steps.metadata.outputs.version }}\`"
-            echo "- Deploy tag: \`${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.version }}\`"
-            echo "- Immutable rollback tag: \`${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.version }}-${{ steps.metadata.outputs.commit }}\`"
+            echo "- Deploy tag: \`${{ steps.metadata.outputs.mutable_tag }}\`"
+            echo "- Immutable rollback tag: \`${{ steps.metadata.outputs.immutable_tag }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Update VERSION file with tag version

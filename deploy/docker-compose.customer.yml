@@ -1,0 +1,27 @@
+# Customer deployment overlay.
+# Usage:
+#   docker compose -f docker-compose.local.yml -f docker-compose.customer.yml up -d
+services:
+  sub2api:
+    image: ${SUB2API_CUSTOMER_IMAGE:?SUB2API_CUSTOMER_IMAGE is required}
+    environment:
+      DEPLOYMENT_LICENSE_ENABLED: "true"
+      DEPLOYMENT_LICENSE_SERVER_URL: ${DEPLOYMENT_LICENSE_SERVER_URL:?required}
+      DEPLOYMENT_LICENSE_ACTIVATION_CODE: ${DEPLOYMENT_LICENSE_ACTIVATION_CODE:-}
+      DEPLOYMENT_LICENSE_DATA_DIR: /app/data/license
+      DEPLOYMENT_LICENSE_RENEWAL_INTERVAL_SECONDS: ${DEPLOYMENT_LICENSE_RENEWAL_INTERVAL_SECONDS:-3600}
+      DEPLOYMENT_LICENSE_REQUEST_TIMEOUT_SECONDS: ${DEPLOYMENT_LICENSE_REQUEST_TIMEOUT_SECONDS:-10}
+      DEPLOYMENT_LICENSE_GRACE_PERIOD_SECONDS: ${DEPLOYMENT_LICENSE_GRACE_PERIOD_SECONDS:-21600}
+      # Source/dev builds only. Customer release images pin this key at build time.
+      DEPLOYMENT_LICENSE_PUBLIC_KEY: ${DEPLOYMENT_LICENSE_PUBLIC_KEY:-}
+      DEPLOYMENT_LICENSE_IMAGE_DIGEST: ${DEPLOYMENT_LICENSE_IMAGE_DIGEST:-}
+      UPDATE_DISABLED: "true"
+    # Machine-binding signals. The container drops to uid 1000, and DMI files are
+    # usually 0400 root:root, so in practice only machine-id is readable. Check
+    # host_signal_count via the admin status endpoint after deploying; 0 means
+    # the binding is not in effect.
+    volumes:
+      - /etc/machine-id:/host/etc/machine-id:ro
+      - /sys/class/dmi/id:/host/sys/class/dmi/id:ro
+    security_opt:
+      - no-new-privileges:true

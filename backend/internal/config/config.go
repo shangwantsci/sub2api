@@ -92,6 +92,7 @@ type Config struct {
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
 	Update                  UpdateConfig                  `mapstructure:"update"`
+	DeploymentLicense       DeploymentLicenseConfig       `mapstructure:"deployment_license"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 }
@@ -155,6 +156,25 @@ type UpdateConfig struct {
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
 	ProxyURL string `mapstructure:"proxy_url"`
+	// Disabled prevents customer-managed images from replacing their pinned,
+	// licensed binary with an upstream public release.
+	Disabled bool `mapstructure:"disabled"`
+}
+
+// DeploymentLicenseConfig controls the optional customer-deployment license
+// client. It is disabled by default so upstream/open-source deployments keep
+// their current behavior. Customer images enable it explicitly.
+type DeploymentLicenseConfig struct {
+	Enabled                bool   `mapstructure:"enabled"`
+	ServerURL              string `mapstructure:"server_url"`
+	ActivationCode         string `mapstructure:"activation_code"`
+	PublicKey              string `mapstructure:"public_key"`
+	DataDir                string `mapstructure:"data_dir"`
+	MachineID              string `mapstructure:"machine_id"`
+	ImageDigest            string `mapstructure:"image_digest"`
+	RenewalIntervalSeconds int    `mapstructure:"renewal_interval_seconds"`
+	RequestTimeoutSeconds  int    `mapstructure:"request_timeout_seconds"`
+	GracePeriodSeconds     int    `mapstructure:"grace_period_seconds"`
 }
 
 type IdempotencyConfig struct {
@@ -1573,6 +1593,12 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Log.Environment = strings.TrimSpace(cfg.Log.Environment)
 	cfg.Log.StacktraceLevel = strings.ToLower(strings.TrimSpace(cfg.Log.StacktraceLevel))
 	cfg.Log.Output.FilePath = strings.TrimSpace(cfg.Log.Output.FilePath)
+	cfg.DeploymentLicense.ServerURL = strings.TrimRight(strings.TrimSpace(cfg.DeploymentLicense.ServerURL), "/")
+	cfg.DeploymentLicense.ActivationCode = strings.TrimSpace(cfg.DeploymentLicense.ActivationCode)
+	cfg.DeploymentLicense.PublicKey = strings.TrimSpace(cfg.DeploymentLicense.PublicKey)
+	cfg.DeploymentLicense.DataDir = strings.TrimSpace(cfg.DeploymentLicense.DataDir)
+	cfg.DeploymentLicense.MachineID = strings.TrimSpace(cfg.DeploymentLicense.MachineID)
+	cfg.DeploymentLicense.ImageDigest = strings.TrimSpace(cfg.DeploymentLicense.ImageDigest)
 	cfg.Gateway.ForcedCodexInstructionsTemplateFile = strings.TrimSpace(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
 	if cfg.Gateway.ForcedCodexInstructionsTemplateFile != "" {
 		content, err := os.ReadFile(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
@@ -2150,6 +2176,19 @@ func setDefaults() {
 	viper.SetDefault("gemini.oauth.scopes", "")
 	viper.SetDefault("gemini.quota.policy", "")
 
+	// Optional customer-deployment license. Disabled for normal open-source use.
+	viper.SetDefault("update.disabled", false)
+	viper.SetDefault("deployment_license.enabled", false)
+	viper.SetDefault("deployment_license.server_url", "")
+	viper.SetDefault("deployment_license.activation_code", "")
+	viper.SetDefault("deployment_license.public_key", "")
+	viper.SetDefault("deployment_license.data_dir", "/app/data/license")
+	viper.SetDefault("deployment_license.machine_id", "")
+	viper.SetDefault("deployment_license.image_digest", "")
+	viper.SetDefault("deployment_license.renewal_interval_seconds", 3600)
+	viper.SetDefault("deployment_license.request_timeout_seconds", 10)
+	viper.SetDefault("deployment_license.grace_period_seconds", 21600)
+
 	// Subscription Maintenance (bounded queue + worker pool)
 	viper.SetDefault("subscription_maintenance.worker_count", 2)
 	viper.SetDefault("subscription_maintenance.queue_size", 1024)
@@ -2220,6 +2259,35 @@ func (c *Config) Validate() error {
 	}
 	if c.SubscriptionMaintenance.QueueSize < 0 {
 		return fmt.Errorf("subscription_maintenance.queue_size must be non-negative")
+	}
+
+	if c.DeploymentLicense.Enabled {
+		if c.DeploymentLicense.ServerURL == "" {
+			return fmt.Errorf("deployment_license.server_url is required when deployment licensing is enabled")
+		}
+		if err := ValidateAbsoluteHTTPURL(c.DeploymentLicense.ServerURL); err != nil {
+			return fmt.Errorf("deployment_license.server_url invalid: %w", err)
+		}
+		licenseURL, err := url.Parse(c.DeploymentLicense.ServerURL)
+		if err != nil {
+			return fmt.Errorf("deployment_license.server_url invalid: %w", err)
+		}
+		isLocal := licenseURL.Hostname() == "localhost" || licenseURL.Hostname() == "127.0.0.1" || licenseURL.Hostname() == "::1"
+		if licenseURL.Scheme != "https" && !isLocal {
+			return fmt.Errorf("deployment_license.server_url must use https outside localhost")
+		}
+		if c.DeploymentLicense.DataDir == "" {
+			return fmt.Errorf("deployment_license.data_dir is required when deployment licensing is enabled")
+		}
+		if c.DeploymentLicense.RenewalIntervalSeconds < 60 {
+			return fmt.Errorf("deployment_license.renewal_interval_seconds must be >= 60")
+		}
+		if c.DeploymentLicense.RequestTimeoutSeconds <= 0 || c.DeploymentLicense.RequestTimeoutSeconds > 60 {
+			return fmt.Errorf("deployment_license.request_timeout_seconds must be between 1 and 60")
+		}
+		if c.DeploymentLicense.GracePeriodSeconds < 0 {
+			return fmt.Errorf("deployment_license.grace_period_seconds must be non-negative")
+		}
 	}
 
 	// Gemini OAuth 配置校验：client_id 与 client_secret 必须同时设置或同时留空。

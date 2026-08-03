@@ -3212,7 +3212,8 @@
         :show-chrome-cookie-option="
           form.platform === 'anthropic' &&
           addMethod === 'oauth' &&
-          !isAnthropicSessionImportMode
+          !isAnthropicSessionImportMode &&
+          deploymentLicenseStore.canUseChromeCookieAuth
         "
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
         :show-mobile-refresh-token-option="form.platform === 'openai'"
@@ -3690,8 +3691,12 @@ import {
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
+import { useDeploymentLicenseStore } from '@/stores'
 
 // Type for exposed OAuthAuthorizationFlow component
+// Customer deployments may have the Chrome cookie capability withheld.
+const deploymentLicenseStore = useDeploymentLicenseStore()
+
 // Note: defineExpose automatically unwraps refs, so we use the unwrapped types
 interface OAuthFlowExposed {
   authCode: string

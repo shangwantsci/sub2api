@@ -63,6 +63,10 @@ export default defineConfig(({ mode }) => {
   build: {
     outDir: '../backend/internal/web/dist',
     emptyOutDir: true,
+    // Customer release images must never publish source maps. This does not
+    // make browser code secret, but avoids shipping original source paths and
+    // convenient reverse-engineering metadata.
+    sourcemap: false,
     rollupOptions: {
       output: {
         /**

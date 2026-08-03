@@ -60,6 +60,7 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 		},
 		"0.1.132",
 		"release",
+		false,
 	)
 
 	err := svc.PerformUpdate(context.Background())
@@ -69,12 +70,31 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
 }
 
+func TestUpdateServiceManagedDeploymentDisablesUpdateAndRollback(t *testing.T) {
+	svc := NewUpdateService(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{},
+		"0.1.132",
+		"release",
+		true,
+	)
+
+	_, err := svc.CheckUpdate(context.Background(), true)
+	require.ErrorIs(t, err, ErrManagedUpdateDisabled)
+	require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrManagedUpdateDisabled)
+	require.ErrorIs(t, svc.Rollback(), ErrManagedUpdateDisabled)
+	_, err = svc.ListRollbackVersions(context.Background())
+	require.ErrorIs(t, err, ErrManagedUpdateDisabled)
+	require.ErrorIs(t, svc.RollbackToVersion(context.Background(), "0.1.131"), ErrManagedUpdateDisabled)
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{recentReleases: releases},
 		current,
 		"release",
+		false,
 	)
 }
 
@@ -137,6 +157,7 @@ func TestUpdateServiceListRollbackVersionsPropagatesFetchError(t *testing.T) {
 		&updateServiceGitHubClientStub{recentErr: errors.New("github unavailable")},
 		"0.1.147",
 		"release",
+		false,
 	)
 
 	_, err := svc.ListRollbackVersions(context.Background())
