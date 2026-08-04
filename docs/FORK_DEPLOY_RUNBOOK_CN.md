@@ -325,6 +325,27 @@ ghcr.io/shangwantsci/sub2api-customer-customer-a:<VERSION>-<COMMIT>
 - 二进制注入 `ManagedCustomerID` 和 build-time 公钥；
 - OCI label 注入 customer/build 水印。
 
+**构建后必须手动把 package 改成 Private——新 package 默认是 public。**
+主仓是 public fork，Dockerfile 的 `org.opencontainers.image.source` 指向上游公开仓库，
+GHCR 据此继承了公开可见性。GitHub **没有**修改 package 可见性的 REST API，只能在网页操作：
+
+```text
+https://github.com/users/shangwantsci/packages/container/sub2api-customer-<客户>/settings
+→ Danger Zone → Change visibility → Private
+```
+
+改完复验，匿名 pull 应当失败：
+
+```bash
+docker logout ghcr.io 2>/dev/null
+docker pull ghcr.io/shangwantsci/sub2api-customer-<客户>:<tag>
+```
+
+2026-08-04 首次为 yihang 构建时踩了这个坑：镜像可匿名拉取。授权保护本身不受影响
+（无有效 lease 跑不起来），但编译产物和客户水印会外泄。生产镜像
+`ghcr.io/shangwantsci/sub2api` 同样是 public，改私有会导致服务器 pull 需要认证，
+按需决定。
+
 ### 准备客户交付目录
 
 客户服务器**不 clone Git 仓库**。只交付：

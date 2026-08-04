@@ -1176,7 +1176,12 @@ backend/migrations/183_backfill_provider_proxy_owner.sql
 金额/周期 CHECK 约束、`(provider_user_id, period_end) WHERE status='settled'` 的
 partial unique index，以及明细快照表 `provider_settlement_items`。
 
-### 4.15 客户服务器部署授权（授权中心已上线，等客户服务器）
+### 4.15 客户服务器部署授权（首个客户 yihang 已上线）
+
+**2026-08-04 状态**：首个客户 yihang 已在火山云新加坡（101.47.39.33）上线，
+授权激活、每小时续租、标定 profile 自动下发（CLI 2.1.221）、Chrome OAuth 按 lease
+features 关闭（403）全部线上实测通过。踩坑记录见 CUSTOMER_DEPLOYMENT_LICENSE_CN.md：
+TOTP_ENCRYPTION_KEY 必须是 hex；GHCR package 默认 public 必须手动改私有。
 
 **2026-08-03 状态**：授权中心已部署在生产同机，`https://license.lumos7.cc` 证书有效，
 管理台 `/console` 可用；GitHub 变量与密钥均已配置且公钥与线上私钥核对一致。

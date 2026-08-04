@@ -7,7 +7,69 @@
 > - 你可以在自己的授权中心查看、续期或吊销实例；
 > - 授权续租不进入 AI 请求链路，不改变 Claude 伪装和 TTFT。
 
-## 0. 当前进度（2026-08-03）
+## 0. 首个客户 yihang 部署实况（2026-08-04，已上线）
+
+```text
+客户            亿航 / customer_id = yihang
+服务器          101.47.39.33（火山云 Byteplus，新加坡，Ubuntu 24.04，4C/15G/99G）
+镜像            ghcr.io/shangwantsci/sub2api-customer-yihang:0.1.156-74ccab74
+部署目录        /opt/sub2api（仅 3 个文件 + 数据目录，无源码、无 .git）
+对外访问        http://101.47.39.33  （HTTP 明文，客户暂不需要域名）
+实例 ID         inst_j2BIZ4R9YdyFKQHiC1XcJaaa
+授权功能        ["gateway"]，未给 chrome_cookie_auth
+标定 profile    CLI 2.1.221，激活时自动下发并热加载
+SSH 密钥        ~/.ssh/customer_volcano_johor（本客户专用）
+管理员          admin@yihang.local
+```
+
+线上实测确认：
+
+| 验收项 | 结果 |
+|---|---|
+| 激活与续租 | `deployment_license.renewed`，租约 24h |
+| profile 自动下发 | `calibration_profile_applied` cli_version=2.1.221 |
+| Chrome OAuth 关闭 | `POST /admin/accounts/chrome-cookie-auth` → **403 deployment_capability_disabled** |
+| 机器绑定 | 无缺失警告，`host_signal_count >= 1` |
+| 主进程用户 | PID 1 = `sub2api` uid **1000**（su-exec 降权确实生效） |
+| DMI 可读性 | 以 uid 1000 实测：machine-id **可读**，product_uuid **不可读** |
+| 外部访问 | `http://101.47.39.33/health` 200，前端 200 |
+
+**DMI 那条印证了本文 §5 的结论**：容器降权后只有 machine-id 参与指纹，
+`host_signal_count` 是 1 不是 3。不要对外宣称三信号。
+
+### 部署时踩到的两个坑
+
+**1. `TOTP_ENCRYPTION_KEY` 必须是十六进制字符串。**
+用字母数字混合会让容器起不来并无限重启，日志报
+`invalid totp encryption key: encoding/hex: invalid byte`。正确生成方式：
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"   # 64 个 hex 字符
+```
+
+**2. GHCR package 默认是 public，必须手动改成 private。**
+根本原因：主仓 `shangwantsci/sub2api` 是 public fork，而 Dockerfile 的
+`org.opencontainers.image.source` 指向上游 `Wei-Shaw/sub2api`（也是 public），
+GHCR 首次推送时按这个 label 关联仓库并**继承了公开可见性**。
+
+GitHub **没有提供修改 package 可见性的 REST API**，只能在网页上改：
+
+```text
+https://github.com/users/shangwantsci/packages/container/sub2api-customer-<客户>/settings
+→ Danger Zone → Change visibility → Private
+```
+
+**每次为新客户构建镜像后都要做这一步并复验**：
+
+```bash
+docker logout ghcr.io 2>/dev/null
+docker pull ghcr.io/shangwantsci/sub2api-customer-<客户>:<tag>   # 应该失败
+```
+
+公开镜像不会让授权失效（没有有效 lease 照样跑不起来），但会泄露编译产物和
+客户水印，等于把"谁是我们的客户"公开。
+
+## 0.1 当前进度（2026-08-03）
 
 A 段（不依赖客户服务器的准备工作）**已全部完成**：
 
