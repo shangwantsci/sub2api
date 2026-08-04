@@ -256,6 +256,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ClaudeMimicryGuardMode:                                 settings.ClaudeMimicryGuardMode,
 		EnableClaudeOAuthSystemPromptInjection:                 settings.EnableClaudeOAuthSystemPromptInjection,
 		EnableClaudeOAuthBillableInputTokens:                   settings.EnableClaudeOAuthBillableInputTokens,
+		ClaudeOAuthBillableInputTokensOverride:                 settings.ClaudeOAuthBillableInputTokensOverride,
 		ClaudeOAuthSystemPrompt:                                settings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:                          settings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:                     settings.EnableAnthropicCacheTTL1hInjection,

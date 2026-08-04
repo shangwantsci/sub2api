@@ -767,6 +767,13 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	// 默认关闭：键缺失或非 "true" 一律 false，存量部署行为不变。
 	result.EnableClaudeOAuthBillableInputTokens = settings[SettingKeyEnableClaudeOAuthBillableInputTokens] == "true"
+	// 0/缺失/非法 => 用本地估算
+	result.ClaudeOAuthBillableInputTokensOverride = 0
+	if raw := strings.TrimSpace(settings[SettingKeyClaudeOAuthBillableInputTokensOverride]); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			result.ClaudeOAuthBillableInputTokensOverride = v
+		}
+	}
 	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
 	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
 	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"

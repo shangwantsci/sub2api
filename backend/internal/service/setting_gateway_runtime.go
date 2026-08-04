@@ -63,6 +63,7 @@ type cachedGatewayForwardingSettings struct {
 	claudeOAuthSystemPrompt          string
 	claudeOAuthSystemPromptBlocks    string
 	claudeOAuthBillableInputTokens   bool
+	claudeOAuthBillableOverride      int
 	anthropicCacheTTL1hInjection     bool
 	rewriteMessageCacheControl       bool
 	clientDatelineNormalization      bool
@@ -596,6 +597,7 @@ type gatewayForwardingSettingsResult struct {
 	clientDatelineNormalization                                                           bool
 	personaGating                                                                         bool
 	claudeOAuthBillableInputTokens                                                        bool
+	claudeOAuthBillableOverride                                                           int
 	claudeCodeMimicryProfile, claudeMimicryGuardMode                                      string
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
@@ -627,6 +629,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				clientDatelineNormalization:      cached.clientDatelineNormalization,
 				personaGating:                    cached.personaGating,
 				claudeOAuthBillableInputTokens:   cached.claudeOAuthBillableInputTokens,
+				claudeOAuthBillableOverride:      cached.claudeOAuthBillableOverride,
 			}
 		}
 	}
@@ -647,6 +650,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					clientDatelineNormalization:      cached.clientDatelineNormalization,
 					personaGating:                    cached.personaGating,
 					claudeOAuthBillableInputTokens:   cached.claudeOAuthBillableInputTokens,
+					claudeOAuthBillableOverride:      cached.claudeOAuthBillableOverride,
 				}, nil
 			}
 		}
@@ -662,6 +666,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyClaudeOAuthSystemPrompt,
 			SettingKeyClaudeOAuthSystemPromptBlocks,
 			SettingKeyEnableClaudeOAuthBillableInputTokens,
+			SettingKeyClaudeOAuthBillableInputTokensOverride,
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
 			SettingKeyEnableClientDatelineNormalization,
@@ -708,6 +713,13 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		systemPromptBlocks := values[SettingKeyClaudeOAuthSystemPromptBlocks]
 		// 默认关闭：键缺失或非 "true" 一律 false，存量部署行为不变。
 		billableInputTokens := values[SettingKeyEnableClaudeOAuthBillableInputTokens] == "true"
+		// 0/缺失/非法 => 用本地估算
+		billableOverride := 0
+		if raw := strings.TrimSpace(values[SettingKeyClaudeOAuthBillableInputTokensOverride]); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+				billableOverride = v
+			}
+		}
 		cacheTTL1h := values[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 		rewriteMessageCacheControl := s.defaultRewriteMessageCacheControl()
 		if v, ok := values[SettingKeyRewriteMessageCacheControl]; ok && v != "" {
@@ -729,6 +741,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
 			claudeOAuthBillableInputTokens:   billableInputTokens,
+			claudeOAuthBillableOverride:      billableOverride,
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
@@ -745,6 +758,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
 			claudeOAuthBillableInputTokens:   billableInputTokens,
+			claudeOAuthBillableOverride:      billableOverride,
 			cacheTTL1h:                       cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
@@ -805,6 +819,11 @@ func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context
 // 是否扣除网关注入的身份 blocks。
 func (s *SettingService) GetClaudeOAuthBillableInputTokensEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).claudeOAuthBillableInputTokens
+}
+
+// GetClaudeOAuthBillableInputTokensOverride 返回注入量的标定覆盖值（0 = 用本地估算）。
+func (s *SettingService) GetClaudeOAuthBillableInputTokensOverride(ctx context.Context) int {
+	return s.getGatewayForwardingSettingsCached(ctx).claudeOAuthBillableOverride
 }
 
 func (s *SettingService) GetClaudeMimicryRuntimeSettings(ctx context.Context) ClaudeMimicryRuntimeSettings {

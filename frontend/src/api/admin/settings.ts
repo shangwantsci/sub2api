@@ -561,6 +561,7 @@ export interface SystemSettings {
   claude_mimicry_guard_mode: string;
   enable_claude_oauth_system_prompt_injection: boolean;
   enable_claude_oauth_billable_input_tokens: boolean;
+  claude_oauth_billable_input_tokens_override: number;
   claude_oauth_system_prompt: string;
   claude_oauth_system_prompt_blocks: string;
   enable_anthropic_cache_ttl_1h_injection: boolean;
@@ -840,6 +841,7 @@ export interface UpdateSettingsRequest {
   claude_mimicry_guard_mode?: string;
   enable_claude_oauth_system_prompt_injection?: boolean;
   enable_claude_oauth_billable_input_tokens?: boolean;
+  claude_oauth_billable_input_tokens_override?: number;
   claude_oauth_system_prompt?: string;
   claude_oauth_system_prompt_blocks?: string;
   enable_anthropic_cache_ttl_1h_injection?: boolean;

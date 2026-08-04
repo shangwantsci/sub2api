@@ -223,6 +223,7 @@ type UpdateSettingsRequest struct {
 	ClaudeMimicryGuardMode                 *string `json:"claude_mimicry_guard_mode"`
 	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	EnableClaudeOAuthBillableInputTokens   *bool   `json:"enable_claude_oauth_billable_input_tokens"`
+	ClaudeOAuthBillableInputTokensOverride *int    `json:"claude_oauth_billable_input_tokens_override"`
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
@@ -1378,6 +1379,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableClaudeOAuthBillableInputTokens
 		}(),
+		ClaudeOAuthBillableInputTokensOverride: func() int {
+			if req.ClaudeOAuthBillableInputTokensOverride != nil && *req.ClaudeOAuthBillableInputTokensOverride >= 0 {
+				return *req.ClaudeOAuthBillableInputTokensOverride
+			}
+			return previousSettings.ClaudeOAuthBillableInputTokensOverride
+		}(),
 		ClaudeOAuthSystemPrompt: func() string {
 			if req.ClaudeOAuthSystemPrompt != nil {
 				return *req.ClaudeOAuthSystemPrompt
@@ -1858,6 +1865,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ClaudeMimicryGuardMode:                                 updatedSettings.ClaudeMimicryGuardMode,
 		EnableClaudeOAuthSystemPromptInjection:                 updatedSettings.EnableClaudeOAuthSystemPromptInjection,
 		EnableClaudeOAuthBillableInputTokens:                   updatedSettings.EnableClaudeOAuthBillableInputTokens,
+		ClaudeOAuthBillableInputTokensOverride:                 updatedSettings.ClaudeOAuthBillableInputTokensOverride,
 		ClaudeOAuthSystemPrompt:                                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:                          updatedSettings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,

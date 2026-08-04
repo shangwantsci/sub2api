@@ -4439,6 +4439,34 @@
                 />
               </div>
 
+              <div v-if="form.enable_claude_oauth_billable_input_tokens">
+                <label
+                  class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.claudeOAuthBillableOverride",
+                    )
+                  }}
+                </label>
+                <input
+                  v-model.number="
+                    form.claude_oauth_billable_input_tokens_override
+                  "
+                  type="number"
+                  min="0"
+                  class="input w-40"
+                  placeholder="0"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.claudeOAuthBillableOverrideHint",
+                    )
+                  }}
+                </p>
+              </div>
+
               <div>
                 <label
                   class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -8526,6 +8554,7 @@ const form = reactive<SettingsForm>({
   claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   enable_claude_oauth_billable_input_tokens: false,
+  claude_oauth_billable_input_tokens_override: 0,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
   enable_anthropic_cache_ttl_1h_injection: false,
@@ -9836,6 +9865,8 @@ async function saveSettings() {
         form.enable_claude_oauth_system_prompt_injection,
       enable_claude_oauth_billable_input_tokens:
         form.enable_claude_oauth_billable_input_tokens,
+      claude_oauth_billable_input_tokens_override:
+        Number(form.claude_oauth_billable_input_tokens_override) || 0,
       claude_oauth_system_prompt: form.claude_oauth_system_prompt?.trim()
         ? form.claude_oauth_system_prompt
         : "",

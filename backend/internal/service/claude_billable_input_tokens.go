@@ -53,6 +53,32 @@ func (s *GatewayService) claudeOAuthBillableInputTokensEnabled(ctx context.Conte
 	return s.settingService.GetClaudeOAuthBillableInputTokensEnabled(ctx)
 }
 
+// claudeOAuthBillableInputTokensOverride 返回注入量的标定覆盖值（0 = 用本地估算）。
+func (s *GatewayService) claudeOAuthBillableInputTokensOverride(ctx context.Context) int {
+	if s == nil || s.settingService == nil {
+		return 0
+	}
+	return s.settingService.GetClaudeOAuthBillableInputTokensOverride(ctx)
+}
+
+// resolveClaudeMimicInjectedInputTokens 得出本次请求应扣除的注入量。
+//
+// 先用本地估算判断「有没有注入」——这一步必须保留：估出 0 说明 system 里没有
+// 不带 cache_control 的注入块，此时即便配了覆盖值也不能扣。
+// 确认有注入后，若管理员填了标定值则以其为准：本地走 o200k，与 Anthropic 口径存在
+// 系统性偏差（线上实测 identity_only 两块，本地估 42 而官方计 28），
+// 注入内容形态固定，一次标定即可长期生效。
+func (s *GatewayService) resolveClaudeMimicInjectedInputTokens(ctx context.Context, body []byte) int {
+	injected := countClaudeMimicInjectedInputTokens(body)
+	if injected <= 0 {
+		return 0
+	}
+	if override := s.claudeOAuthBillableInputTokensOverride(ctx); override > 0 {
+		return override
+	}
+	return injected
+}
+
 // countClaudeMimicInjectedInputTokens 统计最终 wire body 里会落进 usage.input_tokens
 // 的注入 system block token 数。
 //

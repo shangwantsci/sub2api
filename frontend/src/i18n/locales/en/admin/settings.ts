@@ -322,6 +322,8 @@ export default {
         cchSigningHint: 'Sign the billing header in forwarded requests with CCH hash. When disabled, the placeholder is preserved.',
         claudeOAuthSystemPromptInjection: 'Claude OAuth System Blocks',
         claudeOAuthSystemPromptInjectionHint: 'Inject Claude Code-like system blocks for Claude OAuth requests from non-Claude-Code clients. Enabled by default.',
+        claudeOAuthBillableOverride: 'Calibrated Injection Size (tokens)',
+        claudeOAuthBillableOverrideHint: 'Set 0 to use the local estimate. The local tokenizer is o200k, which differs systematically from Anthropic (measured: identity_only blocks estimate 42 locally but count 28 upstream). To calibrate, measure the true content size with official count_tokens and enter (upstream input_tokens - that value). The injected blocks are fixed, so one calibration lasts.',
         claudeOAuthBillableInputTokens: 'Deduct Identity Injection from usage',
         claudeOAuthBillableInputTokensHint: 'Subtract the gateway-injected identity blocks (~41 tokens) from the usage.input_tokens returned to clients, so they only see their own input. Only blocks without cache_control are deducted — cached blocks count toward cache_creation/cache_read and are not part of input_tokens. Display only; billing and auditing keep the upstream usage. Disabled by default.',
         claudeOAuthSystemPrompt: 'Claude OAuth Expansion Prompt',

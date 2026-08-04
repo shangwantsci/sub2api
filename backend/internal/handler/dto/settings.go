@@ -186,6 +186,7 @@ type SystemSettings struct {
 	ClaudeMimicryGuardMode                 string `json:"claude_mimicry_guard_mode"`
 	EnableClaudeOAuthSystemPromptInjection bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	EnableClaudeOAuthBillableInputTokens   bool   `json:"enable_claude_oauth_billable_input_tokens"`
+	ClaudeOAuthBillableInputTokensOverride int    `json:"claude_oauth_billable_input_tokens_override"`
 	ClaudeOAuthSystemPrompt                string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          string `json:"claude_oauth_system_prompt_blocks"`
 	EnableAnthropicCacheTTL1hInjection     bool   `json:"enable_anthropic_cache_ttl_1h_injection"`

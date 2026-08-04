@@ -200,6 +200,7 @@ type SystemSettings struct {
 	ClaudeMimicryGuardMode                 string // Claude Code 伪装审计模式：off/warn/block
 	EnableClaudeOAuthSystemPromptInjection bool   // 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
 	EnableClaudeOAuthBillableInputTokens   bool   // 是否从回给客户端的 usage.input_tokens 扣除注入的身份 blocks（默认 false）
+	ClaudeOAuthBillableInputTokensOverride int    // 用实测值覆盖注入量的本地估算（0 = 用估算）
 	ClaudeOAuthSystemPrompt                string // Claude OAuth mimic 路径注入的通用扩展 system prompt；空值使用内置默认
 	ClaudeOAuthSystemPromptBlocks          string // Claude OAuth mimic 路径注入的 system blocks JSON 配置；空值使用内置默认
 	EnableAnthropicCacheTTL1hInjection     bool   // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）

@@ -522,6 +522,11 @@ const (
 	// 维度，本就不在 input_tokens 里。只改展示值，计费与审计始终用上游原始 usage。
 	// 见 claude_billable_input_tokens.go。
 	SettingKeyEnableClaudeOAuthBillableInputTokens = "enable_claude_oauth_billable_input_tokens"
+	// SettingKeyClaudeOAuthBillableInputTokensOverride 用实测值覆盖注入量的本地估算（0 = 用估算）。
+	// 本地用 o200k 分词，与 Anthropic 口径存在系统性偏差（线上实测：结构化的
+	// billing header 被 o200k 拆得更碎，两块估 42 而官方只计 28）。注入内容形态固定，
+	// 因此一次标定即可长期生效：填 (上游 input_tokens - 客户内容真值)。
+	SettingKeyClaudeOAuthBillableInputTokensOverride = "claude_oauth_billable_input_tokens_override"
 	// SettingKeyEnableAnthropicCacheTTL1hInjection 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
 	SettingKeyEnableAnthropicCacheTTL1hInjection = "enable_anthropic_cache_ttl_1h_injection"
 	// SettingKeyEnableClientDatelineNormalization 是否对 Anthropic OAuth/SetupToken 账号

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -98,6 +99,43 @@ func TestCountClaudeMimicInjectedInputTokensNonArraySystem(t *testing.T) {
 	}
 	if got := countClaudeMimicInjectedInputTokens([]byte(`{"messages":[]}`)); got != 0 {
 		t.Fatalf("missing system must yield 0, got %d", got)
+	}
+}
+
+func TestResolveInjectedInputTokensRespectsOverride(t *testing.T) {
+	// settingService 为 nil 时 override 恒为 0，等价于「未标定」。
+	svc := &GatewayService{}
+	ctx := context.Background()
+
+	injectedBody := []byte(`{
+		"system": [
+			{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.221.678; cc_entrypoint=sdk-cli;"},
+			{"type": "text", "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK."}
+		],
+		"messages": [{"role": "user", "content": "hi"}]
+	}`)
+
+	estimate := countClaudeMimicInjectedInputTokens(injectedBody)
+	if estimate <= 0 {
+		t.Fatal("test setup: expected a positive local estimate")
+	}
+	if got := svc.resolveClaudeMimicInjectedInputTokens(ctx, injectedBody); got != estimate {
+		t.Fatalf("without override should fall back to estimate: got %d, want %d", got, estimate)
+	}
+
+	// 没有注入块时，即便标定值非零也不能扣 —— 否则会凭空削掉客户真实 token。
+	noInjection := []byte(`{"messages":[{"role":"user","content":"hi"}]}`)
+	if got := svc.resolveClaudeMimicInjectedInputTokens(ctx, noInjection); got != 0 {
+		t.Fatalf("no injected blocks must yield 0, got %d", got)
+	}
+
+	// 全部注入块都带 cache_control 时同样视为「无落入 input_tokens 的注入」。
+	allCached := []byte(`{
+		"system": [{"type": "text", "text": "big prompt", "cache_control": {"type": "ephemeral"}}],
+		"messages": [{"role": "user", "content": "hi"}]
+	}`)
+	if got := svc.resolveClaudeMimicInjectedInputTokens(ctx, allCached); got != 0 {
+		t.Fatalf("fully cached injection must yield 0, got %d", got)
 	}
 }
 
