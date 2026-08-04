@@ -765,6 +765,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.EnableClaudeOAuthSystemPromptInjection = true
 	}
+	// 默认关闭：键缺失或非 "true" 一律 false，存量部署行为不变。
+	result.EnableClaudeOAuthBillableInputTokens = settings[SettingKeyEnableClaudeOAuthBillableInputTokens] == "true"
 	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
 	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
 	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"

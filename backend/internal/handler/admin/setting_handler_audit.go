@@ -419,6 +419,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableClaudeOAuthSystemPromptInjection != after.EnableClaudeOAuthSystemPromptInjection {
 		changed = append(changed, "enable_claude_oauth_system_prompt_injection")
 	}
+	if before.EnableClaudeOAuthBillableInputTokens != after.EnableClaudeOAuthBillableInputTokens {
+		changed = append(changed, "enable_claude_oauth_billable_input_tokens")
+	}
 	if before.ClaudeOAuthSystemPrompt != after.ClaudeOAuthSystemPrompt {
 		changed = append(changed, "claude_oauth_system_prompt")
 	}

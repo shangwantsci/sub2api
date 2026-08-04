@@ -222,6 +222,7 @@ type UpdateSettingsRequest struct {
 	ClaudeCodeMimicryProfile               *string `json:"claude_code_mimicry_profile"`
 	ClaudeMimicryGuardMode                 *string `json:"claude_mimicry_guard_mode"`
 	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
+	EnableClaudeOAuthBillableInputTokens   *bool   `json:"enable_claude_oauth_billable_input_tokens"`
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
@@ -1371,6 +1372,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableClaudeOAuthSystemPromptInjection
 		}(),
+		EnableClaudeOAuthBillableInputTokens: func() bool {
+			if req.EnableClaudeOAuthBillableInputTokens != nil {
+				return *req.EnableClaudeOAuthBillableInputTokens
+			}
+			return previousSettings.EnableClaudeOAuthBillableInputTokens
+		}(),
 		ClaudeOAuthSystemPrompt: func() string {
 			if req.ClaudeOAuthSystemPrompt != nil {
 				return *req.ClaudeOAuthSystemPrompt
@@ -1850,6 +1857,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ClaudeCodeMimicryProfile:                               updatedSettings.ClaudeCodeMimicryProfile,
 		ClaudeMimicryGuardMode:                                 updatedSettings.ClaudeMimicryGuardMode,
 		EnableClaudeOAuthSystemPromptInjection:                 updatedSettings.EnableClaudeOAuthSystemPromptInjection,
+		EnableClaudeOAuthBillableInputTokens:                   updatedSettings.EnableClaudeOAuthBillableInputTokens,
 		ClaudeOAuthSystemPrompt:                                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:                          updatedSettings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,

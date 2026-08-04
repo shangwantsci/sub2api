@@ -382,6 +382,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyClaudeCodeMimicryProfile] = normalizeClaudeCodeMimicryProfileID(settings.ClaudeCodeMimicryProfile)
 	updates[SettingKeyClaudeMimicryGuardMode] = normalizeClaudeMimicryGuardMode(settings.ClaudeMimicryGuardMode)
 	updates[SettingKeyEnableClaudeOAuthSystemPromptInjection] = strconv.FormatBool(settings.EnableClaudeOAuthSystemPromptInjection)
+	updates[SettingKeyEnableClaudeOAuthBillableInputTokens] = strconv.FormatBool(settings.EnableClaudeOAuthBillableInputTokens)
 	updates[SettingKeyClaudeOAuthSystemPrompt] = settings.ClaudeOAuthSystemPrompt
 	if err := ValidateClaudeOAuthSystemPromptBlocksConfig(settings.ClaudeOAuthSystemPromptBlocks); err != nil {
 		return nil, err
@@ -541,6 +542,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
 		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
 		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
+		claudeOAuthBillableInputTokens:   settings.EnableClaudeOAuthBillableInputTokens,
 		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
 		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
 		clientDatelineNormalization:      settings.EnableClientDatelineNormalization,

@@ -243,6 +243,12 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
+	// 记录会落进 usage.input_tokens 的身份 block 体量，供响应阶段从回给客户端的
+	// 展示值里扣除。只在伪装路径记录：非伪装路径的 system 是客户自己的内容。
+	if c != nil && mimicClaudeCode && s.claudeOAuthBillableInputTokensEnabled(ctx) {
+		rememberClaudeMimicInjectedInputTokens(c, countClaudeMimicInjectedInputTokens(body))
+	}
+
 	return req, body, nil
 }
 

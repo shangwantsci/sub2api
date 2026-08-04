@@ -322,6 +322,8 @@ export default {
         cchSigningHint: 'Sign the billing header in forwarded requests with CCH hash. When disabled, the placeholder is preserved.',
         claudeOAuthSystemPromptInjection: 'Claude OAuth System Blocks',
         claudeOAuthSystemPromptInjectionHint: 'Inject Claude Code-like system blocks for Claude OAuth requests from non-Claude-Code clients. Enabled by default.',
+        claudeOAuthBillableInputTokens: 'Deduct Identity Injection from usage',
+        claudeOAuthBillableInputTokensHint: 'Subtract the gateway-injected identity blocks (~41 tokens) from the usage.input_tokens returned to clients, so they only see their own input. Only blocks without cache_control are deducted — cached blocks count toward cache_creation/cache_read and are not part of input_tokens. Display only; billing and auditing keep the upstream usage. Disabled by default.',
         claudeOAuthSystemPrompt: 'Claude OAuth Expansion Prompt',
         claudeOAuthSystemPromptPlaceholder: 'Leave empty to use the built-in Claude Code expansion prompt.',
         claudeOAuthSystemPromptHint: 'Legacy compatibility: controls only the third injected system block.',

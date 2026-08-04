@@ -649,6 +649,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
+	// 本次请求注入进 usage.input_tokens 的身份 block 体量（0 表示不介入）。
+	injectedInputTokens := recalledClaudeMimicInjectedInputTokens(c)
+
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -889,6 +892,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				}
 			}
 		}
+
 		if eventType == "message_delta" {
 			if u, ok := event["usage"].(map[string]any); ok {
 				eventChanged = reconcileCachedTokens(u) || eventChanged
@@ -921,7 +925,24 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 		}
 
+		// 计费口径先固定：usagePatch 取的是上游原始 usage。
 		usagePatch := s.extractSSEUsagePatch(event)
+
+		// 之后才改回给客户端的展示值，扣掉注入的身份 blocks。
+		// 顺序不能颠倒 —— 反过来会把扣减后的数字记进账。
+		if eventType == "message_start" && injectedInputTokens > 0 {
+			if msg, ok := event["message"].(map[string]any); ok {
+				if u, ok := msg["usage"].(map[string]any); ok {
+					if official, billable, ok := rewriteInputTokensInMap(u, injectedInputTokens); ok {
+						eventChanged = true
+						logger.LegacyPrintf("service.gateway",
+							"usage.input_tokens: deducted %d injected identity tokens (account=%d, %d -> %d, streaming)",
+							injectedInputTokens, account.ID, official, billable)
+					}
+				}
+			}
+		}
+
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
 		}
@@ -1396,6 +1417,17 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	}
 
 	body = reverseToolNamesIfPresent(c, body)
+
+	// 从回给客户端的展示值里扣掉注入的身份 blocks。
+	// 返回给计费/审计的 response.Usage 保持上游原值，此处只动 body。
+	if injected := recalledClaudeMimicInjectedInputTokens(c); injected > 0 {
+		if next, official, billable, ok := rewriteInputTokensInJSON(body, "usage", injected); ok {
+			body = next
+			logger.LegacyPrintf("service.gateway",
+				"usage.input_tokens: deducted %d injected identity tokens (account=%d, %d -> %d, non-streaming)",
+				injected, account.ID, official, billable)
+		}
+	}
 
 	// 写入响应
 	c.Data(resp.StatusCode, contentType, body)

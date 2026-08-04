@@ -4414,6 +4414,31 @@
                 />
               </div>
 
+              <!-- usage.input_tokens 扣除注入的身份 blocks -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeOAuthBillableInputTokens",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.claudeOAuthBillableInputTokensHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.enable_claude_oauth_billable_input_tokens"
+                />
+              </div>
+
               <div>
                 <label
                   class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -8500,6 +8525,7 @@ const form = reactive<SettingsForm>({
   claude_code_mimicry_profile: currentClaudeCodeMimicryProfileID,
   claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
+  enable_claude_oauth_billable_input_tokens: false,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
   enable_anthropic_cache_ttl_1h_injection: false,
@@ -9808,6 +9834,8 @@ async function saveSettings() {
       claude_mimicry_guard_mode: form.claude_mimicry_guard_mode || "warn",
       enable_claude_oauth_system_prompt_injection:
         form.enable_claude_oauth_system_prompt_injection,
+      enable_claude_oauth_billable_input_tokens:
+        form.enable_claude_oauth_billable_input_tokens,
       claude_oauth_system_prompt: form.claude_oauth_system_prompt?.trim()
         ? form.claude_oauth_system_prompt
         : "",

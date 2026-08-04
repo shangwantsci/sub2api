@@ -62,6 +62,7 @@ type cachedGatewayForwardingSettings struct {
 	claudeOAuthSystemPromptInjection bool
 	claudeOAuthSystemPrompt          string
 	claudeOAuthSystemPromptBlocks    string
+	claudeOAuthBillableInputTokens   bool
 	anthropicCacheTTL1hInjection     bool
 	rewriteMessageCacheControl       bool
 	clientDatelineNormalization      bool
@@ -594,6 +595,7 @@ type gatewayForwardingSettingsResult struct {
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	clientDatelineNormalization                                                           bool
 	personaGating                                                                         bool
+	claudeOAuthBillableInputTokens                                                        bool
 	claudeCodeMimicryProfile, claudeMimicryGuardMode                                      string
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks                                string
 }
@@ -624,6 +626,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 				clientDatelineNormalization:      cached.clientDatelineNormalization,
 				personaGating:                    cached.personaGating,
+				claudeOAuthBillableInputTokens:   cached.claudeOAuthBillableInputTokens,
 			}
 		}
 	}
@@ -643,6 +646,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 					clientDatelineNormalization:      cached.clientDatelineNormalization,
 					personaGating:                    cached.personaGating,
+					claudeOAuthBillableInputTokens:   cached.claudeOAuthBillableInputTokens,
 				}, nil
 			}
 		}
@@ -657,6 +661,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableClaudeOAuthSystemPromptInjection,
 			SettingKeyClaudeOAuthSystemPrompt,
 			SettingKeyClaudeOAuthSystemPromptBlocks,
+			SettingKeyEnableClaudeOAuthBillableInputTokens,
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
 			SettingKeyEnableClientDatelineNormalization,
@@ -701,6 +706,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		}
 		systemPrompt := values[SettingKeyClaudeOAuthSystemPrompt]
 		systemPromptBlocks := values[SettingKeyClaudeOAuthSystemPromptBlocks]
+		// 默认关闭：键缺失或非 "true" 一律 false，存量部署行为不变。
+		billableInputTokens := values[SettingKeyEnableClaudeOAuthBillableInputTokens] == "true"
 		cacheTTL1h := values[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 		rewriteMessageCacheControl := s.defaultRewriteMessageCacheControl()
 		if v, ok := values[SettingKeyRewriteMessageCacheControl]; ok && v != "" {
@@ -721,6 +728,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			claudeOAuthSystemPromptInjection: systemPromptInjection,
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
+			claudeOAuthBillableInputTokens:   billableInputTokens,
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
@@ -736,6 +744,7 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			claudeOAuthSystemPromptInjection: systemPromptInjection,
 			claudeOAuthSystemPrompt:          systemPrompt,
 			claudeOAuthSystemPromptBlocks:    systemPromptBlocks,
+			claudeOAuthBillableInputTokens:   billableInputTokens,
 			cacheTTL1h:                       cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
@@ -790,6 +799,12 @@ func (s *SettingService) IsPersonaGatingEnabled(ctx context.Context) bool {
 func (s *SettingService) GetClaudeOAuthSystemPromptInjectionSettings(ctx context.Context) (enabled bool, prompt string, blocks string) {
 	result := s.getGatewayForwardingSettingsCached(ctx)
 	return result.claudeOAuthSystemPromptInjection, result.claudeOAuthSystemPrompt, result.claudeOAuthSystemPromptBlocks
+}
+
+// GetClaudeOAuthBillableInputTokensEnabled 返回开关：回给客户端的 usage.input_tokens
+// 是否扣除网关注入的身份 blocks。
+func (s *SettingService) GetClaudeOAuthBillableInputTokensEnabled(ctx context.Context) bool {
+	return s.getGatewayForwardingSettingsCached(ctx).claudeOAuthBillableInputTokens
 }
 
 func (s *SettingService) GetClaudeMimicryRuntimeSettings(ctx context.Context) ClaudeMimicryRuntimeSettings {

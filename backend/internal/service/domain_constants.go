@@ -516,6 +516,12 @@ const (
 	SettingKeyClaudeOAuthSystemPrompt = "claude_oauth_system_prompt"
 	// SettingKeyClaudeOAuthSystemPromptBlocks Claude OAuth mimic 路径注入的 system blocks JSON 配置（空值使用内置默认）
 	SettingKeyClaudeOAuthSystemPromptBlocks = "claude_oauth_system_prompt_blocks"
+	// SettingKeyEnableClaudeOAuthBillableInputTokens 是否从回给客户端的 usage.input_tokens
+	// 中扣除网关注入的 Claude Code 身份 blocks（默认 false）。
+	// 仅扣不带 cache_control 的注入块——带 cache_control 的落在 cache_creation/cache_read
+	// 维度，本就不在 input_tokens 里。只改展示值，计费与审计始终用上游原始 usage。
+	// 见 claude_billable_input_tokens.go。
+	SettingKeyEnableClaudeOAuthBillableInputTokens = "enable_claude_oauth_billable_input_tokens"
 	// SettingKeyEnableAnthropicCacheTTL1hInjection 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
 	SettingKeyEnableAnthropicCacheTTL1hInjection = "enable_anthropic_cache_ttl_1h_injection"
 	// SettingKeyEnableClientDatelineNormalization 是否对 Anthropic OAuth/SetupToken 账号
