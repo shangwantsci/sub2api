@@ -2,8 +2,11 @@ package service
 
 import (
 	"encoding/json"
+	"net/http/httptest"
+	"os"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -210,6 +213,72 @@ func TestInjectedThinkingStreamFilter(t *testing.T) {
 		require.True(t, changed)
 		require.Equal(t, 0, text["index"])
 	})
+}
+
+// 首次实现只在一个 normalizeClaudeOAuthRequestBody 调用点打标记，主转发路径漏掉，
+// 线上表现为剥离完全不生效。这里锁住判定语义，路径覆盖由下面的调用点测试保证。
+func TestMarkInjectedThinkingIfAdded(t *testing.T) {
+	tests := []struct {
+		name   string
+		before string
+		after  string
+		want   bool
+	}{
+		{
+			name:   "客户端没带、改写后有 -> 标记",
+			before: `{"model":"claude-opus-5","max_tokens":1024}`,
+			after:  `{"model":"claude-opus-5","max_tokens":1024,"thinking":{"type":"adaptive"}}`,
+			want:   true,
+		},
+		{
+			name:   "客户端自己带了 -> 不标记",
+			before: `{"model":"claude-opus-5","thinking":{"type":"enabled","budget_tokens":1024}}`,
+			after:  `{"model":"claude-opus-5","thinking":{"type":"enabled","budget_tokens":1024}}`,
+			want:   false,
+		},
+		{
+			name:   "客户端带了 disabled、网关未改 -> 不标记",
+			before: `{"model":"claude-opus-5","thinking":{"type":"disabled"}}`,
+			after:  `{"model":"claude-opus-5","thinking":{"type":"disabled"}}`,
+			want:   false,
+		},
+		{
+			name:   "两侧都没有 -> 不标记",
+			before: `{"model":"claude-sonnet-4-5-20250929","max_tokens":1024}`,
+			after:  `{"model":"claude-sonnet-4-5-20250929","max_tokens":1024}`,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			markInjectedThinkingIfAdded(c, []byte(tt.before), []byte(tt.after))
+			require.Equal(t, tt.want, recalledClaudeMimicInjectedThinking(c))
+		})
+	}
+
+	t.Run("nil context 不 panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			markInjectedThinkingIfAdded(nil, []byte(`{}`), []byte(`{"thinking":{"type":"adaptive"}}`))
+		})
+	})
+}
+
+// 每个会把响应回给客户端的转发路径都必须调用 markInjectedThinkingIfAdded，
+// 否则响应侧摘不掉注入的 thinking block。新增转发路径时这条会失败，提醒补上。
+func TestAllForwardPathsMarkInjectedThinking(t *testing.T) {
+	for _, path := range []string{
+		"gateway_forward.go",
+		"gateway_claude_oauth_body.go",
+	} {
+		t.Run(path, func(t *testing.T) {
+			src, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Contains(t, string(src), "markInjectedThinkingIfAdded(",
+				"%s 调用了 normalizeClaudeOAuthRequestBody 却没打注入标记", path)
+		})
+	}
 }
 
 func TestRecalledClaudeMimicInjectedThinking(t *testing.T) {

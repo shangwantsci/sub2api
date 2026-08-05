@@ -37,6 +37,22 @@ func rememberClaudeMimicInjectedThinking(c *gin.Context) {
 	}
 }
 
+// markInjectedThinkingIfAdded 对比改写前后的 body，只有「客户端没带、改写后有」
+// 才认定 thinking 是网关注入的并打标记。
+//
+// normalizeClaudeOAuthRequestBody 有多个调用点（原生 /v1/messages 转发、
+// OAuth mimicry body 改写、count_tokens），**每个会把响应回给客户端的路径都必须
+// 调用本函数**，否则响应侧摘不掉注入的 thinking block —— 首次实现只在其中一个
+// 调用点打标记，主转发路径漏掉，线上表现为修复完全不生效。
+func markInjectedThinkingIfAdded(c *gin.Context, beforeBody, afterBody []byte) {
+	if gjson.GetBytes(beforeBody, "thinking").Exists() {
+		return
+	}
+	if gjson.GetBytes(afterBody, "thinking").Exists() {
+		rememberClaudeMimicInjectedThinking(c)
+	}
+}
+
 // recalledClaudeMimicInjectedThinking 返回本次请求的 thinking 是否由网关注入。
 func recalledClaudeMimicInjectedThinking(c interface {
 	Get(string) (any, bool)

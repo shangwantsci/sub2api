@@ -647,15 +647,12 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		}
 	}
 
-	// 注入前后各看一次 thinking：只有「客户端没带、改写后有」才算网关注入，
-	// 响应侧据此摘掉那个多出来的 thinking block（见 claude_injected_thinking.go）。
-	clientRequestedThinking := gjson.GetBytes(body, "thinking").Exists()
+	// 注入前后对比 thinking，网关注入的才打标记，供响应侧摘块。
+	beforeNormalize := body
 
 	body, _ = normalizeClaudeOAuthRequestBody(body, model, normalizeOpts)
 
-	if !clientRequestedThinking && gjson.GetBytes(body, "thinking").Exists() {
-		rememberClaudeMimicInjectedThinking(c)
-	}
+	markInjectedThinkingIfAdded(c, beforeNormalize, body)
 
 	// Phase D+E+F: messages cache 策略 + 工具名混淆 + tools[-1] 断点
 	// 对齐 Parrot transform_request 里剩余的字段级改写。顺序有语义约束：

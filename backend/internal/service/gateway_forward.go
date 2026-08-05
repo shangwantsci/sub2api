@@ -213,11 +213,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			}
 		}
 
+		// 注入前后对比 thinking，网关注入的才打标记，供响应侧摘块。
+		beforeNormalize := body
+
 		var normalizedBody []byte
 		normalizedBody, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
 		if err := replaceBody(normalizedBody); err != nil {
 			return nil, err
 		}
+		markInjectedThinkingIfAdded(c, beforeNormalize, body)
 
 		// D/E/F: 可选 messages cache 策略 + 工具名混淆 + tools[-1] 断点
 		// 与 forward_as_chat_completions / forward_as_responses 路径对齐，
