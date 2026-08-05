@@ -794,6 +794,11 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	noopDeltaKeepaliveBlockIndex := -1
 	noopDeltaKeepaliveDeltaType := ""
 
+	// 客户端没要 thinking 却被网关注入时，摘掉上游多返回的 thinking block 事件
+	// 并前移其后各块的 index（见 claude_injected_thinking.go）。
+	stripInjectedThinking := recalledClaudeMimicInjectedThinking(c)
+	injectedThinkingFilter := &injectedThinkingStreamFilter{}
+
 	pendingEventLines := make([]string, 0, 4)
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
@@ -848,6 +853,17 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			eventName = eventType
 		}
 		eventChanged := false
+
+		// 放在其余改写之前：被丢弃的事件无需再走后续处理，而 index 改写后
+		// keepalive 记录的块序号才与实际下发给客户端的一致。
+		// 推理块事件不携带 usage、也不是终止事件，整条丢弃不影响计费与收尾判定。
+		if stripInjectedThinking {
+			drop, changed := injectedThinkingFilter.apply(eventType, event)
+			if drop {
+				return nil, "", nil, nil
+			}
+			eventChanged = changed || eventChanged
+		}
 
 		if useNoopDeltaKeepalive {
 			switch eventType {
@@ -1417,6 +1433,14 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	}
 
 	body = reverseToolNamesIfPresent(c, body)
+
+	// 客户端没要 thinking 却被网关注入时，把上游据此多返回的 thinking block 摘掉，
+	// 让响应回到客户端请求时的形态。usage 不受影响。
+	if recalledClaudeMimicInjectedThinking(c) {
+		if next, stripped := stripInjectedThinkingFromResponseBody(body); stripped {
+			body = next
+		}
+	}
 
 	// 从回给客户端的展示值里扣掉注入的身份 blocks。
 	// 返回给计费/审计的 response.Usage 保持上游原值，此处只动 body。

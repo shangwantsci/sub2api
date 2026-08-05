@@ -187,6 +187,47 @@ var claudeCodeMimicryFableCountTokensBetas = []string{
 	BetaTokenCounting,
 }
 
+// claudeCodeMimicryPreAdaptiveMessageBetas / ...CountTokensBetas 是 4.5 代模型的
+// beta 集合：在默认集合基础上去掉 effort-2025-11-24。该 beta 的发布日期晚于这一代
+// 模型本身（如 claude-sonnet-4-5-20250929），真实 CLI 调用它们时不会带上。
+var claudeCodeMimicryPreAdaptiveMessageBetas = []string{
+	BetaClaudeCode,
+	BetaInterleavedThinking,
+	BetaToolSearchTool,
+}
+
+var claudeCodeMimicryPreAdaptiveCountTokensBetas = []string{
+	BetaClaudeCode,
+	BetaInterleavedThinking,
+	BetaThinkingTokenCount,
+	BetaContextManagement,
+	BetaPromptCachingScope,
+	BetaMidConversationSystem,
+	BetaAdvancedToolUse,
+	BetaTokenCounting,
+}
+
+// preAdaptiveThinkingModelMarkers 标记早于 adaptive thinking / output_config.effort
+// 的模型代次。
+//
+// 这两个字段都是 4.6 代才引入的能力，Anthropic 对 4.5 代模型会直接以 400 拒绝
+// （adaptive thinking is not supported on this model / does not support the effort
+// parameter）。真实 CLI 按模型能力下发参数，调用这一代模型时本来就不会带上它们 ——
+// 注入反而制造出真实客户端不可能产生的参数组合，既打不通也不像真身。
+//
+// haiku-4-5 同属这一代，但它在 ResolveClaudeCodeMimicryModelProfile 中由更靠前的
+// haiku 分支命中（其 enabled + budget_tokens 形态来自真身抓包），不走这里。
+var preAdaptiveThinkingModelMarkers = []string{"sonnet-4-5", "opus-4-5"}
+
+func isPreAdaptiveThinkingModel(normalized string) bool {
+	for _, marker := range preAdaptiveThinkingModelMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func cloneStringMap(values map[string]string) map[string]string {
 	out := make(map[string]string, len(values))
 	for k, v := range values {
@@ -246,6 +287,18 @@ func ResolveClaudeCodeMimicryModelProfile(modelID string) ClaudeCodeMimicryModel
 			CountTokensDefaultMaxTokens: 64000,
 			DefaultThinkingType:         "adaptive",
 			DefaultOutputConfigEffort:   "high",
+		}
+	// 必须排在 sonnet 分支之前：claude-sonnet-4-5-* 同时含 "sonnet"，
+	// 落到下面的 sonnet 分支会被套上这一代不支持的 adaptive + effort。
+	case isPreAdaptiveThinkingModel(normalized):
+		return ClaudeCodeMimicryModelProfile{
+			ID:                          "pre-adaptive",
+			MessageBetas:                cloneStrings(claudeCodeMimicryPreAdaptiveMessageBetas),
+			CountTokensBetas:            cloneStrings(claudeCodeMimicryPreAdaptiveCountTokensBetas),
+			DefaultMaxTokens:            32000,
+			CountTokensDefaultMaxTokens: 32000,
+			// DefaultThinkingType / DefaultOutputConfigEffort 刻意留空：
+			// 这一代模型不接受 adaptive 与 effort，客户端没主动要求时不下发。
 		}
 	case strings.Contains(normalized, "sonnet"):
 		return ClaudeCodeMimicryModelProfile{

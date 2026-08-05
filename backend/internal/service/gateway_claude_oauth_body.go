@@ -109,6 +109,37 @@ func marshalAnthropicMetadata(userID string) ([]byte, error) {
 	return json.Marshal(anthropicMetadataPayload{UserID: userID})
 }
 
+// minThinkingBudgetTokens 是 Anthropic 对 thinking.budget_tokens 的下限。
+const minThinkingBudgetTokens = 1024
+
+// resolveMimicThinkingBudget 按请求实际的 max_tokens 收敛要注入的 thinking budget。
+//
+// Anthropic 要求 max_tokens > thinking.budget_tokens。profile 里的默认 budget
+// （haiku 为 31999）来自真身抓包，真身同时下发 max_tokens=32000 —— 两者是成对的。
+// 但 max_tokens 在 Messages API 中是必填字段，客户端总会带上自己的值，profile 的
+// DefaultMaxTokens 实际不会生效；只复制 budget 就拆散了这对约束，凑出
+// max_tokens=1024 + budget=31999 这种真身不可能产生、且上游必然 400 的组合。
+//
+// 返回 0 表示不应注入：预算空间连 API 下限都放不下，此时保持客户端原样，
+// 比发出一个必被拒绝的请求更接近真实客户端行为。
+func resolveMimicThinkingBudget(defaultBudget int, maxTokens int64) int {
+	if defaultBudget <= 0 {
+		return 0
+	}
+	// 客户端没给 max_tokens（如 count_tokens 路径），沿用抓包原值。
+	if maxTokens <= 0 {
+		return defaultBudget
+	}
+	if int64(defaultBudget) < maxTokens {
+		return defaultBudget
+	}
+	budget := int(maxTokens) - 1
+	if budget < minThinkingBudgetTokens {
+		return 0
+	}
+	return budget
+}
+
 func buildJSONArrayRaw(items [][]byte) []byte {
 	if len(items) == 0 {
 		return []byte("[]")
@@ -293,14 +324,26 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	}
 
 	if opts.ensureMimicBodyDefaults {
+		// budget 必须按本次请求真实的 max_tokens 收敛后再注入，理由见
+		// resolveMimicThinkingBudget。此处的 max_tokens 已经过上面的默认值补齐。
+		mimicBudget := resolveMimicThinkingBudget(
+			modelProfile.DefaultThinkingBudgetTokens,
+			gjson.GetBytes(out, "max_tokens").Int(),
+		)
+		// enabled 形态必须携带 budget（haiku 即是），预算放不下时整段跳过注入，
+		// 保持客户端原样，而不是发出一个注定被上游 400 的组合。
+		skipThinkingInjection := modelProfile.DefaultThinkingBudgetTokens > 0 && mimicBudget <= 0
+
 		thinking := gjson.GetBytes(out, "thinking")
 		thinkingRaw := strings.TrimSpace(thinking.Raw)
 		thinkingIsObject := thinking.Exists() && strings.HasPrefix(thinkingRaw, "{")
 		switch {
+		case skipThinkingInjection:
+			// 预算不足，不动客户端的 thinking 字段。
 		case !thinking.Exists() && modelProfile.DefaultThinkingType != "":
 			raw := fmt.Sprintf(`{"type":%q}`, modelProfile.DefaultThinkingType)
-			if modelProfile.DefaultThinkingBudgetTokens > 0 {
-				raw = fmt.Sprintf(`{"type":%q,"budget_tokens":%d}`, modelProfile.DefaultThinkingType, modelProfile.DefaultThinkingBudgetTokens)
+			if mimicBudget > 0 {
+				raw = fmt.Sprintf(`{"type":%q,"budget_tokens":%d}`, modelProfile.DefaultThinkingType, mimicBudget)
 			}
 			if next, ok := setJSONRawBytes(out, "thinking", []byte(raw)); ok {
 				out = next
@@ -312,7 +355,7 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 				modified = true
 			}
 		}
-		if thinkingIsObject || !thinking.Exists() {
+		if !skipThinkingInjection && (thinkingIsObject || !thinking.Exists()) {
 			thinkingType := gjson.GetBytes(out, "thinking.type").String()
 			if modelProfile.ID == "haiku" && thinkingType == "adaptive" {
 				if next, ok := setJSONValueBytes(out, "thinking.type", modelProfile.DefaultThinkingType); ok {
@@ -321,10 +364,10 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 					thinkingType = modelProfile.DefaultThinkingType
 				}
 			}
-			if modelProfile.DefaultThinkingBudgetTokens > 0 &&
+			if mimicBudget > 0 &&
 				thinkingType == modelProfile.DefaultThinkingType &&
 				!gjson.GetBytes(out, "thinking.budget_tokens").Exists() {
-				if next, ok := setJSONValueBytes(out, "thinking.budget_tokens", modelProfile.DefaultThinkingBudgetTokens); ok {
+				if next, ok := setJSONValueBytes(out, "thinking.budget_tokens", mimicBudget); ok {
 					out = next
 					modified = true
 				}
@@ -604,7 +647,15 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		}
 	}
 
+	// 注入前后各看一次 thinking：只有「客户端没带、改写后有」才算网关注入，
+	// 响应侧据此摘掉那个多出来的 thinking block（见 claude_injected_thinking.go）。
+	clientRequestedThinking := gjson.GetBytes(body, "thinking").Exists()
+
 	body, _ = normalizeClaudeOAuthRequestBody(body, model, normalizeOpts)
+
+	if !clientRequestedThinking && gjson.GetBytes(body, "thinking").Exists() {
+		rememberClaudeMimicInjectedThinking(c)
+	}
 
 	// Phase D+E+F: messages cache 策略 + 工具名混淆 + tools[-1] 断点
 	// 对齐 Parrot transform_request 里剩余的字段级改写。顺序有语义约束：

@@ -224,3 +224,51 @@ func TestResolveClaudeCodeMimicryModelProfilePreservesPre2206CountTokensBetas(t 
 		})
 	}
 }
+
+// 4.5 代模型不接受 adaptive thinking 与 output_config.effort，Anthropic 会直接 400。
+// 真实 CLI 按模型能力下发参数，调这一代时本来就不带这两项。
+func TestResolveClaudeCodeMimicryModelProfileSkipsAdaptiveAndEffortForPreAdaptiveModels(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{name: "sonnet-4-5 不能被 sonnet 分支吞掉", model: "claude-sonnet-4-5-20250929"},
+		{name: "opus-4-5 不能落到 default 分支", model: "claude-opus-4-5-20251101"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveClaudeCodeMimicryModelProfile(tt.model)
+
+			require.Equal(t, "pre-adaptive", got.ID)
+			require.Empty(t, got.DefaultThinkingType, "不得注入 adaptive")
+			require.Empty(t, got.DefaultOutputConfigEffort, "不得注入 effort")
+			require.Empty(t, got.DefaultThinkingBudgetTokens)
+			require.NotContains(t, got.MessageBetas, BetaEffort)
+			require.NotContains(t, got.CountTokensBetas, BetaEffort)
+		})
+	}
+}
+
+// haiku-4-5 同属 4.5 代，但其 enabled + budget_tokens 形态来自真身抓包，
+// 必须继续由更靠前的 haiku 分支命中，不能被 pre-adaptive 规则改掉。
+func TestResolveClaudeCodeMimicryModelProfileKeepsHaikuBranchForHaiku45(t *testing.T) {
+	got := ResolveClaudeCodeMimicryModelProfile("claude-haiku-4-5-20251001")
+
+	require.Equal(t, "haiku", got.ID)
+	require.Equal(t, "enabled", got.DefaultThinkingType)
+	require.Equal(t, 31999, got.DefaultThinkingBudgetTokens)
+}
+
+// 新代模型不受 pre-adaptive 规则影响。
+func TestResolveClaudeCodeMimicryModelProfileKeepsAdaptiveForCurrentModels(t *testing.T) {
+	for _, model := range []string{"claude-sonnet-5", "claude-opus-5", "claude-sonnet-4-6", "claude-opus-4-8"} {
+		t.Run(model, func(t *testing.T) {
+			got := ResolveClaudeCodeMimicryModelProfile(model)
+
+			require.NotEqual(t, "pre-adaptive", got.ID)
+			require.Equal(t, "adaptive", got.DefaultThinkingType)
+			require.Equal(t, "high", got.DefaultOutputConfigEffort)
+		})
+	}
+}
