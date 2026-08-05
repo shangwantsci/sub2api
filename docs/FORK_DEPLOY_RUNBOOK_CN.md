@@ -14,9 +14,43 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-08-02 已按本流程部署 `0.1.156-8035f77a`（档位标签按实际参数反推、
+> 最近验证：2026-08-05 已按本流程部署 `0.1.156-3648784f`（修三个模型 400 +
+> 响应侧剥离注入的 thinking block），GitHub Actions run `30978595796`。
+> **本轮无数据库迁移**，回滚只需切回镜像。同日同步更新了客户 yihang。
+>
+> ```text
+> immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-3648784f
+> digest:          sha256:a42ba9eba434441b6b1285e231563e59c7cd9a454a0d4a9a6932db927ab61e43
+> env backup:      backups/.env.20260805-054002.before-3648784f
+> rollback tag:    sub2api-rollback:pre-3648784f
+>
+> 客户 yihang（101.47.39.33）:
+> image:           ghcr.io/shangwantsci/sub2api-customer-yihang:0.1.156-3648784f
+> digest:          sha256:e0b68d9274ba453f0c3c343f6396e5482f2b0ab17379c9848c585119f3ee0d0a
+> env backup:      backups/.env.20260805-134407.before-3648784f
+> rollback tag:    sub2api-customer-rollback:pre-3648784f
+> ```
+>
+> 两台均 8 秒转 healthy，panic/fatal 为 0。客户侧 `deployment_license.renewed`
+> 正常（instance `inst_j2BIZ4R9YdyFKQHiC1XcJaaa`，租约 +24h），
+> `calibration_profile_applied` 仍为 cli_version 2.1.221，授权未受升级影响。
+>
+> **踩坑：先发的 `50407487` 上线后剥离完全不生效（实测 16/22）。**
+> `normalizeClaudeOAuthRequestBody` 有三个调用点，那一版只在
+> `gateway_claude_oauth_body.go` 打了注入标记，而原生 `/v1/messages` 实际走
+> `gateway_forward.go`，标记从未写入 gin.Context。`3648784f` 抽出
+> `markInjectedThinkingIfAdded` 让两条路径共用，并加了一条路径覆盖断言测试
+> （新增转发路径漏调用会直接失败）。改动跨路径的请求改写时，务必先确认
+> 目标函数的全部调用点，单测过了不等于线上路径覆盖到了。
+>
+> 验收脚本 `verify_fix.py` 22/22：10 个模型小 max_tokens 全部 200；
+> opus-5/sonnet-5 未请求 thinking 时首块为 text（拼接提取从 `"\n3973"` 变
+> `"3973"`，即客户测评误判的根因）；显式请求 thinking 时仍原样保留；
+> 流式 index 从 0 连续；多轮回传 3/3。
+>
+> 上一轮为 2026-08-02 的 `0.1.156-8035f77a`（档位标签按实际参数反推、
 > 开放自定义档编辑、修 priority 对齐口径、管理端改分组提示），
-> GitHub Actions run `30747110860`。**本轮无数据库迁移**，回滚只需切回镜像。
+> GitHub Actions run `30747110860`。**该轮无数据库迁移**，回滚只需切回镜像。
 >
 > ```text
 > immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-8035f77a
