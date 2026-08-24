@@ -14,9 +14,33 @@
 
 本文档固定二开分支的日常发布流程，避免每次手工部署时遗漏测试、版本号或服务器切换步骤。
 
-> 最近验证：2026-08-05 已按本流程部署 `0.1.156-3648784f`（修三个模型 400 +
+> 最近验证：2026-08-24 已按本流程部署**主站** `0.1.156-477bbf31`
+> （供号商账号列表增加并发 / 会话 / RPM 占用显示），GitHub Actions run
+> `32724644542`（仅 `custom-image` 成功，6m28s；未跑 tag Release）。
+> **本轮无数据库迁移**，回滚只需切回镜像。**未更新任何客户站。**
+>
+> ```text
+> immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-477bbf31
+> digest:          sha256:28d428adc928c7a4ca72ced3b8c3795f16606dc0a493537b9e9fd332ad540203
+> env backup:      backups/.env.20260824-120608.before-477bbf31
+> rollback tag:    sub2api-rollback:pre-477bbf31   # = 0.1.156-3648784f / a42ba9eba434
+> ```
+>
+> 容器约 14 秒转 healthy。二进制
+> `Sub2API 0.1.156 (commit: 477bbf31, built: 2026-08-24T12:00:41Z)`。
+> 本机 `127.0.0.1:18080/health` 与公网 `https://lumos7.cc/health` 均为 200。
+> 启动窗口 panic/fatal 为 0。无凭证 `GET /api/v1/provider/accounts` 返回 401
+> （不是 404）。`/provider/accounts` 页面 200，嵌入前端含 `colOccupancy` /
+> `occupancyHint`，二进制含 `current_concurrency` / `current_rpm` /
+> `active_sessions`。
+> **未用供号商登录会话核对占用数字本身**，只确认产物、路由和健康检查。
+> postgres / redis / Caddy / license / new-api / grok 容器创建时间未变；
+> `sub2api` 仍同时挂在 `openstaryu-internal` 与项目网络，端口仍是
+> `127.0.0.1:18080->8080`。
+>
+> 上一轮为 2026-08-05 的 `0.1.156-3648784f`（修三个模型 400 +
 > 响应侧剥离注入的 thinking block），GitHub Actions run `30978595796`。
-> **本轮无数据库迁移**，回滚只需切回镜像。同日同步更新了客户 yihang。
+> **该轮无数据库迁移**，回滚只需切回镜像。同日同步更新了客户 yihang。
 >
 > ```text
 > immutable image: ghcr.io/shangwantsci/sub2api:0.1.156-3648784f

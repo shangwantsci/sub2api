@@ -1,6 +1,6 @@
 # Sub2API 二开项目记忆
 
-> 最后更新：2026-07-31
+> 最后更新：2026-08-24
 > 目的：记录本 fork 的设计目标、生产状态、GitHub 自动化、上线/回滚流程、已验证结论和后续优化方向。后续 Agent 或维护者应先读本文，再修改 Claude 伪装、账号调度或部署流程。
 
 ## 1. 唯一核心目标
@@ -100,18 +100,18 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 
 ## 3. 当前生产状态
 
-截至 2026-08-02 供号商账号管理面板上线（同日两轮部署）：
+截至 2026-08-24 主站占用列发布（**只部署社区主站，未动客户站**）：
 
 - 镜像：`ghcr.io/shangwantsci/sub2api:0.1.156`
-- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-8035f77a`
-- 应用 commit：`8035f77a`（档位标签按实际参数反推、开放自定义档编辑、
-  修 `MinPriorityByGroup` 口径、管理端改分组提示优先级门槛，见 4.14.3）；
-  前一轮 `047f4fb9`（批量上号、二次编辑、账号邮箱与额度用量，见 4.14.2）
+- 不可变镜像：`ghcr.io/shangwantsci/sub2api:0.1.156-477bbf31`
+- digest：`sha256:28d428adc928c7a4ca72ced3b8c3795f16606dc0a493537b9e9fd332ad540203`
+- 应用 commit：`477bbf31`（供号商账号列表增加并发 / 会话 / RPM 占用显示）
 - 应用版本：`0.1.156`
-- GitHub Actions run：`30747110860`（`custom-image` success）；前一轮 `30744920471`
-- **两轮均无数据库迁移**，最高迁移仍是 `183`，回滚只需切回镜像
-- 上一轮为 2026-08-01 的 `a6948086`（run `30707022376`，共三次部署：
-  功能主体 `4d3ff165` → 归属回填迁移 `aba0a308` → 上号页白屏热修 `a6948086`）
+- GitHub Actions run：`32724644542`（`custom-image` success，6m28s）
+- **本轮无数据库迁移**，最高迁移记载仍是 `183`，回滚只需切回镜像
+- 部署时 `.env` 备份：`backups/.env.20260824-120608.before-477bbf31`
+- 回滚 tag：`sub2api-rollback:pre-477bbf31`（即上一版 `0.1.156-3648784f`）
+- 上一轮为 2026-08-05 的 `3648784f`（run `30978595796`，修模型 400 与注入 thinking 剥离）
 - 平台：Linux x86_64 / Docker Compose
 - 生产目录：`/opt/sub2api-production`
 - Compose：
@@ -120,9 +120,11 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 - 应用本地映射：`127.0.0.1:18080 -> 8080`
 - 公网入口：Caddy 反代
 - PostgreSQL、Redis、Caddy 与其它项目独立运行；部署只重建 `sub2api`
-- 健康状态：healthy（容器 8 秒转 healthy）
-- 本机与公网 `/health`：HTTP 200
+- 健康状态：healthy（本轮容器约 14 秒转 healthy）
+- 本机与公网 `/health`：HTTP 200（2026-08-24 复验）
 - 设置接口与标定状态接口保持鉴权保护；无凭证请求为 HTTP 401
+- 供号商占用列：无凭证 `GET /api/v1/provider/accounts` 为 401；嵌入前端含
+  `colOccupancy`。**未用供号商登录会话核对占用数字。**
 - Persona 全局门控：`false`（尚未灰度启用）
 - **供号商站点 `provider_portal_enabled`：已开启**。4 个 `is_provider` 用户
   （id 44/45/46/47），其中两家已实际上号：**供号商 44 共 16 个账号（1 个已下线）、
@@ -135,17 +137,16 @@ workflow 文件调度。公司分支的存在与部署对它零影响，反之�
 - 代理归属分布：41 条平台自有 + 2 条供号商私有（74→44、76→45）；
   `auto_assignable = true` 的为 0，即当前没有任何代理进入自动分配池
 - 使用 `identity_only` 的 Anthropic 分组数：1（分组 14）
-- 账号总数：63（未软删）
-- 部署时 `.env` 备份：`backups/.env.20260731-173758.before-aba0a308`
-  （功能主体那轮为 `backups/.env.20260731-172623.before-4d3ff165`）
-- 部署前运行镜像 commit：`0832ab07`
+- 账号总数、供号商户数、结算单、标定 CLI 版本以上条目取自 2026-08-02 及更早记录，
+  **2026-08-24 本轮未重新清点**
 
 部署前旧镜像已保留为本地回滚 tag：
 
 ```text
+sub2api-rollback:pre-477bbf31   # = 0.1.156-3648784f，本轮回滚用这个
 sub2api-rollback:pre-a6948086   # = aba0a308 的镜像（该版本上号页白屏，别回滚到它）
 sub2api-rollback:pre-aba0a308   # = 4d3ff165 的镜像（同样白屏）
-sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像，要回到本轮之前用这个
+sub2api-rollback:pre-4d3ff165   # = 0832ab07 的镜像
 ```
 
 **本轮出过一次生产事故**：`4d3ff165` 上线后 `/provider/onboard` 整页白屏，
