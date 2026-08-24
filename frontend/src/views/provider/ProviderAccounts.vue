@@ -39,6 +39,12 @@
               <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
                 {{ t('provider.accounts.colTier') }}
               </th>
+              <th
+                class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-dark-400"
+                :title="t('provider.accounts.occupancyHint')"
+              >
+                {{ t('provider.accounts.colOccupancy') }}
+              </th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
                 {{ t('provider.accounts.colWindow') }}
               </th>
@@ -77,7 +83,10 @@
               <td class="px-4 py-3 text-sm text-gray-600 dark:text-dark-300">
                 {{ tierText(account) }}
               </td>
-              <td class="px-4 py-3 text-sm">
+              <td class="px-4 py-3 text-sm" data-test="occupancy">
+                <ProviderCapacityCell :account="account" />
+              </td>
+              <td class="px-4 py-3 text-sm" data-test="usage">
                 <div v-if="usageState[account.id]?.loading" class="space-y-1.5">
                   <div class="h-3 w-28 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
                   <div class="h-3 w-28 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
@@ -459,6 +468,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import UsageProgressBar from '@/components/account/UsageProgressBar.vue'
+import ProviderCapacityCell from '@/components/provider/ProviderCapacityCell.vue'
 import {
   generateReauthURL,
   getAccountUsage,

@@ -131,6 +131,15 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 	require.Equal(t, 30, view.BaseRPM)
 	require.Equal(t, float64(60), view.WindowCostLimit)
 
+	// 占用字段只由列表 enrichment 填。FromService 带上 0 会让 pause/update
+	// 等响应看起来像「这个号现在空闲」，那是假值。
+	require.Nil(t, view.CurrentConcurrency)
+	require.Nil(t, view.CurrentRPM)
+	require.Nil(t, view.ActiveSessions)
+	require.NotContains(t, payload, "current_concurrency")
+	require.NotContains(t, payload, "current_rpm")
+	require.NotContains(t, payload, "active_sessions")
+
 	// 金额必须序列化成十进制字符串并保住全部有效位。序列化成 JSON 数字的话，
 	// JS 侧解析成 float64 就当场丢精度，对账时两边对不上。
 	require.Equal(t, "1.2345678901", view.PeriodCost.String())

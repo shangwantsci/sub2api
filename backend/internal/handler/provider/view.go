@@ -67,6 +67,19 @@ type AccountView struct {
 	BaseRPM         int     `json:"base_rpm"`
 	WindowCostLimit float64 `json:"window_cost_limit"`
 
+	// 调度槽位此刻占用。只由列表 enrichment 填，AccountViewFromService 故意不碰。
+	//
+	// 三项都是指针：nil 表示本次没采到（该项未启用，或 Redis 失败），不要当成 0。
+	// 并发上限为 0 时调度器不写 Redis 槽位，current 永远是 0，因此那种号不下发。
+	// 不下发 rpm_strategy / rpm_sticky_buffer / session_idle_timeout。
+	//
+	// 若管理员事后开了 persona gating，真实并发分母可能是
+	// EffectivePersonaMaxConcurrency；供号商自己上号写不进 persona_*，
+	// 这里仍用档位 concurrency。
+	CurrentConcurrency *int `json:"current_concurrency,omitempty"`
+	CurrentRPM         *int `json:"current_rpm,omitempty"`
+	ActiveSessions     *int `json:"active_sessions,omitempty"`
+
 	// 本结算周期内该账号的 1 倍率用量。
 	// 金额用 decimal 并序列化成字符串，避免 JSON 数字在 JS 侧退化为二进制浮点。
 	PeriodRequests int64           `json:"period_requests"`

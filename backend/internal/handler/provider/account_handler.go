@@ -59,6 +59,7 @@ func (h *Handler) ListAccounts(c *gin.Context) {
 		}
 		views = append(views, AccountViewFromService(&acc, settings, usage))
 	}
+	h.attachRuntimeOccupancy(ctx, accounts, views)
 
 	response.Paginated(c, views, result.Total, page, pageSize)
 }

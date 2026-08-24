@@ -78,6 +78,10 @@ function account(overrides: Record<string, unknown> = {}) {
     hosting_type_label: '稳健型',
     tier_label: '3 档',
     tier: '3',
+    concurrency: 3,
+    max_sessions: 3,
+    base_rpm: 30,
+    window_cost_limit: 60,
     created_at: '2026-08-01T00:00:00Z',
     period_requests: 120,
     period_tokens: 5000,
@@ -160,7 +164,7 @@ describe('ProviderAccounts 挂载', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    const usageCell = wrapper.findAll('td')[4]
+    const usageCell = wrapper.find('[data-test="usage"]')
     expect(usageCell.text()).not.toContain('$')
   })
 
@@ -171,7 +175,7 @@ describe('ProviderAccounts 挂载', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    const usageCell = wrapper.findAll('td')[4]
+    const usageCell = wrapper.find('[data-test="usage"]')
     expect(usageCell.text()).toContain('5h')
     expect(usageCell.text()).not.toContain('7d')
   })
@@ -201,6 +205,29 @@ describe('ProviderAccounts 挂载', () => {
     await flushPromises()
 
     expect(getAccountUsageMock).toHaveBeenLastCalledWith(1, 'active')
+  })
+
+  it('占用列展示并发、会话、RPM 的 current/max', async () => {
+    listAccountsMock.mockResolvedValue({
+      items: [
+        account({
+          current_concurrency: 1,
+          active_sessions: 2,
+          current_rpm: 5
+        })
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const cell = wrapper.find('[data-test="occupancy"]')
+    expect(cell.text()).toMatch(/1\s*\/\s*3/)
+    expect(cell.text()).toMatch(/2\s*\/\s*3/)
+    expect(cell.text()).toMatch(/5\s*\/\s*30/)
   })
 })
 

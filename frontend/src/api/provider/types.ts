@@ -81,6 +81,13 @@ export interface ProviderAccount {
   max_sessions: number
   base_rpm: number
   window_cost_limit: number
+  /**
+   * 调度槽位此刻占用。缺省或 null 表示本次没采到（该项未启用或 Redis 失败），
+   * 不要当成 0。这是平台调度占用，不是 Anthropic 额度窗口。
+   */
+  current_concurrency?: number | null
+  current_rpm?: number | null
+  active_sessions?: number | null
   expires_at?: string | null
   last_used_at?: string | null
   created_at: string

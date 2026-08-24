@@ -25,6 +25,9 @@ type Handler struct {
 	userReader        service.ProviderUserReader
 	// accountUsageService 供「账号在 Anthropic 侧的额度用量」使用，与结算无关。
 	accountUsageService *service.AccountUsageService
+	concurrencyService  *service.ConcurrencyService
+	rpmCache            service.RPMCache
+	sessionLimitCache   service.SessionLimitCache
 }
 
 func NewHandler(
@@ -37,6 +40,9 @@ func NewHandler(
 	usageReader service.ProviderUsageReader,
 	userReader service.ProviderUserReader,
 	accountUsageService *service.AccountUsageService,
+	concurrencyService *service.ConcurrencyService,
+	rpmCache service.RPMCache,
+	sessionLimitCache service.SessionLimitCache,
 ) *Handler {
 	return &Handler{
 		authService:         authService,
@@ -48,6 +54,9 @@ func NewHandler(
 		usageReader:         usageReader,
 		userReader:          userReader,
 		accountUsageService: accountUsageService,
+		concurrencyService:  concurrencyService,
+		rpmCache:            rpmCache,
+		sessionLimitCache:   sessionLimitCache,
 	}
 }
 
