@@ -262,6 +262,27 @@ func (s *BillingService) initFallbackPricing() {
 	s.fallbackPrices["claude-opus-4.8"] = s.fallbackPrices["claude-opus-4.7"]
 	s.fallbackPrices["claude-opus-5"] = s.fallbackPrices["claude-opus-4.8"]
 
+	// Claude Fable 5 / 5.1。远程定价目录缺失时，未知 Claude 型号会落到 Sonnet 4
+	// （$3/$15）。Fable 官方价是 $10/$50；5.1 的缓存读取降到 $0.25/MTok。
+	s.fallbackPrices["claude-fable-5"] = &ModelPricing{
+		InputPricePerToken:         10e-6,
+		OutputPricePerToken:        50e-6,
+		CacheCreationPricePerToken: 12.5e-6,
+		CacheCreation5mPrice:       12.5e-6,
+		CacheCreation1hPrice:       20e-6,
+		CacheReadPricePerToken:     1e-6,
+		SupportsCacheBreakdown:     true,
+	}
+	s.fallbackPrices["claude-fable-5-1"] = &ModelPricing{
+		InputPricePerToken:         10e-6,
+		OutputPricePerToken:        50e-6,
+		CacheCreationPricePerToken: 12.5e-6,
+		CacheCreation5mPrice:       12.5e-6,
+		CacheCreation1hPrice:       20e-6,
+		CacheReadPricePerToken:     0.25e-6,
+		SupportsCacheBreakdown:     true,
+	}
+
 	// Gemini 3.1 Pro
 	s.fallbackPrices["gemini-3.1-pro"] = &ModelPricing{
 		InputPricePerToken:         2e-6,   // $2 per MTok
@@ -586,9 +607,34 @@ func (s *BillingService) initFallbackPricing() {
 	}
 }
 
+// isClaudeFable51Model 识别 Fable 5.1。marker 后面若还是数字则不算，避免把更长的版本号误判进来。
+func isClaudeFable51Model(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	for _, marker := range []string{"fable-5-1", "fable-5.1", "fable5.1", "fable51"} {
+		at := strings.Index(model, marker)
+		if at < 0 {
+			continue
+		}
+		after := at + len(marker)
+		if after == len(model) || model[after] < '0' || model[after] > '9' {
+			return true
+		}
+	}
+	return false
+}
+
 // getFallbackPricing 根据模型系列获取回退价格
 func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	modelLower := strings.ToLower(model)
+
+	// Fable 必须先于「未知 Claude → Sonnet 4」兜底，否则远程目录失效时按 $3/$15 少收。
+	// 5.1 必须先于 5：名字里同时包含 fable-5 与 fable-5-1。
+	if isClaudeFable51Model(modelLower) {
+		return s.fallbackPrices["claude-fable-5-1"]
+	}
+	if strings.Contains(modelLower, "fable-5") || strings.Contains(modelLower, "fable5") {
+		return s.fallbackPrices["claude-fable-5"]
+	}
 
 	// 按模型系列匹配
 	if strings.Contains(modelLower, "opus") {

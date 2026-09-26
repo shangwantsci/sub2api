@@ -141,6 +141,38 @@ func TestGetModelPricing_FallbackWarnLoggedOncePerModel(t *testing.T) {
 	require.Equal(t, 1, got, "同一模型的 fallback warn 应只打一条,实际日志:\n%s", buf.String())
 }
 
+// 远程定价目录没有 Fable 条目、或下载失败时，GetModelPricing 走硬编码回退。
+// 回退不得落到 Sonnet 4（$3/$15），否则 Fable（$10/$50）会少收约 3.3 倍。
+func TestGetModelPricing_FableFallbackNotSonnet4(t *testing.T) {
+	svc := newTestBillingService()
+	require.Nil(t, svc.pricingService)
+
+	sonnet, err := svc.GetModelPricing("claude-sonnet-4")
+	require.NoError(t, err)
+
+	fable, err := svc.GetModelPricing("claude-fable-5")
+	require.NoError(t, err)
+	require.NotEqual(t, sonnet.InputPricePerToken, fable.InputPricePerToken)
+	require.InDelta(t, 10e-6, fable.InputPricePerToken, 1e-15)
+	require.InDelta(t, 50e-6, fable.OutputPricePerToken, 1e-15)
+	require.InDelta(t, 12.5e-6, fable.CacheCreationPricePerToken, 1e-15)
+	require.InDelta(t, 12.5e-6, fable.CacheCreation5mPrice, 1e-15)
+	require.InDelta(t, 20e-6, fable.CacheCreation1hPrice, 1e-15)
+	require.InDelta(t, 1e-6, fable.CacheReadPricePerToken, 1e-15)
+	require.True(t, fable.SupportsCacheBreakdown)
+
+	fable51, err := svc.GetModelPricing("claude-fable-5-1")
+	require.NoError(t, err)
+	require.InDelta(t, 10e-6, fable51.InputPricePerToken, 1e-15)
+	require.InDelta(t, 50e-6, fable51.OutputPricePerToken, 1e-15)
+	require.InDelta(t, 0.25e-6, fable51.CacheReadPricePerToken, 1e-15)
+	require.True(t, fable51.SupportsCacheBreakdown)
+
+	dotted, err := svc.GetModelPricing("claude-fable-5.1")
+	require.NoError(t, err)
+	require.InDelta(t, 0.25e-6, dotted.CacheReadPricePerToken, 1e-15)
+}
+
 // 去重按"每模型"而非全局:不同模型各打一条;大小写变体经入口 ToLower 归一,视为同一条目。
 func TestGetModelPricing_FallbackWarnPerModelNotGlobal(t *testing.T) {
 	svc := newTestBillingService()
