@@ -797,5 +797,25 @@ func (s *stubAdminService) CreateShadow(ctx context.Context, parentID int64, opt
 	}, nil
 }
 
+func (s *stubAdminService) ListCompositeRoutes(context.Context, int64) ([]service.CompositeModelRoute, error) {
+	return nil, nil
+}
+
+func (s *stubAdminService) CreateCompositeRoute(context.Context, int64, service.CompositeRouteInput) (*service.CompositeModelRoute, error) {
+	return nil, nil
+}
+
+func (s *stubAdminService) UpdateCompositeRoute(context.Context, int64, int64, service.CompositeRouteInput) (*service.CompositeModelRoute, error) {
+	return nil, nil
+}
+
+func (s *stubAdminService) DeleteCompositeRoute(context.Context, int64, int64) error {
+	return nil
+}
+
+func (s *stubAdminService) PreviewCompositeRoute(context.Context, int64, service.CompositeRoutePreviewRequest) (*service.CompositeRouteDecision, error) {
+	return nil, nil
+}
+
 // Ensure stub implements interface.
 var _ service.AdminService = (*stubAdminService)(nil)

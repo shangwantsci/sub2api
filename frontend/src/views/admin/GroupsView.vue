@@ -462,6 +462,9 @@
             @change="createForm.copy_accounts_from_group_ids = []"
           />
           <p class="input-hint">{{ t("admin.groups.platformHint") }}</p>
+          <p v-if="createForm.platform === 'composite'" class="input-hint">
+            按本次请求的模型名分到 Anthropic、OpenAI、Gemini、Antigravity 或 Grok。没有单独路由时按模型名前缀识别。
+          </p>
         </div>
         <!-- 从分组复制账号 -->
         <div v-if="copyAccountsGroupOptions.length > 0">
@@ -4074,6 +4077,7 @@ const platformOptions = computed(() => [
   { value: "gemini", label: "Gemini" },
   { value: "antigravity", label: "Antigravity" },
   { value: "grok", label: "Grok" },
+  { value: "composite", label: "Composite" },
 ]);
 
 const platformFilterOptions = computed(() => [
@@ -4083,6 +4087,7 @@ const platformFilterOptions = computed(() => [
   { value: "gemini", label: "Gemini" },
   { value: "antigravity", label: "Antigravity" },
   { value: "grok", label: "Grok" },
+  { value: "composite", label: "Composite" },
 ]);
 
 const editStatusOptions = computed(() => [

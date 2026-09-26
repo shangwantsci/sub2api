@@ -1,6 +1,16 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <div class="w-full min-w-0 space-y-6 pb-8">
+      <div class="tabs inline-flex" role="tablist">
+        <button type="button" class="tab" :class="adminMonitorTab === 'v2' ? 'tab-active' : ''" @click="adminMonitorTab = 'v2'">
+          {{ t('channelMonitorV2.admin.tabV2') }}
+        </button>
+        <button type="button" class="tab" :class="adminMonitorTab === 'legacy' ? 'tab-active' : ''" @click="adminMonitorTab = 'legacy'">
+          {{ isV1Mode ? t('channelMonitorV2.admin.tabV1Active') : t('channelMonitorV2.admin.tabV1History') }}
+        </button>
+      </div>
+      <MonitorSettingsPanel v-if="adminMonitorTab === 'v2'" />
+      <TablePageLayout v-else>
       <template #filters>
         <MonitorFiltersBar
           v-model:search="searchQuery"
@@ -78,7 +88,8 @@
           @update:pageSize="onPageSizeChange"
         />
       </template>
-    </TablePageLayout>
+      </TablePageLayout>
+    </div>
 
     <MonitorFormDialog
       :show="showDialog"
@@ -114,6 +125,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import MonitorSettingsPanel from '@/features/channel-monitor-v2/MonitorSettingsPanel.vue'
+import { isChannelMonitorV1Mode } from '@/utils/featureFlags'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -145,6 +158,8 @@ import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const isV1Mode = computed(() => isChannelMonitorV1Mode())
+const adminMonitorTab = ref<'v2' | 'legacy'>(isChannelMonitorV1Mode() ? 'legacy' : 'v2')
 const {
   providerLabel,
   providerBadgeClass,

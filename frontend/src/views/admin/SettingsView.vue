@@ -6077,6 +6077,13 @@
               </div>
               <Toggle v-model="form.channel_monitor_enabled" />
             </div>
+            <div v-if="form.channel_monitor_enabled" class="mt-3">
+              <label class="mb-1 block text-sm text-gray-700 dark:text-gray-300">监控实现</label>
+              <select v-model="form.channel_monitor_mode" class="input">
+                <option value="v1">V1 主动探活</option>
+                <option value="v2">V2 被动流量</option>
+              </select>
+            </div>
 
             <div v-if="form.channel_monitor_enabled">
               <label class="input-label">
@@ -8579,6 +8586,7 @@ const form = reactive<SettingsForm>({
   account_quota_notify_emails: [] as NotifyEmailEntry[],
   // Channel Monitor feature switch
   channel_monitor_enabled: true,
+  channel_monitor_mode: 'v1',
   channel_monitor_default_interval_seconds: 60,
   // Available Channels feature switch
   available_channels_enabled: false,
@@ -9966,6 +9974,7 @@ async function saveSettings() {
       ).filter((e) => e.email.trim() !== ""),
       // Channel Monitor feature switch
       channel_monitor_enabled: form.channel_monitor_enabled,
+      channel_monitor_mode: form.channel_monitor_mode === 'v2' ? 'v2' : 'v1',
       channel_monitor_default_interval_seconds:
         Number(form.channel_monitor_default_interval_seconds) || 60,
       // Available Channels feature switch

@@ -45,6 +45,13 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 		groupID = resolvedGroupID
 		ctx = s.withGroupContext(ctx, group)
 		platform = group.Platform
+		if group != nil && group.Platform == PlatformComposite {
+			var routeErr error
+			ctx, platform, requestedModel, routeErr = s.applyCompositeRouting(ctx, group, requestedModel)
+			if routeErr != nil {
+				return nil, routeErr
+			}
+		}
 	} else {
 		// 无分组时只使用原生 anthropic 平台
 		platform = PlatformAnthropic
@@ -194,7 +201,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 	}
 
-	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group)
+	if group != nil && group.Platform == PlatformComposite {
+		var routeErr error
+		ctx, _, requestedModel, routeErr = s.applyCompositeRouting(ctx, group, requestedModel)
+		if routeErr != nil {
+			return nil, routeErr
+		}
+	}
+	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
 		return nil, err
 	}
@@ -1050,18 +1064,47 @@ func (s *GatewayService) checkClaudeCodeRestriction(ctx context.Context, groupID
 	return group, resolvedID, nil
 }
 
-func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, group *Group) (string, bool, error) {
+func (s *GatewayService) applyCompositeRouting(ctx context.Context, group *Group, requestedModel string) (context.Context, string, string, error) {
+	if group == nil || group.Platform != PlatformComposite {
+		platform := PlatformAnthropic
+		if group != nil {
+			platform = group.Platform
+		}
+		return ctx, platform, requestedModel, nil
+	}
+	decision, ok, err := s.resolveCompositeRouteDecision(ctx, group, requestedModel, CompositeRouteEndpointAny)
+	if err != nil {
+		return ctx, "", requestedModel, err
+	}
+	if !ok {
+		return ctx, "", requestedModel, fmt.Errorf("%w supporting model: %s (composite target platform unknown)", ErrNoAvailableAccounts, requestedModel)
+	}
+	return WithCompositeRouteDecision(ctx, decision), decision.TargetPlatform, decision.UpstreamModel, nil
+}
+
+func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, group *Group, requestedModel string) (string, bool, error) {
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
 	if hasForcePlatform && forcePlatform != "" {
 		return forcePlatform, true, nil
 	}
+	if platform, ok := ResolvedTargetPlatformFromContext(ctx); ok {
+		return platform, false, nil
+	}
 	if group != nil {
+		if group.Platform == PlatformComposite {
+			_, platform, _, err := s.applyCompositeRouting(ctx, group, requestedModel)
+			return platform, false, err
+		}
 		return group.Platform, false, nil
 	}
 	if groupID != nil {
 		group, err := s.resolveGroupByID(ctx, *groupID)
 		if err != nil {
 			return "", false, err
+		}
+		if group.Platform == PlatformComposite {
+			_, platform, _, err := s.applyCompositeRouting(ctx, group, requestedModel)
+			return platform, false, err
 		}
 		return group.Platform, false, nil
 	}

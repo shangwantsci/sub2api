@@ -702,6 +702,7 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	compositeResolver     *CompositeRouteResolver
 	// noProxyAnthropicWarned 记录已告警过的无代理 Anthropic OAuth 账号 ID，
 	// 避免在请求热路径上对同一账号重复打印告警日志。
 	noProxyAnthropicWarned sync.Map

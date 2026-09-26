@@ -147,3 +147,19 @@ export function isFeatureFlagEnabled(flag: FeatureFlagDefinition): boolean {
 export function makeSidebarFlag(flag: FeatureFlagDefinition): () => boolean {
   return () => isFeatureFlagEnabled(flag)
 }
+
+export type ChannelMonitorMode = 'v1' | 'v2'
+
+export function getChannelMonitorMode(): ChannelMonitorMode {
+  const appStore = useAppStore()
+  const mode = appStore.cachedPublicSettings?.channel_monitor_mode
+  return mode === 'v2' ? 'v2' : 'v1'
+}
+
+export function isChannelMonitorV1Mode(): boolean {
+  return isFeatureFlagEnabled(FeatureFlags.channelMonitor) && getChannelMonitorMode() === 'v1'
+}
+
+export function isChannelMonitorV2Mode(): boolean {
+  return isFeatureFlagEnabled(FeatureFlags.channelMonitor) && getChannelMonitorMode() === 'v2'
+}

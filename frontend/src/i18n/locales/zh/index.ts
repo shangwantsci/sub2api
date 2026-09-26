@@ -4,6 +4,7 @@ import dashboard from './dashboard'
 import admin from './admin'
 import misc from './misc'
 import provider from './provider'
+import channelMonitorV2 from './channelMonitorV2'
 
 export default {
   ...landing,
@@ -11,5 +12,6 @@ export default {
   ...dashboard,
   admin,
   provider,
+  ...channelMonitorV2,
   ...misc,
 }

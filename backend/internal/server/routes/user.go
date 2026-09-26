@@ -122,8 +122,19 @@ func RegisterUserRoutes(
 		// 渠道监控（用户只读）
 		monitors := authenticated.Group("/channel-monitors")
 		{
-			monitors.GET("", h.ChannelMonitor.List)
-			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
+		monitors.GET("", h.ChannelMonitor.List)
+		monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
+		}
+
+		monitorV2 := authenticated.Group("/channel-monitor-v2")
+		monitorV2.Use(channelMonitorModeV2Guard(settingService))
+		{
+			monitorV2.GET("/dimensions", h.ChannelMonitorV2.Dimensions)
+			monitorV2.GET("/snapshot", h.ChannelMonitorV2.Snapshot)
+			monitorV2.GET("/models", h.ChannelMonitorV2.Models)
+			monitorV2.GET("/matrix", h.ChannelMonitorV2.Matrix)
+			monitorV2.GET("/errors", h.ChannelMonitorV2.Errors)
+			monitorV2.GET("/users", h.ChannelMonitorV2.Users)
 		}
 	}
 }
