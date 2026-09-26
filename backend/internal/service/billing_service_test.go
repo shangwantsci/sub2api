@@ -171,6 +171,15 @@ func TestGetModelPricing_FableFallbackNotSonnet4(t *testing.T) {
 	dotted, err := svc.GetModelPricing("claude-fable-5.1")
 	require.NoError(t, err)
 	require.InDelta(t, 0.25e-6, dotted.CacheReadPricePerToken, 1e-15)
+
+	opus5, err := svc.GetModelPricing("claude-opus-5")
+	require.NoError(t, err)
+	opus55, err := svc.GetModelPricing("claude-opus-5-5")
+	require.NoError(t, err)
+	require.NotEqual(t, opus5.InputPricePerToken, opus55.InputPricePerToken)
+	require.InDelta(t, 4e-6, opus55.InputPricePerToken, 1e-15)
+	require.InDelta(t, 20e-6, opus55.OutputPricePerToken, 1e-15)
+	require.InDelta(t, 0.2e-6, opus55.CacheReadPricePerToken, 1e-15)
 }
 
 // 去重按"每模型"而非全局:不同模型各打一条;大小写变体经入口 ToLower 归一,视为同一条目。

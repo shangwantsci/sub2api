@@ -784,6 +784,9 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 	// 因子串关系误匹配 "claude-opus-4-7"（opus-4.7 系列）。
 	// 注意：原 map 实现存在 Go map 迭代随机性导致的同类 bug，此处改为有序切片修复。
 	families := []modelFamily{
+		{name: "opus-5.5", match: []string{"claude-opus-5-5", "claude-opus-5.5"}, pricing: []string{"claude-opus-5-5", "claude-opus-5"}},
+		{name: "fable-5.1", match: []string{"claude-fable-5-1", "claude-fable-5.1"}, pricing: []string{"claude-fable-5-1", "claude-fable-5"}},
+		{name: "fable-5", match: []string{"claude-fable-5", "claude-fable5"}, pricing: []string{"claude-fable-5"}},
 		{name: "opus-5", match: []string{"claude-opus-5", "claude-opus5"}, pricing: []string{"claude-opus-5", "claude-opus-4-8"}},
 		{name: "opus-4.8", match: []string{"claude-opus-4-8", "claude-opus-4.8"}, pricing: []string{"claude-opus-4-8", "claude-opus-4.8", "claude-opus-4-7"}},
 		{name: "opus-4.7", match: []string{"claude-opus-4-7", "claude-opus-4.7"}, pricing: []string{"claude-opus-4-7", "claude-opus-4.7", "claude-opus-4-6"}},
@@ -816,8 +819,17 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 	if matched == nil {
 		var fallbackName string
 		switch {
+		case strings.Contains(model, "fable"):
+			switch {
+			case strings.Contains(model, "fable-5-1") || strings.Contains(model, "fable-5.1") || strings.Contains(model, "fable51"):
+				fallbackName = "fable-5.1"
+			default:
+				fallbackName = "fable-5"
+			}
 		case strings.Contains(model, "opus"):
 			switch {
+			case strings.Contains(model, "opus-5-5") || strings.Contains(model, "opus-5.5"):
+				fallbackName = "opus-5.5"
 			case strings.Contains(model, "opus-5") || strings.Contains(model, "opus5"):
 				fallbackName = "opus-5"
 			case strings.Contains(model, "4.8") || strings.Contains(model, "4-8"):
@@ -866,6 +878,12 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 	lookups := matched.pricing
 	if lookups == nil {
 		lookups = matched.match
+	}
+	// 先精确命中。否则 "claude-opus-5" 会因子串命中 "claude-opus-5-5"，把两个模型的价格串起来。
+	for _, pattern := range lookups {
+		if pricing, ok := s.pricingData[pattern]; ok {
+			return pricing
+		}
 	}
 	for _, pattern := range lookups {
 		for key, pricing := range s.pricingData {

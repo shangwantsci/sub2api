@@ -261,6 +261,16 @@ func (s *BillingService) initFallbackPricing() {
 	// Claude 4.8 Opus / Opus 5 (官方定价与 4.5 起的 Opus 档一致：$5 / $25)
 	s.fallbackPrices["claude-opus-4.8"] = s.fallbackPrices["claude-opus-4.7"]
 	s.fallbackPrices["claude-opus-5"] = s.fallbackPrices["claude-opus-4.8"]
+	// Opus 5.5 官方价是 $4 / $20，不能落到 Opus 5 的 $5 / $25。
+	s.fallbackPrices["claude-opus-5-5"] = &ModelPricing{
+		InputPricePerToken:         4e-6,
+		OutputPricePerToken:        20e-6,
+		CacheCreationPricePerToken: 5e-6,
+		CacheReadPricePerToken:     0.2e-6,
+		CacheCreation5mPrice:       5e-6,
+		CacheCreation1hPrice:       8e-6,
+		SupportsCacheBreakdown:     true,
+	}
 
 	// Claude Fable 5 / 5.1。远程定价目录缺失时，未知 Claude 型号会落到 Sonnet 4
 	// （$3/$15）。Fable 官方价是 $10/$50；5.1 的缓存读取降到 $0.25/MTok。
@@ -638,6 +648,10 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 
 	// 按模型系列匹配
 	if strings.Contains(modelLower, "opus") {
+		// 5.5 必须先于 5：opus-5 是 opus-5-5 的子串。
+		if strings.Contains(modelLower, "opus-5-5") || strings.Contains(modelLower, "opus-5.5") || strings.Contains(modelLower, "opus55") {
+			return s.fallbackPrices["claude-opus-5-5"]
+		}
 		if strings.Contains(modelLower, "opus-5") || strings.Contains(modelLower, "opus5") {
 			return s.fallbackPrices["claude-opus-5"]
 		}
