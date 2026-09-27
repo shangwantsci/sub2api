@@ -82,6 +82,9 @@ type AdminService interface {
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
+	// BatchApplyPersonaConfig 批量给账号写入 persona 配置。
+	// 已启用 persona 的账号会被跳过（不覆盖），除非 force=true。
+	BatchApplyPersonaConfig(ctx context.Context, input BatchPersonaConfig, force bool) (applied int, skipped int, err error)
 	DeleteAccount(ctx context.Context, id int64) error
 	RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error)
 	ClearAccountError(ctx context.Context, id int64) (*Account, error)

@@ -347,3 +347,105 @@ func TestSettingService_IsPersonaGatingEnabled_DefaultOff(t *testing.T) {
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
 	require.True(t, settingSvc.IsPersonaGatingEnabled(ctx))
 }
+
+// TestEffectivePersonaMaxConcurrency_DynamicByTime 验证活跃/非活跃时段动态并发。
+// IsWithinActiveHours 依赖 time.Now()，因此按当前 UTC 小时构造窗口，跨小时边界时重试。
+func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
+	// 1. 未启用 persona → 返回 account.Concurrency
+	disabled := &Account{Concurrency: 8, Extra: map[string]any{
+		extraPersonaEnabled:        false,
+		extraPersonaMaxConcurrency: 4,
+	}}
+	require.Equal(t, 8, disabled.EffectivePersonaMaxConcurrency())
+
+	// 未配置 Extra → 回落 Concurrency
+	bare := &Account{Concurrency: 3}
+	require.Equal(t, 3, bare.EffectivePersonaMaxConcurrency())
+
+	for attempt := 0; attempt < 3; attempt++ {
+		h := time.Now().UTC().Hour()
+
+		// 2. 启用 persona + 活跃时段 → 返回 MaxConcurrency
+		// 窗口覆盖当前小时：[h, h+1) 或跨夜时用 [h, 24)∪[0,1) 的简化：全天窗口。
+		inWindow := &Account{Concurrency: 8, Extra: map[string]any{
+			extraPersonaEnabled:        true,
+			extraPersonaTimezone:       "UTC",
+			extraPersonaActiveStart:    0,
+			extraPersonaActiveEnd:      24,
+			extraPersonaMaxConcurrency: 6,
+		}}
+		require.Equal(t, 6, inWindow.EffectivePersonaMaxConcurrency())
+
+		// 窗口精确覆盖当前小时（更贴近“活跃时段”语义）
+		start := h
+		end := h + 1
+		if end > 24 {
+			end = 24
+		}
+		inExact := &Account{Concurrency: 8, Extra: map[string]any{
+			extraPersonaEnabled:        true,
+			extraPersonaTimezone:       "UTC",
+			extraPersonaActiveStart:    start,
+			extraPersonaActiveEnd:      end,
+			extraPersonaMaxConcurrency: 6,
+		}}
+		gotIn := inExact.EffectivePersonaMaxConcurrency()
+		if time.Now().UTC().Hour() != h {
+			continue
+		}
+		require.Equal(t, 6, gotIn)
+
+		// 3. 启用 persona + 非活跃时段 + 显式 OffPeakConcurrency → 返回 OffPeakConcurrency
+		offStart := (h + 1) % 24
+		offEnd := offStart + 1
+		if offEnd > 24 {
+			offEnd = 24
+		}
+		// 若 offStart==0 且 offEnd==1 而 h==23，窗口 [0,1) 不含 23，OK；
+		// 若 offStart==23，offEnd 会被夹到 24，窗口 [23,24) 不含 h≠23。
+		outExplicit := &Account{Concurrency: 8, Extra: map[string]any{
+			extraPersonaEnabled:            true,
+			extraPersonaTimezone:           "UTC",
+			extraPersonaActiveStart:        offStart,
+			extraPersonaActiveEnd:          offEnd,
+			extraPersonaMaxConcurrency:     6,
+			extraPersonaOffPeakConcurrency: 2,
+		}}
+		gotOut := outExplicit.EffectivePersonaMaxConcurrency()
+		if time.Now().UTC().Hour() != h {
+			continue
+		}
+		require.Equal(t, 2, gotOut)
+
+		// 4. 启用 persona + 非活跃时段 + OffPeakConcurrency=0 → max(MaxConcurrency/2, 1)
+		outAuto := &Account{Concurrency: 8, Extra: map[string]any{
+			extraPersonaEnabled:        true,
+			extraPersonaTimezone:       "UTC",
+			extraPersonaActiveStart:    offStart,
+			extraPersonaActiveEnd:      offEnd,
+			extraPersonaMaxConcurrency: 6,
+			// OffPeakConcurrency 省略 = 0 = 自动
+		}}
+		gotAuto := outAuto.EffectivePersonaMaxConcurrency()
+		if time.Now().UTC().Hour() != h {
+			continue
+		}
+		require.Equal(t, 3, gotAuto) // 6/2 = 3
+
+		// 5. MaxConcurrency=1 + 非活跃 → 返回 1（不会返回 0）
+		outMin := &Account{Concurrency: 8, Extra: map[string]any{
+			extraPersonaEnabled:        true,
+			extraPersonaTimezone:       "UTC",
+			extraPersonaActiveStart:    offStart,
+			extraPersonaActiveEnd:      offEnd,
+			extraPersonaMaxConcurrency: 1,
+		}}
+		gotMin := outMin.EffectivePersonaMaxConcurrency()
+		if time.Now().UTC().Hour() != h {
+			continue
+		}
+		require.Equal(t, 1, gotMin)
+		return
+	}
+	t.Fatal("could not complete DynamicByTime assertions without crossing hour boundary")
+}

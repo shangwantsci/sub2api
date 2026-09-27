@@ -492,6 +492,10 @@ func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, upd
 	return nil
 }
 
+func (s *stubAdminService) BatchApplyPersonaConfig(ctx context.Context, input service.BatchPersonaConfig, force bool) (applied int, skipped int, err error) {
+	return 0, 0, nil
+}
+
 func (s *stubAdminService) DeleteAccount(ctx context.Context, id int64) error {
 	return nil
 }

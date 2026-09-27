@@ -1578,11 +1578,13 @@ func (s *GatewayService) isAccountWithinPersonaDailyCap(ctx context.Context, acc
 	return count < env.DailyCap
 }
 
-// isAccountPersonaSchedulable 组合人格调度门控：作息窗口 + 日请求上限。
-// 二者皆 fail-open；仅在全局开关开启且账号启用 persona 时才可能收紧。调度候选过滤
-// 统一走这一个入口，确保作息与日上限两个维度同时生效。
+// isAccountPersonaSchedulable 组合人格调度门控：仅保留日请求上限。
+// 作息窗口不再硬拦截，而是通过 effectiveAccountConcurrency 动态调整并发数实现软限流。
+// 日上限 fail-open；仅在全局开关开启且账号启用 persona 时才可能收紧。
 func (s *GatewayService) isAccountPersonaSchedulable(ctx context.Context, account *Account) bool {
-	return s.isAccountWithinPersonaActiveHours(ctx, account) && s.isAccountWithinPersonaDailyCap(ctx, account)
+	// 作息窗口不再硬拦截，而是通过 effectiveAccountConcurrency 动态调整并发数实现软限流。
+	// 保留日请求上限门控。
+	return s.isAccountWithinPersonaDailyCap(ctx, account)
 }
 
 // IncrementAccountPersonaDailyRequest 在成功转发后递增账号的人格日请求计数。

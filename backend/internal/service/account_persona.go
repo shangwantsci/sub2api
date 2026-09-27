@@ -18,24 +18,26 @@ import (
 // 设计动机见死亡取证：账号中位寿命 ~5 天，主因是被复用成“24 小时长亮、跨时区”的机器画像；
 // 而全池峰值并发仅 ~10，账号数远超需求——因此把每个账号整形成“单人作息”几乎零吞吐代价。
 const (
-	extraPersonaEnabled        = "persona_enabled"
-	extraPersonaTimezone       = "persona_timezone"          // IANA 名称，如 "America/New_York"
-	extraPersonaLocale         = "persona_locale"            // BCP-47，如 "en-US"
-	extraPersonaActiveStart    = "persona_active_start_hour" // 0..23（含）
-	extraPersonaActiveEnd      = "persona_active_end_hour"   // 1..24（不含；24 表示到当地午夜）
-	extraPersonaMaxConcurrency = "persona_max_concurrency"   // 每账号 messages 真实并发上限
-	extraPersonaDailyCap       = "persona_daily_request_cap" // 每日请求上限（0 = 不限）
+	extraPersonaEnabled            = "persona_enabled"
+	extraPersonaTimezone           = "persona_timezone"             // IANA 名称，如 "America/New_York"
+	extraPersonaLocale             = "persona_locale"               // BCP-47，如 "en-US"
+	extraPersonaActiveStart        = "persona_active_start_hour"    // 0..23（含）
+	extraPersonaActiveEnd          = "persona_active_end_hour"      // 1..24（不含；24 表示到当地午夜）
+	extraPersonaMaxConcurrency     = "persona_max_concurrency"      // 每账号 messages 真实并发上限
+	extraPersonaDailyCap           = "persona_daily_request_cap"    // 每日请求上限（0 = 不限）
+	extraPersonaOffPeakConcurrency = "persona_off_peak_concurrency" // 非活跃时段并发上限（0 = 自动计算）
 )
 
 // PersonaEnvelope 是账号人格的行为/本地化配置快照。
 type PersonaEnvelope struct {
-	Enabled        bool
-	Timezone       string // 空 = 未指定（作息判定退化为不门控）
-	Locale         string
-	ActiveStart    int // 0..23，含
-	ActiveEnd      int // 1..24，不含；ActiveEnd <= ActiveStart 时表示跨夜窗口
-	MaxConcurrency int // 0 = 未指定（回落到 account.Concurrency）
-	DailyCap       int // 0 = 不限
+	Enabled            bool
+	Timezone           string // 空 = 未指定（作息判定退化为不门控）
+	Locale             string
+	ActiveStart        int // 0..23，含
+	ActiveEnd          int // 1..24，不含；ActiveEnd <= ActiveStart 时表示跨夜窗口
+	MaxConcurrency     int // 0 = 未指定（回落到 account.Concurrency）
+	DailyCap           int // 0 = 不限
+	OffPeakConcurrency int // 0 = 自动（max(MaxConcurrency/2, 1)）
 }
 
 // personaBool 采用与 intercept_warmup_requests 一致的严格布尔语义：仅真正的 bool true
@@ -66,6 +68,9 @@ func (a *Account) GetPersonaEnvelope() PersonaEnvelope {
 	}
 	if v, ok := a.Extra[extraPersonaDailyCap]; ok {
 		env.DailyCap = parseExtraInt(v)
+	}
+	if v, ok := a.Extra[extraPersonaOffPeakConcurrency]; ok {
+		env.OffPeakConcurrency = parseExtraInt(v)
 	}
 	return env
 }
@@ -119,14 +124,28 @@ func (p PersonaEnvelope) DayKey(now time.Time) string {
 	return now.In(p.location()).Format("20060102")
 }
 
-// EffectiveMaxConcurrency 返回人格约束下的 messages 并发上限：
-// 显式配置优先，否则回落到账号自身 concurrency。<=0 表示不额外限制。
+// EffectivePersonaMaxConcurrency 返回人格约束下的 messages 并发上限。
+// 活跃时段返回 MaxConcurrency；非活跃时段返回 OffPeakConcurrency（或自动
+// max(MaxConcurrency/2, 1)），实现软限流而非硬拦截。未启用/未配置时回落 account.Concurrency。
 func (a *Account) EffectivePersonaMaxConcurrency() int {
 	env := a.GetPersonaEnvelope()
-	if env.Enabled && env.MaxConcurrency > 0 {
+	if !env.Enabled || env.MaxConcurrency <= 0 {
+		return a.Concurrency
+	}
+	// 在活跃时段：返回正常并发
+	if env.IsWithinActiveHours(time.Now()) {
 		return env.MaxConcurrency
 	}
-	return a.Concurrency
+	// 非活跃时段：返回低并发
+	if env.OffPeakConcurrency > 0 {
+		return env.OffPeakConcurrency
+	}
+	// 自动计算：max(MaxConcurrency/2, 1)
+	half := env.MaxConcurrency / 2
+	if half < 1 {
+		return 1
+	}
+	return half
 }
 
 // validatePersonaFieldValues 校验 map 中出现的每个 persona_* 字段取值是否合法
@@ -164,6 +183,11 @@ func validatePersonaFieldValues(m map[string]any) error {
 	if v, ok := m[extraPersonaDailyCap]; ok {
 		if c := parseExtraInt(v); c < 0 {
 			return fmt.Errorf("persona_daily_request_cap must be >= 0, got %d", c)
+		}
+	}
+	if v, ok := m[extraPersonaOffPeakConcurrency]; ok {
+		if c := parseExtraInt(v); c < 0 {
+			return fmt.Errorf("persona_off_peak_concurrency must be >= 0, got %d", c)
 		}
 	}
 	return nil

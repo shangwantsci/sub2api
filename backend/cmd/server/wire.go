@@ -85,6 +85,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	deploymentLicense *service.DeploymentLicenseService,
 	accountExpiry *service.AccountExpiryService,
+	accountNurturing *service.AccountNurturingService,
 	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
@@ -106,6 +107,7 @@ func provideCleanup(
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
+	channelMonitorV2Aggregator *service.ChannelMonitorV2Aggregator,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 ) func() {
 	return func() {
@@ -199,6 +201,12 @@ func provideCleanup(
 				accountExpiry.Stop()
 				return nil
 			}},
+			{"AccountNurturingService", func() error {
+				if accountNurturing != nil {
+					accountNurturing.Stop()
+				}
+				return nil
+			}},
 			{"ProxyExpiryService", func() error {
 				proxyExpiry.Stop()
 				return nil
@@ -280,6 +288,12 @@ func provideCleanup(
 			{"ChannelMonitorRunner", func() error {
 				if channelMonitorRunner != nil {
 					channelMonitorRunner.Stop()
+				}
+				return nil
+			}},
+			{"ChannelMonitorV2Aggregator", func() error {
+				if channelMonitorV2Aggregator != nil {
+					channelMonitorV2Aggregator.Stop()
 				}
 				return nil
 			}},

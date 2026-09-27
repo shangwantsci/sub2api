@@ -320,6 +320,13 @@ func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpirySe
 	return svc
 }
 
+// ProvideAccountNurturingService creates and starts AccountNurturingService.
+func ProvideAccountNurturingService(accountRepo AccountRepository, tokenProvider *ClaudeTokenProvider) *AccountNurturingService {
+	svc := NewAccountNurturingService(accountRepo, tokenProvider, time.Hour)
+	svc.Start()
+	return svc
+}
+
 // ProvideProxyExpiryService creates and starts ProxyExpiryService.
 func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	svc := NewProxyExpiryService(proxyRepo, time.Minute)
@@ -742,6 +749,7 @@ var ProviderSet = wire.NewSet(
 	ProvideTokenRefreshService,
 	wire.Bind(new(GrokOAuthReconciler), new(*TokenRefreshService)),
 	ProvideAccountExpiryService,
+	ProvideAccountNurturingService,
 	ProvideProxyExpiryService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,
