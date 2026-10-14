@@ -169,6 +169,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	isClaudeCode := IsClaudeCodeClient(ctx)
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
 
+	// 环境小节要在提取首条用户文本之前改完，计费指纹才和发出去的正文一致。
+	if next, ok := s.normalizeClaudePromptEnv(ctx, account, body); ok {
+		if err := replaceBody(next); err != nil {
+			return nil, err
+		}
+	}
+
 	if shouldMimicClaudeCode {
 		firstUserText := extractFirstUserText(body)
 		rememberClaudeMimicFirstUserText(c, firstUserText)

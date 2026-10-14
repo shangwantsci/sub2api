@@ -4746,7 +4746,7 @@
                 />
               </div>
 
-              <!-- 账号人格门控（作息窗口 + 人格并发上限；默认关，需每账号 persona_enabled 同时开启） -->
+              <!-- 旧版人格门控：只作用于没有 persona_preset 的旧账号 -->
               <div class="flex items-center justify-between">
                 <div>
                   <label

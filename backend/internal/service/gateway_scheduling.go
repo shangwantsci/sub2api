@@ -454,11 +454,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			// 2. 批量获取负载信息
+			// 使用 effectiveAccountConcurrency 而非 EffectiveLoadFactor，
+			// 确保负载率排序与实际槽位获取使用一致的动态并发值。
 			routingLoads := make([]AccountWithConcurrency, 0, len(routingCandidates))
 			for _, acc := range routingCandidates {
 				routingLoads = append(routingLoads, AccountWithConcurrency{
 					ID:             acc.ID,
-					MaxConcurrency: acc.EffectiveLoadFactor(),
+					MaxConcurrency: s.effectiveAccountConcurrency(ctx, acc),
 				})
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
@@ -735,11 +737,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, ErrNoAvailableAccounts
 	}
 
+	// 使用 effectiveAccountConcurrency 而非 EffectiveLoadFactor，
+	// 确保负载率排序与实际槽位获取使用一致的动态并发值。
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
 		accountLoads = append(accountLoads, AccountWithConcurrency{
 			ID:             acc.ID,
-			MaxConcurrency: acc.EffectiveLoadFactor(),
+			MaxConcurrency: s.effectiveAccountConcurrency(ctx, acc),
 		})
 	}
 
@@ -1491,7 +1495,7 @@ func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account
 
 	var ids []int64
 	for i := range accounts {
-		if accounts[i].IsAnthropicOAuthOrSetupToken() && accounts[i].GetBaseRPM() > 0 {
+		if accounts[i].IsAnthropicOAuthOrSetupToken() && accounts[i].RPMCeiling() > 0 {
 			ids = append(ids, accounts[i].ID)
 		}
 	}
@@ -1508,12 +1512,12 @@ func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account
 
 // isAccountSchedulableForRPM 检查账号是否可根据 RPM 进行调度
 // 仅适用于 Anthropic OAuth/SetupToken 账号
+// 当账号启用了 persona 时，RPM 上限会根据利用率动态缩减。
 func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account *Account, isSticky bool) bool {
 	if !account.IsAnthropicOAuthOrSetupToken() {
 		return true
 	}
-	baseRPM := account.GetBaseRPM()
-	if baseRPM <= 0 {
+	if account.RPMCeiling() <= 0 {
 		return true
 	}
 
@@ -1526,6 +1530,20 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 			currentRPM = count
 		}
 		// 失败开放：GetRPM 错误时允许调度
+	}
+
+	// 启用 persona 时使用动态 RPM（利用率高→RPM降→请求频率自然降低）
+	if account.IsPersonaEnabled() {
+		effectiveRPM := account.EffectivePersonaRPM()
+		if effectiveRPM > 0 && currentRPM >= effectiveRPM {
+			if isSticky {
+				// 粘性会话给少量缓冲
+				buffer := account.GetRPMStickyBuffer()
+				return currentRPM < effectiveRPM+buffer
+			}
+			return false
+		}
+		return true
 	}
 
 	schedulability := account.CheckRPMSchedulability(currentRPM)
@@ -1541,12 +1559,9 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 }
 
 // isAccountWithinPersonaActiveHours 检查账号当前是否处于人格作息窗口内。
-// fail-open 语义：全局开关 enable_persona_gating 关闭（默认）、settingService 缺失、
-// 账号未启用 persona 或未配置作息窗口时一律放行——保证开关关闭时调度行为与既有完全一致。
+// fail-open 语义：账号未启用 persona 或未配置作息窗口时一律放行。
+// 注意：预设模式下不使用作息窗口（恒放行），仅旧模式手动配置时才检查。
 func (s *GatewayService) isAccountWithinPersonaActiveHours(ctx context.Context, account *Account) bool {
-	if s.settingService == nil || !s.settingService.IsPersonaGatingEnabled(ctx) {
-		return true
-	}
 	if account == nil || !account.IsPersonaEnabled() {
 		return true
 	}
@@ -1554,13 +1569,10 @@ func (s *GatewayService) isAccountWithinPersonaActiveHours(ctx context.Context, 
 }
 
 // isAccountWithinPersonaDailyCap 检查账号今日请求数是否仍在人格日上限内。
-// fail-open 语义与作息门控一致：全局开关关、settingService 缺失、账号未启用 persona、
-// 未配置上限（DailyCap<=0，默认 0=不限）、rpmCache 缺失或读取出错时一律放行。
-// 计数按人格时区跨日重置（DayKey）。
+// fail-open 语义：账号未启用 persona、未配置上限（DailyCap<=0，默认 0=不限）、
+// rpmCache 缺失或读取出错时一律放行。计数按人格时区跨日重置（DayKey）。
+// 不再依赖全局 enable_persona_gating 开关——配了 persona/preset 就自动生效。
 func (s *GatewayService) isAccountWithinPersonaDailyCap(ctx context.Context, account *Account) bool {
-	if s.settingService == nil || !s.settingService.IsPersonaGatingEnabled(ctx) {
-		return true
-	}
 	if account == nil || !account.IsPersonaEnabled() {
 		return true
 	}
@@ -1580,20 +1592,16 @@ func (s *GatewayService) isAccountWithinPersonaDailyCap(ctx context.Context, acc
 
 // isAccountPersonaSchedulable 组合人格调度门控：仅保留日请求上限。
 // 作息窗口不再硬拦截，而是通过 effectiveAccountConcurrency 动态调整并发数实现软限流。
-// 日上限 fail-open；仅在全局开关开启且账号启用 persona 时才可能收紧。
+// 日上限 fail-open；配了 persona/preset 就自动生效，无需全局开关。
 func (s *GatewayService) isAccountPersonaSchedulable(ctx context.Context, account *Account) bool {
-	// 作息窗口不再硬拦截，而是通过 effectiveAccountConcurrency 动态调整并发数实现软限流。
-	// 保留日请求上限门控。
 	return s.isAccountWithinPersonaDailyCap(ctx, account)
 }
 
 // IncrementAccountPersonaDailyRequest 在成功转发后递增账号的人格日请求计数。
-// 自守卫：仅在全局开关开启、账号启用 persona、且配置了正的日上限时才写入 Redis，
+// 自守卫：仅在账号启用 persona 且配置了正的日上限时才写入 Redis，
 // 避免对无上限账号产生无谓写入。best-effort，出错仅记日志。
+// 不再依赖全局 enable_persona_gating 开关。
 func (s *GatewayService) IncrementAccountPersonaDailyRequest(ctx context.Context, account *Account) {
-	if s.settingService == nil || !s.settingService.IsPersonaGatingEnabled(ctx) {
-		return
-	}
 	if account == nil || !account.IsPersonaEnabled() {
 		return
 	}
@@ -1606,14 +1614,14 @@ func (s *GatewayService) IncrementAccountPersonaDailyRequest(ctx context.Context
 	}
 }
 
-// effectiveAccountConcurrency 返回人格门控下的账号并发上限：
-// 仅当全局开关开启且账号启用 persona 时使用人格并发（未配置时内部回落到 account.Concurrency），
-// 其余情况一律返回 account.Concurrency，确保开关关闭时行为不变。
+// effectiveAccountConcurrency 返回人格门控下的账号动态并发上限：
+// 当账号启用了 persona（通过 preset 或手动配置），使用基于 5h/7d 利用率的动态并发，
+// 否则返回 account.Concurrency。不再依赖全局 enable_persona_gating 开关。
 func (s *GatewayService) effectiveAccountConcurrency(ctx context.Context, account *Account) int {
 	if account == nil {
 		return 0
 	}
-	if s.settingService != nil && s.settingService.IsPersonaGatingEnabled(ctx) && account.IsPersonaEnabled() {
+	if account.IsPersonaEnabled() {
 		return account.EffectivePersonaMaxConcurrency()
 	}
 	return account.Concurrency

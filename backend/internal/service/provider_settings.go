@@ -60,6 +60,7 @@ type ProviderCapacityTier struct {
 	BaseRPM         int     `json:"base_rpm"`
 	WindowCostLimit float64 `json:"window_cost_limit"` // 0 = 不限
 	Enabled         bool    `json:"enabled"`
+	PersonaPreset   string  `json:"persona_preset,omitempty"` // 防封预设：balanced/aggressive/conservative/off，空=不设
 }
 
 // ProviderCustomTierCaps 是自定义档各项参数的上限护栏。
@@ -468,6 +469,11 @@ func ValidateProviderSettings(in ProviderSettings) (ProviderSettings, error) {
 		}
 		if err := validateTierNumbers(t.Tier, t.Concurrency, t.MaxSessions, t.BaseRPM, t.WindowCostLimit); err != nil {
 			return out, err
+		}
+		t.PersonaPreset = strings.TrimSpace(t.PersonaPreset)
+		if t.PersonaPreset != "" && !IsValidPreset(t.PersonaPreset) {
+			return out, infraerrors.BadRequest("INVALID_PERSONA_PRESET",
+				fmt.Sprintf("tier %q persona preset must be off, aggressive, balanced, or conservative", t.Tier))
 		}
 		if t.Enabled {
 			enabledTiers[t.Tier] = true

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -12,7 +13,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/util/httputil"
 	"github.com/imroc/req/v3"
+)
+
+var (
+	errNurturingAuth = errors.New("nurturing: auth failure")
+	errNurturingCF   = errors.New("nurturing: cloudflare challenge")
 )
 
 // AccountNurturingService 周期性地给号池 Anthropic OAuth 账号制造正常的
@@ -85,7 +92,8 @@ func (s *AccountNurturingService) Stop() {
 }
 
 // runOnce 一次扫描循环：列出可调度 Anthropic OAuth/setup_token 账号，
-// 在人格活跃时段内、按「每天一次」规则依次养号。
+// 按「跟随真实使用」策略养号——只对近期有 API 调用活动的账号执行养号动作，
+// 使养号活动与真实使用穿插在一起，行为模式更自然。
 func (s *AccountNurturingService) runOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -113,8 +121,16 @@ func (s *AccountNurturingService) runOnce() {
 			continue
 		}
 
-		// 只在人格活跃时段养号；未启用 persona 时 IsWithinActiveHours 默认放行。
-		if !account.GetPersonaEnvelope().IsWithinActiveHours(time.Now()) {
+		// 预设为 off 时不养号
+		if account.GetPersonaPreset() == PersonaPresetOff {
+			continue
+		}
+
+		// 跟随真实使用：只对近期有 API 调用活动的账号养号。
+		// 这样养号活动与真实请求穿插，Anthropic 看到的是一个人在密集使用
+		// 间隙浏览网页、查额度，比固定时段养号更自然。
+		// 未启用 persona/preset 的账号也参与（向后兼容旧行为）。
+		if !s.hasRecentActivity(account) {
 			continue
 		}
 
@@ -133,14 +149,49 @@ func (s *AccountNurturingService) runOnce() {
 	}
 }
 
+// hasRecentActivity 判断账号近期是否有 API 调用活动。
+// 有 persona/preset 配置的账号：检查 LastUsedAt 是否在最近 2 小时内。
+// 未配置 persona 的账号：保持旧行为（旧的 IsWithinActiveHours 逻辑，默认放行）。
+func (s *AccountNurturingService) hasRecentActivity(account *Account) bool {
+	if account == nil {
+		return false
+	}
+
+	// 有 preset 或 persona 配置：基于真实使用活动判断
+	if account.IsPersonaEnabled() {
+		if account.LastUsedAt == nil {
+			return false // 从未使用过，不需要养号
+		}
+		return time.Since(*account.LastUsedAt) < 2*time.Hour
+	}
+
+	// 未配置 persona/preset：保持旧行为（IsWithinActiveHours 默认放行）
+	return account.GetPersonaEnvelope().IsWithinActiveHours(time.Now())
+}
+
 // nurture 对单个账号执行养号动作（浏览 + Chat 对话 + 用量查询）。
+// 动作编排模拟真人使用间隙的行为：浏览网页→偶尔聊一句→用多了查额度。
+// browseClaudeAI 充当 SK 预检：如果 SK 失效或遭 CF 拦截，立即熔断并标记冷却。
 func (s *AccountNurturingService) nurture(ctx context.Context, account *Account) {
 	if account == nil {
 		return
 	}
 
-	if err := s.browseClaudeAI(ctx, account); err != nil {
+	proxyURL := ""
+	if account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	webClient, err := createNurturingWebClient(proxyURL)
+	if err != nil {
+		logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d create web client failed: %v", account.ID, err)
+		return
+	}
+
+	if err := s.browseClaudeAI(ctx, account, webClient); err != nil {
 		logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d browse failed: %v", account.ID, err)
+		s.handleNurturingError(ctx, account, err)
+		return
 	}
 
 	// 随机延迟 5-15 秒
@@ -150,40 +201,56 @@ func (s *AccountNurturingService) nurture(ctx context.Context, account *Account)
 
 	// Chat 对话痕迹（每次养号有 50% 概率发 Chat，避免每天固定模式）
 	if rand.Intn(2) == 0 {
-		if err := s.sendNurturingChat(ctx, account); err != nil {
+		if err := s.sendNurturingChat(ctx, account, webClient); err != nil {
 			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d chat failed: %v", account.ID, err)
+			s.handleNurturingError(ctx, account, err)
+			return
 		}
 		if !s.sleepOrStop(ctx, time.Duration(3000+rand.Intn(7000))*time.Millisecond) {
 			return
 		}
 	}
 
-	if err := s.queryUsage(ctx, account); err != nil {
-		logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d usage query failed: %v", account.ID, err)
+	// 查用量：真人在大量使用后会查"我还剩多少额度"。
+	// 利用率 > 30% 时一定查（模拟用多了自然关心额度），否则 30% 概率查。
+	env := account.GetPersonaEnvelope()
+	shouldQueryUsage := env.Utilization5h > 0.30 || rand.Intn(100) < 30
+	if shouldQueryUsage {
+		if err := s.queryUsage(ctx, account); err != nil {
+			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d usage query failed: %v", account.ID, err)
+		}
+	}
+}
+
+// handleNurturingError 根据养号错误类型标记账号冷却，防止失效 SK 反复请求。
+func (s *AccountNurturingService) handleNurturingError(ctx context.Context, account *Account, err error) {
+	switch {
+	case errors.Is(err, errNurturingAuth):
+		if setErr := s.accountRepo.SetTempUnschedulable(ctx, account.ID, time.Now().Add(1*time.Hour), "nurturing: session key invalid"); setErr != nil {
+			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d SetTempUnschedulable failed: %v", account.ID, setErr)
+		} else {
+			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d marked unschedulable 1h (auth failure)", account.ID)
+		}
+	case errors.Is(err, errNurturingCF):
+		if setErr := s.accountRepo.SetTempUnschedulable(ctx, account.ID, time.Now().Add(2*time.Hour), "nurturing: cloudflare challenge"); setErr != nil {
+			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d SetTempUnschedulable failed: %v", account.ID, setErr)
+		} else {
+			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d marked unschedulable 2h (cloudflare challenge)", account.ID)
+		}
 	}
 }
 
 // browseClaudeAI 用 sessionKey 访问 claude.ai 组织与设置接口，制造网页活动痕迹。
-// 无 sessionKey 时跳过（仍可由 nurture 继续做 usage 查询）。
-func (s *AccountNurturingService) browseClaudeAI(ctx context.Context, account *Account) error {
+// 同时充当 SK 预检——如果 GET /api/organizations 返回 401/403，说明 SK 已失效或
+// 遭遇 CF 拦截，返回带标记的 error 供 nurture() 熔断。
+func (s *AccountNurturingService) browseClaudeAI(ctx context.Context, account *Account, client *req.Client) error {
 	sessionKey := strings.TrimSpace(account.GetCredential("session_key"))
 	if sessionKey == "" {
 		return nil
 	}
 
-	proxyURL := ""
-	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
-
-	client, err := createNurturingClient(proxyURL)
-	if err != nil {
-		return fmt.Errorf("create client: %w", err)
-	}
-
 	cookie := &http.Cookie{Name: "sessionKey", Value: sessionKey}
 
-	// 1. GET /api/organizations（正常用户每次开页面都会触发）
 	resp, err := client.R().
 		SetContext(ctx).
 		SetCookies(cookie).
@@ -192,16 +259,14 @@ func (s *AccountNurturingService) browseClaudeAI(ctx context.Context, account *A
 		return fmt.Errorf("browse organizations: %w", err)
 	}
 	if !resp.IsSuccessState() {
-		logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d browse /api/organizations failed: %d", account.ID, resp.StatusCode)
-		return nil
+		return classifyNurturingHTTPError(resp.StatusCode, resp.Header, resp.Bytes(),
+			fmt.Sprintf("browse /api/organizations: status %d", resp.StatusCode))
 	}
 
-	// 随机延迟 2-5 秒，模拟用户看页面。
 	if !s.sleepOrStop(ctx, time.Duration(2000+rand.Intn(3000))*time.Millisecond) {
 		return ctx.Err()
 	}
 
-	// 2. GET /api/organizations/{org}/settings（查看设置页）
 	orgUUID := strings.TrimSpace(account.GetExtraString("org_uuid"))
 	if orgUUID != "" {
 		resp2, err := client.R().
@@ -256,7 +321,34 @@ func (s *AccountNurturingService) queryUsage(ctx context.Context, account *Accou
 	return nil
 }
 
-// createNurturingClient 创建带 Chrome TLS 仿真的 HTTP 客户端，可选走账号代理。
+// createNurturingWebClient 创建面向 claude.ai web 的 HTTP 客户端。
+// 启用默认 CookieJar（Cloudflare 下发的 __cf_bm 等 cookie 自动存储并回传），
+// 设置与 XHR API 调用一致的浏览器 header（覆盖 ImpersonateChrome 的导航默认值）。
+func createNurturingWebClient(proxyURL string) (*req.Client, error) {
+	client := req.C().
+		SetTimeout(30 * time.Second).
+		ImpersonateChrome().
+		SetCommonHeaders(map[string]string{
+			"accept-language": "en-US,en;q=0.9",
+			"sec-fetch-site":  "same-origin",
+			"sec-fetch-mode":  "cors",
+			"sec-fetch-dest":  "empty",
+			"origin":          "https://claude.ai",
+			"referer":         "https://claude.ai/",
+		})
+
+	trimmed, _, err := proxyurl.Parse(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if trimmed != "" {
+		client.SetProxyURL(trimmed)
+	}
+
+	return client, nil
+}
+
+// createNurturingClient 创建面向 api.anthropic.com 的 HTTP 客户端（queryUsage 专用）。
 func createNurturingClient(proxyURL string) (*req.Client, error) {
 	client := req.C().
 		SetTimeout(30 * time.Second).
@@ -272,6 +364,26 @@ func createNurturingClient(proxyURL string) (*req.Client, error) {
 	}
 
 	return client, nil
+}
+
+// classifyNurturingHTTPError 根据 HTTP 状态码和响应体分类养号错误。
+func classifyNurturingHTTPError(statusCode int, headers http.Header, body []byte, msg string) error {
+	if httputil.IsCloudflareChallengeResponse(statusCode, headers, body) {
+		ray := httputil.ExtractCloudflareRayID(headers, body)
+		if ray != "" {
+			msg += " (cf-ray: " + ray + ")"
+		}
+		return fmt.Errorf("%s: %w", msg, errNurturingCF)
+	}
+
+	if statusCode == 401 || statusCode == 403 {
+		if isDefinitiveClaudeSessionRejection(string(body)) {
+			return fmt.Errorf("%s: %w", msg, errNurturingAuth)
+		}
+		return fmt.Errorf("%s: %w", msg, errNurturingAuth)
+	}
+
+	return fmt.Errorf("%s", msg)
 }
 
 func (s *AccountNurturingService) nurtureDayKey(accountID int64, today string) string {

@@ -122,6 +122,8 @@ export interface ProviderCapacityTierSetting {
   /** 0 表示不限。 */
   window_cost_limit: number
   enabled: boolean
+  /** 防封预设：balanced / aggressive / conservative / off。空表示不写入。 */
+  persona_preset?: string
 }
 
 export interface ProviderCustomTierCapsSetting {

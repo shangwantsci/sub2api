@@ -433,6 +433,9 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 
 // buildCountTokensRequest 构建 count_tokens 上游请求
 func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, []byte, error) {
+	if next, ok := s.normalizeClaudePromptEnv(ctx, account, body); ok {
+		body = next
+	}
 	firstUserText := extractFirstUserText(body)
 	if hasClaudeOAuthMimicCoreSystemBlocks(body) {
 		mode, _, _ := s.claudeOAuthSystemPromptInjectionSettings(ctx)
@@ -488,6 +491,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if account.IsOAuth() && s.identityService != nil {
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
 		if err == nil {
+			alignClaudeDeviceID(ctx, s, account, fp)
 			if ctEnableFP {
 				ctFingerprint = fp
 				ctBillingUserAgent = fp.UserAgent
@@ -594,6 +598,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
 	if tokenType == "oauth" && mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(ctCalProfile, req, false)
+	}
+	if account.IsAnthropicOAuthOrSetupToken() {
+		pinClaudeMachineHeaders(req)
 	}
 
 	// 写入最终 anthropic-beta header（Del 一次避免白名单透传值残留）

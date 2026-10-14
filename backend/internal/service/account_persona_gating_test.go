@@ -50,15 +50,17 @@ func personaDailyAccount(enabled bool, cap int) *Account {
 	return &Account{ID: 42, Concurrency: 5, Extra: extra}
 }
 
+func presetAccount(preset string) *Account {
+	return &Account{ID: 42, Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset: preset,
+	}}
+}
+
 func TestGatewayService_IsAccountWithinPersonaDailyCap(t *testing.T) {
 	ctx := context.Background()
 
-	// 开关 OFF：即使超限也放行。
-	svcOff, _ := newPersonaGatingTestService(false)
-	svcOff.rpmCache = &fakePersonaRPMCache{}
-	require.True(t, svcOff.isAccountWithinPersonaDailyCap(ctx, personaDailyAccount(true, 1)))
-
-	svc, _ := newPersonaGatingTestService(true)
+	// 不再依赖全局开关——直接基于账号配置生效
+	svc, _ := newPersonaGatingTestService(false)
 	fake := &fakePersonaRPMCache{}
 	svc.rpmCache = fake
 
@@ -85,13 +87,36 @@ func TestGatewayService_IsAccountWithinPersonaDailyCap(t *testing.T) {
 	// persona 未启用 → 放行。
 	svc.rpmCache = &fakePersonaRPMCache{daily: map[string]int{}}
 	require.True(t, svc.isAccountWithinPersonaDailyCap(ctx, personaDailyAccount(false, 1)))
+
+	// preset 账号默认不限日请求（DailyCap=0，由动态并发调节），恒放行
+	presetAcc := &Account{ID: 99, Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:   "balanced",
+		extraPersonaTimezone: "UTC",
+	}}
+	env := presetAcc.GetPersonaEnvelope()
+	require.Equal(t, 0, env.DailyCap) // balanced 默认不限
+	svc.rpmCache = &fakePersonaRPMCache{}
+	require.True(t, svc.isAccountWithinPersonaDailyCap(ctx, presetAcc))
+
+	// 手动设了 DailyCap 的 preset 账号，日上限生效
+	presetWithCap := &Account{ID: 100, Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:   "balanced",
+		extraPersonaTimezone: "UTC",
+		extraPersonaDailyCap: 300,
+	}}
+	envCap := presetWithCap.GetPersonaEnvelope()
+	require.Equal(t, 300, envCap.DailyCap)
+	svc.rpmCache = &fakePersonaRPMCache{daily: map[string]int{
+		fmt.Sprintf("%d:%s", presetWithCap.ID, envCap.DayKey(time.Now())): 300,
+	}}
+	require.False(t, svc.isAccountWithinPersonaDailyCap(ctx, presetWithCap))
 }
 
 func TestGatewayService_IncrementAccountPersonaDailyRequest(t *testing.T) {
 	ctx := context.Background()
 
-	// 开关 ON + persona 启用 + cap>0 → 计数递增。
-	svc, _ := newPersonaGatingTestService(true)
+	// persona 启用 + cap>0 → 计数递增（不再需要全局开关）。
+	svc, _ := newPersonaGatingTestService(false)
 	fake := &fakePersonaRPMCache{}
 	svc.rpmCache = fake
 	acc := personaDailyAccount(true, 5)
@@ -106,12 +131,27 @@ func TestGatewayService_IncrementAccountPersonaDailyRequest(t *testing.T) {
 	svc.IncrementAccountPersonaDailyRequest(ctx, personaDailyAccount(true, 0))
 	require.Empty(t, fake2.daily)
 
-	// 开关 OFF → 不写入。
-	svcOff, _ := newPersonaGatingTestService(false)
+	// persona 未启用 → 不写入。
 	fake3 := &fakePersonaRPMCache{}
-	svcOff.rpmCache = fake3
-	svcOff.IncrementAccountPersonaDailyRequest(ctx, personaDailyAccount(true, 5))
+	svc.rpmCache = fake3
+	svc.IncrementAccountPersonaDailyRequest(ctx, personaDailyAccount(false, 5))
 	require.Empty(t, fake3.daily)
+
+	// preset 账号默认 DailyCap=0 → 不写入（由动态并发调节，无需日计数）
+	fake4 := &fakePersonaRPMCache{}
+	svc.rpmCache = fake4
+	svc.IncrementAccountPersonaDailyRequest(ctx, presetAccount("balanced"))
+	require.Empty(t, fake4.daily)
+
+	// preset 账号手动设了 DailyCap → 递增
+	fake5 := &fakePersonaRPMCache{}
+	svc.rpmCache = fake5
+	accWithCap := &Account{ID: 42, Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:   "balanced",
+		extraPersonaDailyCap: 500,
+	}}
+	svc.IncrementAccountPersonaDailyRequest(ctx, accWithCap)
+	require.NotEmpty(t, fake5.daily)
 }
 
 func TestValidatePersonaFieldValues_RejectsZeroLengthWindow(t *testing.T) {
@@ -129,6 +169,17 @@ func TestValidatePersonaFieldValues_RejectsZeroLengthWindow(t *testing.T) {
 	}))
 	// 仅给 start（无 end）：不做跨字段校验，合法。
 	require.NoError(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaActiveStart: 9}))
+}
+
+func TestValidatePersonaFieldValues_PresetValidation(t *testing.T) {
+	// 合法预设名。
+	require.NoError(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaPreset: "balanced"}))
+	require.NoError(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaPreset: "aggressive"}))
+	require.NoError(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaPreset: "conservative"}))
+	require.NoError(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaPreset: "off"}))
+	// 非法预设名。
+	require.Error(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaPreset: "turbo"}))
+	require.Error(t, ValidatePersonaExtraPatch(map[string]any{extraPersonaPreset: "max"}))
 }
 
 // fakeProxyLatencyCache 是 ProxyLatencyCache 的最小假实现，用于地理 prefill/一致性测试。
@@ -253,32 +304,33 @@ func personaAccount(enabled bool, maxConcurrency int) *Account {
 	return &Account{Concurrency: 5, Extra: extra}
 }
 
-// TestGatewayService_EffectiveAccountConcurrency_PersonaGating 覆盖 {开关 on/off} × {persona 启用/未启用}。
+// TestGatewayService_EffectiveAccountConcurrency_PersonaGating 覆盖 persona 启用/未启用 的并发计算。
+// 不再依赖全局开关——配了 persona 就生效。
 func TestGatewayService_EffectiveAccountConcurrency_PersonaGating(t *testing.T) {
 	ctx := context.Background()
 
-	// 开关 OFF：无论 persona 是否启用，一律返回 account.Concurrency
 	svc, _ := newPersonaGatingTestService(false)
-	require.Equal(t, 5, svc.effectiveAccountConcurrency(ctx, personaAccount(true, 2)))
-	require.Equal(t, 5, svc.effectiveAccountConcurrency(ctx, personaAccount(false, 2)))
 
-	// 开关 ON + persona 启用：使用人格并发；未配置人格并发时回落 account.Concurrency
-	svc, _ = newPersonaGatingTestService(true)
+	// persona 启用：使用人格并发（动态调节，无利用率数据时 = base）
 	require.Equal(t, 2, svc.effectiveAccountConcurrency(ctx, personaAccount(true, 2)))
+	// persona 启用但未配置人格并发：回落 account.Concurrency
 	require.Equal(t, 5, svc.effectiveAccountConcurrency(ctx, personaAccount(true, 0)))
 
-	// 开关 ON + persona 未启用：不受影响
+	// persona 未启用：不受影响
 	require.Equal(t, 5, svc.effectiveAccountConcurrency(ctx, personaAccount(false, 2)))
-
-	// settingService 缺失：恒回落 account.Concurrency
-	bare := &GatewayService{}
-	require.Equal(t, 5, bare.effectiveAccountConcurrency(ctx, personaAccount(true, 2)))
 
 	// nil account 防御
 	require.Equal(t, 0, svc.effectiveAccountConcurrency(ctx, nil))
+
+	// preset 账号自动生效
+	require.Equal(t, 3, svc.effectiveAccountConcurrency(ctx, presetAccount("balanced")))
+	require.Equal(t, 5, svc.effectiveAccountConcurrency(ctx, presetAccount("aggressive")))
+	require.Equal(t, 2, svc.effectiveAccountConcurrency(ctx, presetAccount("conservative")))
+	// preset=off → 使用 account.Concurrency
+	require.Equal(t, 5, svc.effectiveAccountConcurrency(ctx, presetAccount("off")))
 }
 
-// TestGatewayService_IsAccountWithinPersonaActiveHours 覆盖 {开关 on/off} × {persona 启用/未启用}
+// TestGatewayService_IsAccountWithinPersonaActiveHours 覆盖 persona 启用/未启用
 // 的短路语义；真实时钟仅用于「窗口排除当前小时」的负例（带跨小时边界重试防抖）。
 func TestGatewayService_IsAccountWithinPersonaActiveHours(t *testing.T) {
 	ctx := context.Background()
@@ -290,23 +342,18 @@ func TestGatewayService_IsAccountWithinPersonaActiveHours(t *testing.T) {
 		extraPersonaActiveEnd:   24,
 	}}
 
-	// 开关 OFF：即使配置了 persona 也恒放行（零行为变化）
 	svc, _ := newPersonaGatingTestService(false)
+
+	// persona 启用 + 全天窗口：放行
 	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, inWindowAll))
+
+	// persona 未启用：放行
 	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, personaAccount(false, 0)))
 
-	// 开关 ON + persona 未启用：放行
-	svc, _ = newPersonaGatingTestService(true)
-	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, personaAccount(false, 0)))
-
-	// 开关 ON + persona 启用 + 未配置窗口：fail-open 放行
+	// persona 启用 + 未配置窗口：fail-open 放行
 	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, personaAccount(true, 0)))
 
-	// 开关 ON + persona 启用 + 全天窗口 [0,24)：任何时刻都在窗口内
-	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, inWindowAll))
-
-	// 开关 ON + persona 启用 + 窗口排除当前小时：应被拦截。
-	// 用真实时钟构造 [h+1, h+2) 窗口；若断言期间跨越小时边界则重试。
+	// persona 启用 + 窗口排除当前小时：应被拦截。
 	for attempt := 0; attempt < 3; attempt++ {
 		h := time.Now().UTC().Hour()
 		start := (h + 1) % 24
@@ -324,13 +371,15 @@ func TestGatewayService_IsAccountWithinPersonaActiveHours(t *testing.T) {
 		break
 	}
 
-	// nil account / settingService 缺失：放行
+	// nil account：放行
 	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, nil))
-	bare := &GatewayService{}
-	require.True(t, bare.isAccountWithinPersonaActiveHours(ctx, inWindowAll))
+
+	// preset 账号（无作息窗口）：恒放行
+	require.True(t, svc.isAccountWithinPersonaActiveHours(ctx, presetAccount("balanced")))
 }
 
 // TestSettingService_IsPersonaGatingEnabled_DefaultOff 验证键缺失/非 true 时默认关闭。
+// 注：全局开关保留用于向后兼容，但新设计下不再是必需的。
 func TestSettingService_IsPersonaGatingEnabled_DefaultOff(t *testing.T) {
 	ctx := context.Background()
 
@@ -349,7 +398,7 @@ func TestSettingService_IsPersonaGatingEnabled_DefaultOff(t *testing.T) {
 }
 
 // TestEffectivePersonaMaxConcurrency_DynamicByTime 验证活跃/非活跃时段动态并发。
-// IsWithinActiveHours 依赖 time.Now()，因此按当前 UTC 小时构造窗口，跨小时边界时重试。
+// 旧模式（手动配置）保持活跃/非活跃逻辑 + 动态调节。
 func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
 	// 1. 未启用 persona → 返回 account.Concurrency
 	disabled := &Account{Concurrency: 8, Extra: map[string]any{
@@ -365,8 +414,7 @@ func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
 	for attempt := 0; attempt < 3; attempt++ {
 		h := time.Now().UTC().Hour()
 
-		// 2. 启用 persona + 活跃时段 → 返回 MaxConcurrency
-		// 窗口覆盖当前小时：[h, h+1) 或跨夜时用 [h, 24)∪[0,1) 的简化：全天窗口。
+		// 2. 启用 persona + 全天窗口 → 返回 MaxConcurrency（无利用率数据时 = base）
 		inWindow := &Account{Concurrency: 8, Extra: map[string]any{
 			extraPersonaEnabled:        true,
 			extraPersonaTimezone:       "UTC",
@@ -376,7 +424,7 @@ func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
 		}}
 		require.Equal(t, 6, inWindow.EffectivePersonaMaxConcurrency())
 
-		// 窗口精确覆盖当前小时（更贴近“活跃时段”语义）
+		// 窗口精确覆盖当前小时
 		start := h
 		end := h + 1
 		if end > 24 {
@@ -395,14 +443,12 @@ func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
 		}
 		require.Equal(t, 6, gotIn)
 
-		// 3. 启用 persona + 非活跃时段 + 显式 OffPeakConcurrency → 返回 OffPeakConcurrency
+		// 3. 非活跃时段 + 显式 OffPeakConcurrency
 		offStart := (h + 1) % 24
 		offEnd := offStart + 1
 		if offEnd > 24 {
 			offEnd = 24
 		}
-		// 若 offStart==0 且 offEnd==1 而 h==23，窗口 [0,1) 不含 23，OK；
-		// 若 offStart==23，offEnd 会被夹到 24，窗口 [23,24) 不含 h≠23。
 		outExplicit := &Account{Concurrency: 8, Extra: map[string]any{
 			extraPersonaEnabled:            true,
 			extraPersonaTimezone:           "UTC",
@@ -417,14 +463,13 @@ func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
 		}
 		require.Equal(t, 2, gotOut)
 
-		// 4. 启用 persona + 非活跃时段 + OffPeakConcurrency=0 → max(MaxConcurrency/2, 1)
+		// 4. 非活跃时段 + OffPeakConcurrency=0 → max(MaxConcurrency/2, 1)
 		outAuto := &Account{Concurrency: 8, Extra: map[string]any{
 			extraPersonaEnabled:        true,
 			extraPersonaTimezone:       "UTC",
 			extraPersonaActiveStart:    offStart,
 			extraPersonaActiveEnd:      offEnd,
 			extraPersonaMaxConcurrency: 6,
-			// OffPeakConcurrency 省略 = 0 = 自动
 		}}
 		gotAuto := outAuto.EffectivePersonaMaxConcurrency()
 		if time.Now().UTC().Hour() != h {
@@ -448,4 +493,234 @@ func TestEffectivePersonaMaxConcurrency_DynamicByTime(t *testing.T) {
 		return
 	}
 	t.Fatal("could not complete DynamicByTime assertions without crossing hour boundary")
+}
+
+// ========== 新增：预设档位 + 动态并发测试 ==========
+
+func TestPersonaPreset_GetPersonaEnvelope(t *testing.T) {
+	// balanced preset 自动填充默认值
+	acc := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset: "balanced",
+	}}
+	env := acc.GetPersonaEnvelope()
+	require.True(t, env.Enabled)
+	require.Equal(t, PersonaPresetBalanced, env.Preset)
+	require.Equal(t, 3, env.MaxConcurrency)
+	require.Equal(t, 0, env.DailyCap) // 不限，由动态并发调节
+	require.Equal(t, "America/New_York", env.Timezone)
+	require.Equal(t, "en-US", env.Locale)
+
+	// aggressive preset
+	accAgg := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset: "aggressive",
+	}}
+	envAgg := accAgg.GetPersonaEnvelope()
+	require.True(t, envAgg.Enabled)
+	require.Equal(t, 5, envAgg.MaxConcurrency)
+	require.Equal(t, 0, envAgg.DailyCap)
+
+	// conservative preset
+	accCon := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset: "conservative",
+	}}
+	envCon := accCon.GetPersonaEnvelope()
+	require.True(t, envCon.Enabled)
+	require.Equal(t, 2, envCon.MaxConcurrency)
+	require.Equal(t, 0, envCon.DailyCap)
+
+	// off preset → 未启用
+	accOff := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset: "off",
+	}}
+	envOff := accOff.GetPersonaEnvelope()
+	require.False(t, envOff.Enabled)
+
+	// 手动字段覆盖预设默认值
+	accOverride := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:         "balanced",
+		extraPersonaMaxConcurrency: 4,
+		extraPersonaDailyCap:       300,
+		extraPersonaTimezone:       "America/Los_Angeles",
+	}}
+	envOverride := accOverride.GetPersonaEnvelope()
+	require.True(t, envOverride.Enabled)
+	require.Equal(t, 4, envOverride.MaxConcurrency) // 手动覆盖
+	require.Equal(t, 300, envOverride.DailyCap)     // 手动覆盖
+	require.Equal(t, "America/Los_Angeles", envOverride.Timezone) // 手动覆盖
+	require.Equal(t, "en-US", envOverride.Locale)                  // 预设默认值
+
+	// 无预设无 persona → 全部为零值
+	accNone := &Account{Concurrency: 5, Extra: map[string]any{}}
+	envNone := accNone.GetPersonaEnvelope()
+	require.False(t, envNone.Enabled)
+	require.Equal(t, 0, envNone.MaxConcurrency)
+}
+
+func TestThrottleFactor(t *testing.T) {
+	// 无数据 → 全速
+	require.InDelta(t, 1.0, throttleFactor(0), 0.01)
+	require.InDelta(t, 1.0, throttleFactor(-1), 0.01)
+
+	// 低利用率 → 全速
+	require.InDelta(t, 1.0, throttleFactor(0.20), 0.01)
+	require.InDelta(t, 1.0, throttleFactor(0.49), 0.01)
+
+	// 50% 边界
+	require.InDelta(t, 1.0, throttleFactor(0.50), 0.01)
+
+	// 中等利用率 → 线性下降
+	require.InDelta(t, 0.75, throttleFactor(0.65), 0.01) // 50-80 区间中点
+
+	// 80% 边界
+	require.InDelta(t, 0.50, throttleFactor(0.80), 0.01)
+
+	// 高利用率 → 继续下降
+	require.InDelta(t, 0.30, throttleFactor(0.90), 0.05) // 大约在中间
+
+	// 95% 边界（>= 0.95 进入最低档 0.1）
+	require.InDelta(t, 0.10, throttleFactor(0.95), 0.01)
+
+	// 超高 → 最低
+	require.InDelta(t, 0.10, throttleFactor(0.99), 0.01)
+	require.InDelta(t, 0.10, throttleFactor(1.00), 0.01)
+}
+
+func TestDynamicConcurrency(t *testing.T) {
+	// 无利用率 → 返回 base
+	env := PersonaEnvelope{Enabled: true, MaxConcurrency: 5}
+	require.Equal(t, 5, env.DynamicConcurrency(5))
+
+	// 低利用率 → 保持 base
+	envLow := PersonaEnvelope{Enabled: true, Utilization5h: 0.3, Utilization7d: 0.2}
+	require.Equal(t, 5, envLow.DynamicConcurrency(5))
+
+	// 5h 高利用率 → 减速
+	envHigh5h := PersonaEnvelope{Enabled: true, Utilization5h: 0.85}
+	result := envHigh5h.DynamicConcurrency(5)
+	require.True(t, result < 5, "should reduce from base 5, got %d", result)
+	require.True(t, result >= 1, "should be at least 1, got %d", result)
+
+	// 7d 高利用率 → 减速
+	envHigh7d := PersonaEnvelope{Enabled: true, Utilization7d: 0.90}
+	result7d := envHigh7d.DynamicConcurrency(5)
+	require.True(t, result7d < 5, "should reduce from base 5, got %d", result7d)
+
+	// 两个都高 → 取更低的因子
+	envBothHigh := PersonaEnvelope{Enabled: true, Utilization5h: 0.60, Utilization7d: 0.90}
+	resultBoth := envBothHigh.DynamicConcurrency(5)
+	require.True(t, resultBoth <= result7d, "should not exceed 7d-only result")
+
+	// 极高利用率 → 最低并发
+	envExtreme := PersonaEnvelope{Enabled: true, Utilization5h: 0.99, Utilization7d: 0.99}
+	require.Equal(t, 1, envExtreme.DynamicConcurrency(5))
+
+	// base 为 0 或负数 → 返回 1
+	require.Equal(t, 1, env.DynamicConcurrency(0))
+	require.Equal(t, 1, env.DynamicConcurrency(-1))
+}
+
+func TestPresetAccount_DynamicConcurrency_WithUtilization(t *testing.T) {
+	// balanced preset + 低利用率 → base=3
+	accLow := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:            "balanced",
+		extraSessionWindowUtilization: 0.2,
+	}}
+	require.Equal(t, 3, accLow.EffectivePersonaConcurrency())
+
+	// balanced preset + 高利用率 → 降速
+	accHigh := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:            "balanced",
+		extraSessionWindowUtilization: 0.85,
+	}}
+	result := accHigh.EffectivePersonaConcurrency()
+	require.True(t, result < 3 && result >= 1,
+		"balanced base=3 at 85%% utilization should reduce, got %d", result)
+
+	// aggressive preset + 极高利用率 → 最低
+	accExtreme := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset:            "aggressive",
+		extraSessionWindowUtilization: 0.99,
+		extraPassiveUsage7d:           0.98,
+	}}
+	require.Equal(t, 1, accExtreme.EffectivePersonaConcurrency())
+}
+
+func TestDynamicRPM(t *testing.T) {
+	// 无利用率 → 返回 base
+	env := PersonaEnvelope{Enabled: true}
+	require.Equal(t, 10, env.DynamicRPM(10))
+
+	// 低利用率 → 保持 base
+	envLow := PersonaEnvelope{Enabled: true, Utilization5h: 0.3}
+	require.Equal(t, 10, envLow.DynamicRPM(10))
+
+	// 高利用率 → 减速
+	envHigh := PersonaEnvelope{Enabled: true, Utilization5h: 0.85}
+	result := envHigh.DynamicRPM(10)
+	require.True(t, result < 10 && result >= 1,
+		"RPM should reduce at 85%% utilization, got %d", result)
+
+	// 极高利用率 → 最低
+	envExtreme := PersonaEnvelope{Enabled: true, Utilization5h: 0.99, Utilization7d: 0.99}
+	require.Equal(t, 1, envExtreme.DynamicRPM(10))
+
+	// base=0 → 保持 0（未配置）
+	require.Equal(t, 0, env.DynamicRPM(0))
+}
+
+func TestEffectivePersonaRPM(t *testing.T) {
+	// 未启用 persona → 返回原始 baseRPM
+	acc := &Account{Concurrency: 5, Extra: map[string]any{
+		"base_rpm": 20,
+	}}
+	require.Equal(t, 20, acc.EffectivePersonaRPM())
+
+	// 启用 preset + 低利用率 → 保持 baseRPM
+	accPreset := &Account{Concurrency: 5, Extra: map[string]any{
+		"base_rpm":                    20,
+		extraPersonaPreset:            "balanced",
+		extraSessionWindowUtilization: 0.2,
+	}}
+	require.Equal(t, 20, accPreset.EffectivePersonaRPM())
+
+	// 启用 preset + 高利用率 → RPM 降低
+	accHigh := &Account{Concurrency: 5, Extra: map[string]any{
+		"base_rpm":                    20,
+		extraPersonaPreset:            "balanced",
+		extraSessionWindowUtilization: 0.85,
+	}}
+	result := accHigh.EffectivePersonaRPM()
+	require.True(t, result < 20 && result >= 1,
+		"RPM should reduce at high utilization, got %d", result)
+
+	// 无 base_rpm + balanced → 使用档位推荐值 30
+	accNoRPM := &Account{Concurrency: 5, Extra: map[string]any{
+		extraPersonaPreset: "balanced",
+	}}
+	require.Equal(t, 30, accNoRPM.EffectivePersonaRPM())
+
+	// 显式 base_rpm 覆盖推荐值
+	accOverride := &Account{Concurrency: 5, Extra: map[string]any{
+		"base_rpm":         12,
+		extraPersonaPreset: "aggressive",
+	}}
+	require.Equal(t, 12, accOverride.EffectivePersonaRPM())
+
+	// 未启用 persona 且无 base_rpm → 0
+	require.Equal(t, 0, (&Account{Concurrency: 5}).EffectivePersonaRPM())
+}
+
+func TestIsPersonaEnabled_PresetVsManual(t *testing.T) {
+	// preset 生效
+	require.True(t, presetAccount("balanced").IsPersonaEnabled())
+	require.True(t, presetAccount("aggressive").IsPersonaEnabled())
+	require.True(t, presetAccount("conservative").IsPersonaEnabled())
+	// preset=off → 未启用
+	require.False(t, presetAccount("off").IsPersonaEnabled())
+	// 无预设 + 手动启用
+	require.True(t, personaAccount(true, 0).IsPersonaEnabled())
+	// 无预设 + 手动未启用
+	require.False(t, personaAccount(false, 0).IsPersonaEnabled())
+	// 空 extra
+	require.False(t, (&Account{Concurrency: 5}).IsPersonaEnabled())
 }

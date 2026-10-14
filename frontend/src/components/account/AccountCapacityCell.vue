@@ -189,49 +189,29 @@ const formatCost = (value: number | null | undefined) => {
 
 // ====== 人格 Persona ======
 const personaExtra = computed(() => (props.account.extra || {}) as Record<string, unknown>)
-const showPersona = computed(() => personaExtra.value.persona_enabled === true)
-const personaTz = computed(() =>
-  typeof personaExtra.value.persona_timezone === 'string' ? (personaExtra.value.persona_timezone as string) : ''
+const personaPreset = computed(() =>
+  typeof personaExtra.value.persona_preset === 'string' ? (personaExtra.value.persona_preset as string) : ''
 )
-const personaStart = computed(() =>
-  typeof personaExtra.value.persona_active_start_hour === 'number' ? (personaExtra.value.persona_active_start_hour as number) : null
-)
-const personaEnd = computed(() =>
-  typeof personaExtra.value.persona_active_end_hour === 'number' ? (personaExtra.value.persona_active_end_hour as number) : null
-)
-const personaHasWindow = computed(() => !(personaStart.value == null && personaEnd.value == null) && !(personaStart.value === 0 && personaEnd.value === 0))
-// 在班判定：无作息窗口视为恒在班；否则用浏览器 Intl 换算到人格时区的当前小时。
-const personaOnShift = computed(() => {
-  if (!personaHasWindow.value) return true
-  const start = personaStart.value ?? 0
-  const end = personaEnd.value ?? 24
-  let hour: number
-  try {
-    const s = new Date().toLocaleString('en-US', {
-      timeZone: personaTz.value || 'UTC',
-      hour12: false,
-      hour: '2-digit',
-    })
-    hour = parseInt(s, 10) % 24
-  } catch {
+const showPersona = computed(() => {
+  if (personaPreset.value === 'aggressive' || personaPreset.value === 'balanced' || personaPreset.value === 'conservative') {
     return true
   }
-  return start < end ? hour >= start && hour < end : hour >= start || hour < end
+  return personaPreset.value !== 'off' && personaExtra.value.persona_enabled === true
 })
 const personaLabel = computed(() => {
-  const seg = personaTz.value ? personaTz.value.split('/').pop() : 'persona'
-  return seg || 'persona'
+  if (personaPreset.value === 'aggressive' || personaPreset.value === 'balanced' || personaPreset.value === 'conservative') {
+    return t(`admin.accounts.persona.presetShort.${personaPreset.value}`)
+  }
+  return 'persona'
 })
 const personaClass = computed(() =>
-  personaOnShift.value
-    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-    : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
 )
 const personaTooltip = computed(() => {
-  const parts = ['Persona ' + (personaOnShift.value ? '· on shift' : '· off shift')]
-  if (personaTz.value) parts.push(personaTz.value)
-  if (personaHasWindow.value) parts.push(`${personaStart.value ?? 0}:00-${personaEnd.value ?? 24}:00`)
-  return parts.join(' · ')
+  if (personaPreset.value === 'aggressive' || personaPreset.value === 'balanced' || personaPreset.value === 'conservative') {
+    return t(`admin.accounts.persona.presetOptions.${personaPreset.value}`)
+  }
+  return t('admin.accounts.persona.label')
 })
 
 // ====== 配额 ======

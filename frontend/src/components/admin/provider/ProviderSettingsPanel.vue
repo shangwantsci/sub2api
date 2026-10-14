@@ -290,6 +290,9 @@
                 <th class="px-3 py-2 text-left text-xs uppercase text-gray-500">
                   {{ t('admin.providerSettings.colWindowCost') }}
                 </th>
+                <th class="px-3 py-2 text-left text-xs uppercase text-gray-500">
+                  {{ t('admin.providerSettings.colPersonaPreset') }}
+                </th>
                 <th class="px-3 py-2 text-right text-xs uppercase text-gray-500"></th>
               </tr>
             </thead>
@@ -339,6 +342,15 @@
                     class="input w-24 py-1 text-sm"
                     :class="errors[`tier_window_${tier.tier}`] ? 'border-red-500' : ''"
                   />
+                </td>
+                <td class="px-3 py-2">
+                  <select v-model="tier.persona_preset" class="input w-28 py-1 text-sm">
+                    <option value="">{{ t('admin.providerSettings.personaPresetNone') }}</option>
+                    <option value="off">{{ t('admin.providerSettings.personaPresetOff') }}</option>
+                    <option value="conservative">{{ t('admin.providerSettings.personaPresetConservative') }}</option>
+                    <option value="balanced">{{ t('admin.providerSettings.personaPresetBalanced') }}</option>
+                    <option value="aggressive">{{ t('admin.providerSettings.personaPresetAggressive') }}</option>
+                  </select>
                 </td>
                 <td class="px-3 py-2 text-right">
                   <button
@@ -654,6 +666,9 @@ async function load() {
     const data = await adminAPI.providers.getSettings()
     availableGroups.value = data.available_groups ?? []
     const { available_groups: _ignored, ...rest } = data
+    for (const tier of rest.capacity_tiers ?? []) {
+      tier.persona_preset = tier.persona_preset || ''
+    }
     settings.value = rest
     savedSnapshot.value = JSON.stringify(rest)
   } catch (error) {

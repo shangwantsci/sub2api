@@ -425,7 +425,7 @@ var allowedHeaders = map[string]bool{
 	"anthropic-version":                         true,
 	"x-app":                                     true,
 	"anthropic-beta":                            true,
-	"accept-language":                           true,
+	"accept-language":                           false,
 	"sec-fetch-mode":                            true,
 	"user-agent":                                true,
 	"content-type":                              true,

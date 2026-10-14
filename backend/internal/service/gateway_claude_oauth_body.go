@@ -1677,6 +1677,25 @@ func (s *GatewayService) normalizeClientDatelineIfEnabled(ctx context.Context, a
 	return next, true
 }
 
+// normalizeClaudePromptEnv 补齐账号机器档案，并把正文里的环境小节换成这套档案。
+// 档案写入失败时返回 false，调用方保持原正文。
+func (s *GatewayService) normalizeClaudePromptEnv(ctx context.Context, account *Account, body []byte) ([]byte, bool) {
+	profile, ok := s.ensureClaudeMachineProfile(ctx, account)
+	if !ok {
+		return nil, false
+	}
+	next, changed := anthropicfp.NormalizePromptEnv(body, anthropicfp.PromptEnv{
+		Platform:   profile.Platform,
+		Shell:      profile.Shell,
+		OSVersion:  profile.OSVersion,
+		WorkingDir: profile.WorkingDir(),
+	})
+	if !changed {
+		return nil, false
+	}
+	return next, true
+}
+
 type claudeOAuthSystemPromptMode string
 
 const (

@@ -180,6 +180,32 @@ func getHeaderOrDefault(headers http.Header, key, defaultValue string) string {
 	return defaultValue
 }
 
+// CachedClientID 返回 Redis 里已经为这个账号生成过的设备号。没有则返回空。
+func (s *IdentityService) CachedClientID(ctx context.Context, accountID int64) string {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return ""
+	}
+	fp, err := s.cache.GetFingerprint(ctx, accountID)
+	if err != nil || fp == nil {
+		return ""
+	}
+	return fp.ClientID
+}
+
+// AlignClientID 把指纹缓存里的 ClientID 改成账号上的永久设备号。
+func (s *IdentityService) AlignClientID(ctx context.Context, accountID int64, fp *Fingerprint, deviceID string) {
+	if s == nil || fp == nil || accountID <= 0 || !isClaudeDeviceID(deviceID) || fp.ClientID == deviceID {
+		return
+	}
+	fp.ClientID = deviceID
+	fp.UpdatedAt = time.Now().Unix()
+	if s.cache != nil {
+		if err := s.cache.SetFingerprint(ctx, accountID, fp); err != nil {
+			logger.LegacyPrintf("service.identity", "Warning: failed to align client id for account %d: %v", accountID, err)
+		}
+	}
+}
+
 // ApplyFingerprint 将指纹应用到请求头（覆盖原有的x-stainless-*头）
 // 使用 setHeaderRaw 保持原始大小写（如 X-Stainless-OS 而非 X-Stainless-Os）
 func (s *IdentityService) ApplyFingerprint(req *http.Request, fp *Fingerprint) {

@@ -728,15 +728,31 @@ export default {
 	  autoPause5hDisabled: '禁用 5h 自动暂停',
 	  autoPause7dDisabled: '禁用 7d 自动暂停',
 	  autoPauseDisabledHint: '开启后该账号永不进入自动暂停（即使全局默认阈值已配置）。',
-      // Persona envelope (Anthropic OAuth/SetupToken; 需系统设置里"账号人格门控"全局开关同时开启)
+      // 防封预设 (Anthropic OAuth/SetupToken)
       persona: {
-        label: '人格 / Persona',
-        hint: '把该账号整形成"一个在本机用 Claude Code 的真人"：按人格时区作息调度、压低并发。仅当系统设置里的"账号人格门控"全局开关同时开启时才生效；此处仅编辑本账号档位。',
+        label: '防封策略',
+        hint: '选择防封预设档位，系统自动控制并发和 RPM（基于利用率动态调节），并在使用高峰期穿插养号活动。配了就生效，无需额外开关。',
+        preset: '防封档位',
+        presetHint: '选择适合该账号的防封策略。并发和 RPM 会根据 5h/7d 利用率自动动态调节，不需要手动设置。',
+        presetOptions: {
+          none: '不设置（手动配置）',
+          off: '关闭防封',
+          aggressive: '激进（并发 5，每分钟 50 次）',
+          balanced: '均衡（并发 3，每分钟 30 次，推荐）',
+          conservative: '保守（并发 2，每分钟 15 次）',
+        },
+        presetShort: {
+          aggressive: '激进',
+          balanced: '均衡',
+          conservative: '保守',
+        },
+        advancedToggle: '高级设置',
+        advancedHint: '手动覆盖预设参数。留空使用预设默认值。',
         timezone: '时区 (IANA)',
         timezonePlaceholder: '请选择时区',
-        timezoneHint: '默认按代理出口国家自动识别；也可直接选择东八区、新加坡、日本或美国常用时区。',
+        timezoneHint: '预设模式默认美东时区。也可手动选择。',
         locale: 'Locale',
-        localeHint: '默认跟随代理国家/所选时区；仅作组织标记，不写入任何出站请求头。',
+        localeHint: '预设模式默认 en-US。仅作组织标记，不写入出站请求头。',
         customOption: '历史自定义值：{value}',
         timezoneOptions: {
           auto: '自动（根据代理出口国家，推荐）',
@@ -757,11 +773,11 @@ export default {
         },
         activeStart: '活跃起始小时 (0-23)',
         activeEnd: '活跃结束小时 (1-24)',
-        activeHint: '作息窗口（当地时区）。起<终为当日窗口；起>终为跨夜窗口；起=终不允许（歧义）。两者留空则不做作息门控；全天用 0/24。',
-        maxConcurrency: '并发上限',
+        activeHint: '作息窗口（当地时区）。预设模式下不使用作息限制。',
+        maxConcurrency: '并发上限（覆盖预设）',
         dailyCap: '日请求上限 (0=不限)',
-        dailyCapHint: '按人格时区跨日零点重置；命中上限后该账号当日不再被调度（fail-open：计数异常时不拦截）。',
-        createDefaultHint: '新建账号默认开启人格并把并发压到 2（Tier A 养号）。仅当系统设置里的"账号人格门控"全局开关开启时才真正生效，且不影响任何存量账号。若这是美国 IP 老号或不希望被压并发，请在此关闭。',
+        dailyCapHint: '预设模式默认不限。动态并发+RPM 已自动控制节奏。',
+        createDefaultHint: '推荐选择"均衡"档位。系统自动根据利用率动态调节并发和 RPM，并在使用高峰期自动养号。',
       },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {

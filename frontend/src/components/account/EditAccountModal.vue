@@ -2407,74 +2407,76 @@
           </div>
         </div>
 
-        <!-- 人格 / Persona（作息 + 并发 + 本地化；需全局 enable_persona_gating 同时开启才生效） -->
+        <!-- 防封策略（预设档位 + 可选高级设置） -->
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.persona.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.persona.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="personaEnabled = !personaEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                personaEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  personaEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.persona.label') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.persona.hint') }}
+            </p>
           </div>
-          <div v-if="personaEnabled" class="mt-3 space-y-3">
+          <div class="mt-3 space-y-3">
+            <!-- 防封档位下拉框 -->
             <div>
-              <label class="input-label">{{ t('admin.accounts.persona.timezone') }}</label>
-              <Select
-                v-model="personaTimezone"
-                data-testid="persona-timezone-select"
-                :options="personaTimezoneOptions"
-                :searchable="false"
-              />
-              <p class="input-hint">{{ t('admin.accounts.persona.timezoneHint') }}</p>
+              <label class="input-label">{{ t('admin.accounts.persona.preset') }}</label>
+              <select
+                v-model="personaPreset"
+                class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
+              >
+                <option value="">{{ t('admin.accounts.persona.presetOptions.none') }}</option>
+                <option value="off">{{ t('admin.accounts.persona.presetOptions.off') }}</option>
+                <option value="aggressive">{{ t('admin.accounts.persona.presetOptions.aggressive') }}</option>
+                <option value="balanced">{{ t('admin.accounts.persona.presetOptions.balanced') }}</option>
+                <option value="conservative">{{ t('admin.accounts.persona.presetOptions.conservative') }}</option>
+              </select>
+              <p class="input-hint">{{ t('admin.accounts.persona.presetHint') }}</p>
             </div>
-            <div>
-              <label class="input-label">{{ t('admin.accounts.persona.locale') }}</label>
-              <Select
-                v-model="personaLocale"
-                data-testid="persona-locale-select"
-                :options="personaLocaleOptions"
-                :searchable="false"
-              />
-              <p class="input-hint">{{ t('admin.accounts.persona.localeHint') }}</p>
+
+            <!-- 高级设置折叠区 -->
+            <div v-if="personaPreset !== 'off'">
+              <button
+                type="button"
+                class="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                @click="personaAdvancedOpen = !personaAdvancedOpen"
+              >
+                <svg :class="['h-3 w-3 transition-transform', personaAdvancedOpen ? 'rotate-90' : '']" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                {{ t('admin.accounts.persona.advancedToggle') }}
+              </button>
+              <div v-if="personaAdvancedOpen" class="mt-2 space-y-3 border-l-2 border-gray-200 pl-3 dark:border-dark-500">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.persona.advancedHint') }}</p>
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.persona.timezone') }}</label>
+                  <Select
+                    v-model="personaTimezone"
+                    data-testid="persona-timezone-select"
+                    :options="personaTimezoneOptions"
+                    :searchable="false"
+                  />
+                  <p class="input-hint">{{ t('admin.accounts.persona.timezoneHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.persona.locale') }}</label>
+                  <Select
+                    v-model="personaLocale"
+                    data-testid="persona-locale-select"
+                    :options="personaLocaleOptions"
+                    :searchable="false"
+                  />
+                  <p class="input-hint">{{ t('admin.accounts.persona.localeHint') }}</p>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="input-label">{{ t('admin.accounts.persona.maxConcurrency') }}</label>
+                    <input v-model.number="personaMaxConcurrency" type="number" min="0" class="input" placeholder="" />
+                  </div>
+                  <div>
+                    <label class="input-label">{{ t('admin.accounts.persona.dailyCap') }}</label>
+                    <input v-model.number="personaDailyCap" type="number" min="0" class="input" placeholder="0" />
+                  </div>
+                </div>
+                <p class="input-hint">{{ t('admin.accounts.persona.dailyCapHint') }}</p>
+              </div>
             </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="input-label">{{ t('admin.accounts.persona.activeStart') }}</label>
-                <input v-model.number="personaActiveStart" type="number" min="0" max="23" class="input" placeholder="9" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.accounts.persona.activeEnd') }}</label>
-                <input v-model.number="personaActiveEnd" type="number" min="1" max="24" class="input" placeholder="24" />
-              </div>
-            </div>
-            <p class="input-hint">{{ t('admin.accounts.persona.activeHint') }}</p>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="input-label">{{ t('admin.accounts.persona.maxConcurrency') }}</label>
-                <input v-model.number="personaMaxConcurrency" type="number" min="0" class="input" placeholder="2" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.accounts.persona.dailyCap') }}</label>
-                <input v-model.number="personaDailyCap" type="number" min="0" class="input" placeholder="0" />
-              </div>
-            </div>
-            <p class="input-hint">{{ t('admin.accounts.persona.dailyCapHint') }}</p>
           </div>
         </div>
 
@@ -2983,8 +2985,10 @@ const baseRpm = ref<number | null>(null)
 const rpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
 const rpmStickyBuffer = ref<number | null>(null)
 
-// Persona envelope state (Anthropic OAuth/SetupToken only; stored in account.extra).
-// 需全局 enable_persona_gating 同时开启才生效；此处仅编辑每账号档位。
+// 防封策略 (Anthropic OAuth/SetupToken only; stored in account.extra).
+// 配了 preset 就自动生效，无需全局开关。
+const personaPreset = ref('')
+const personaAdvancedOpen = ref(false)
 const personaEnabled = ref(false)
 const personaTimezone = ref('')
 const personaLocale = ref('')
@@ -4020,6 +4024,8 @@ function loadQuotaControlSettings(account: Account) {
   cacheTTLOverrideTarget.value = '5m'
   customBaseUrlEnabled.value = false
   customBaseUrl.value = ''
+  personaPreset.value = ''
+  personaAdvancedOpen.value = false
   personaEnabled.value = false
   personaTimezone.value = ''
   personaLocale.value = ''
@@ -4051,9 +4057,14 @@ function loadQuotaControlSettings(account: Account) {
     sessionIdleTimeout.value = account.session_idle_timeout_minutes ?? 5
   }
 
-  // Persona envelope: read directly from extra (backend DTO does not promote persona_* keys).
+  // 防封策略: read directly from extra (backend DTO does not promote persona_* keys).
   {
     const ex = (account.extra || {}) as Record<string, unknown>
+    if (typeof ex.persona_preset === 'string' && ex.persona_preset) {
+      personaPreset.value = ex.persona_preset as string
+    } else {
+      personaPreset.value = ''
+    }
     personaEnabled.value = ex.persona_enabled === true
     if (typeof ex.persona_timezone === 'string') personaTimezone.value = ex.persona_timezone
     if (typeof ex.persona_locale === 'string') personaLocale.value = ex.persona_locale
@@ -4061,6 +4072,10 @@ function loadQuotaControlSettings(account: Account) {
     if (typeof ex.persona_active_end_hour === 'number') personaActiveEnd.value = ex.persona_active_end_hour
     if (typeof ex.persona_max_concurrency === 'number') personaMaxConcurrency.value = ex.persona_max_concurrency
     if (typeof ex.persona_daily_request_cap === 'number') personaDailyCap.value = ex.persona_daily_request_cap
+    // 有高级字段被手动设置时自动展开高级区域
+    if (personaTimezone.value || personaLocale.value || personaMaxConcurrency.value || personaDailyCap.value) {
+      personaAdvancedOpen.value = true
+    }
   }
 
   // RPM limit
@@ -4628,8 +4643,27 @@ const handleSubmit = async () => {
         delete newExtra.session_idle_timeout_minutes
       }
 
-      // Persona envelope settings (merge into extra like the quota-control keys).
-      if (personaEnabled.value) {
+      // 防封策略 (merge into extra like the quota-control keys).
+      // 预设模式：写入 persona_preset，后端自动推导其余参数。
+      if (personaPreset.value) {
+        newExtra.persona_preset = personaPreset.value
+        // preset 非 off 时，高级覆盖参数（留空则用预设默认值）
+        if (personaPreset.value !== 'off') {
+          if (personaTimezone.value.trim()) newExtra.persona_timezone = personaTimezone.value.trim()
+          else delete newExtra.persona_timezone
+          if (personaLocale.value.trim()) newExtra.persona_locale = personaLocale.value.trim()
+          else delete newExtra.persona_locale
+          if (personaMaxConcurrency.value != null && personaMaxConcurrency.value > 0) newExtra.persona_max_concurrency = personaMaxConcurrency.value
+          else delete newExtra.persona_max_concurrency
+          if (personaDailyCap.value != null && personaDailyCap.value > 0) newExtra.persona_daily_request_cap = personaDailyCap.value
+          else delete newExtra.persona_daily_request_cap
+        }
+        // preset 模式下清理旧字段
+        delete newExtra.persona_enabled
+        delete newExtra.persona_active_start_hour
+        delete newExtra.persona_active_end_hour
+      } else if (personaEnabled.value) {
+        // 旧模式兼容：无 preset 但手动启用了 persona
         newExtra.persona_enabled = true
         if (personaTimezone.value.trim()) newExtra.persona_timezone = personaTimezone.value.trim()
         else delete newExtra.persona_timezone
@@ -4643,7 +4677,9 @@ const handleSubmit = async () => {
         else delete newExtra.persona_max_concurrency
         if (personaDailyCap.value != null) newExtra.persona_daily_request_cap = personaDailyCap.value
         else delete newExtra.persona_daily_request_cap
+        delete newExtra.persona_preset
       } else {
+        delete newExtra.persona_preset
         delete newExtra.persona_enabled
         delete newExtra.persona_timezone
         delete newExtra.persona_locale

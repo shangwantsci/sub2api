@@ -1181,6 +1181,54 @@
         </div>
       </div>
 
+      <!-- Persona Preset / 防封档位 (仅 Anthropic OAuth/SetupToken) -->
+      <div
+        v-if="allAnthropicOAuthOrSetupToken"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-persona-label"
+              class="input-label mb-0"
+              for="bulk-edit-persona-enabled"
+            >
+              {{ t('admin.accounts.persona.label') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.persona.hint') }}
+            </p>
+          </div>
+          <input
+            v-model="enablePersona"
+            id="bulk-edit-persona-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-persona-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-persona-body"
+          :class="!enablePersona && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-persona-label"
+        >
+          <select
+            v-model="personaPreset"
+            class="input w-full"
+          >
+            <option value="">{{ t('admin.accounts.persona.presetOptions.none') }}</option>
+            <option value="off">{{ t('admin.accounts.persona.presetOptions.off') }}</option>
+            <option value="aggressive">{{ t('admin.accounts.persona.presetOptions.aggressive') }}</option>
+            <option value="balanced">{{ t('admin.accounts.persona.presetOptions.balanced') }}</option>
+            <option value="conservative">{{ t('admin.accounts.persona.presetOptions.conservative') }}</option>
+          </select>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.persona.presetHint') }}
+          </p>
+        </div>
+      </div>
+
       <!-- Groups -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1421,6 +1469,7 @@ const enableCodexCLIOnlyAppServer = ref(false)
 const enableOpenAICompactMode = ref(false)
 const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
+const enablePersona = ref(false)
 
 // State - field values
 const submitting = ref(false)
@@ -1486,6 +1535,7 @@ const bulkBaseRpm = ref<number | null>(null)
 const bulkRpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
 const bulkRpmStickyBuffer = ref<number | null>(null)
 const userMsgQueueMode = ref<string | null>(null)
+const personaPreset = ref('balanced')
 const umqModeOptions = computed(() => [
   { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },
   { value: 'throttle', label: t('admin.accounts.quotaControl.rpmLimit.umqModeThrottle') },
@@ -1780,6 +1830,16 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.extra = extra
   }
 
+  // Persona preset (写入 extra 字段)
+  if (enablePersona.value) {
+    const extra = ensureExtra()
+    if (personaPreset.value) {
+      extra.persona_preset = personaPreset.value
+    } else {
+      extra.persona_preset = ''
+    }
+  }
+
   // UMQ mode（独立于 RPM 保存）
   if (userMsgQueueMode.value !== null) {
     const umqExtra = ensureExtra()
@@ -1861,6 +1921,7 @@ const handleSubmit = async () => {
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
     enableRpmLimit.value ||
+    enablePersona.value ||
     userMsgQueueMode.value !== null
 
   if (!hasAnyFieldEnabled) {
@@ -1989,6 +2050,7 @@ watch(
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
+      enablePersona.value = false
 
       // Reset all values
       baseUrl.value = ''
@@ -2019,6 +2081,7 @@ watch(
       bulkRpmStrategy.value = 'tiered'
       bulkRpmStickyBuffer.value = null
       userMsgQueueMode.value = null
+      personaPreset.value = 'balanced'
 
       // Reset mixed channel warning state
       showMixedChannelWarning.value = false

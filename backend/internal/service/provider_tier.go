@@ -38,11 +38,13 @@ const (
 // providerTierExtraKeys 是档位写入 extra 的键集合。
 //
 // 「应用到存量」严格只增量合并这几个键，绝不整体覆盖 extra，否则会清掉
-// persona_*、window_cost_sticky_reserve、quota_*、privacy_mode 等另行配置的持久设置。
+// window_cost_sticky_reserve、quota_*、privacy_mode 等另行配置的持久设置。
+// persona_preset 是唯一允许通过 tier 写入的 persona_ 键。
 var providerTierExtraKeys = []string{
 	extraKeyMaxSessions,
 	extraKeyBaseRPM,
 	extraKeyWindowCostLimit,
+	extraPersonaPreset,
 }
 
 // ProviderCustomTierInput 是供号商在自定义档下可以自行设置的参数。
@@ -69,6 +71,7 @@ type ResolvedProviderTier struct {
 	WindowCostLimit float64
 	IdleTimeoutMin  int    // 0 = 用系统默认
 	RPMStrategy     string // "" = 用系统默认 (tiered)
+	PersonaPreset   string // "" = 不设防封预设；balanced/aggressive/conservative/off
 }
 
 // ResolveProviderTier 把所选档位翻译成建账号参数。
@@ -107,6 +110,7 @@ func ResolveProviderTier(
 		MaxSessions:     def.MaxSessions,
 		BaseRPM:         def.BaseRPM,
 		WindowCostLimit: def.WindowCostLimit,
+		PersonaPreset:   def.PersonaPreset,
 	}, nil
 }
 
@@ -184,6 +188,12 @@ func ApplyProviderTierToExtra(extra map[string]any, tier ResolvedProviderTier) m
 	}
 	if tier.RPMStrategy != "" {
 		out[extraKeyRPMStrategy] = tier.RPMStrategy
+	}
+	// 档位指定了防封预设时写入，让上号自动启用防封。
+	// 这是唯一允许通过 tier 机制写入 persona_* 键的路径——
+	// 供应商直接提交的 persona_* 仍被 SanitizeProviderExtra 丢弃。
+	if tier.PersonaPreset != "" && IsValidPreset(tier.PersonaPreset) {
+		out[extraPersonaPreset] = tier.PersonaPreset
 	}
 	return out
 }

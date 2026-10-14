@@ -80,6 +80,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			logger.LegacyPrintf("service.gateway", "Warning: failed to get fingerprint for account %d: %v", account.ID, err)
 			// 失败时降级为透传原始headers
 		} else {
+			alignClaudeDeviceID(ctx, s, account, fp)
 			if enableFP {
 				fingerprint = fp
 				billingUserAgent = fp.UserAgent
@@ -202,6 +203,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if tokenType == "oauth" && mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(calProfile, req, reqStream)
 	}
+	if account.IsAnthropicOAuthOrSetupToken() {
+		pinClaudeMachineHeaders(req)
+	}
 
 	// 写入最终 anthropic-beta header
 	// 注：透传分支白名单可能写入了客户端 anthropic-beta，无条件 Del 一次再按 finalBeta
@@ -213,6 +217,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 	// 同步 X-Claude-Code-Session-Id 头：始终从最终 body 的 metadata.user_id 派生。
 	syncClaudeCodeSessionHeaderFromBody(req, body)
+
+	// Accept-Language 统一设为美式英语，与美国出口 IP 一致。
+	setHeaderRaw(req.Header, "Accept-Language", "en-US,en;q=0.9")
 
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 放在所有 header 逻辑之后，确保配置值对同名头拥有最终决定权。

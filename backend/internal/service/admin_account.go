@@ -552,6 +552,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	}
 	// 人格地理默认：按代理出口国家 prefill 时区 / 一致性告警（fail-open）。
 	s.applyPersonaGeoDefaults(ctx, account.Extra, account.ProxyID)
+	if account.IsAnthropicOAuthOrSetupToken() {
+		account.Extra = applyClaudeMachineProfile(account.Extra)
+	}
 
 	// 账号与分组绑定必须同事务：分开写的话，绑组失败会让一个没有任何分组的账号
 	// 留在库里，而调用方收到的是错误，以为什么都没发生，于是去回滚它自己建的资源
@@ -667,6 +670,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				normalizedExtra[key] = v
 			}
 		}
+		preserveClaudeMachineProfile(account.Extra, normalizedExtra)
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
