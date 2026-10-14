@@ -197,6 +197,9 @@ func TestDefaultPricingIncludesOfficialGPT56Rates(t *testing.T) {
 		{model: "gpt-5.6-sol", input: 5e-6, cached: 0.5e-6, cacheWrite: 6.25e-6, output: 30e-6, inputPriority: 10e-6, cachedPriority: 1e-6, cacheWritePriority: 12.5e-6, outputPriority: 60e-6},
 		{model: "gpt-5.6-terra", input: 2.5e-6, cached: 0.25e-6, cacheWrite: 3.125e-6, output: 15e-6, inputPriority: 5e-6, cachedPriority: 0.5e-6, cacheWritePriority: 6.25e-6, outputPriority: 30e-6},
 		{model: "gpt-5.6-luna", input: 1e-6, cached: 0.1e-6, cacheWrite: 1.25e-6, output: 6e-6, inputPriority: 2e-6, cachedPriority: 0.2e-6, cacheWritePriority: 2.5e-6, outputPriority: 12e-6},
+		{model: "gpt-6.1-sol", input: 2e-6, cached: 0.1e-6, cacheWrite: 2.5e-6, output: 10e-6, inputPriority: 4e-6, cachedPriority: 0.2e-6, cacheWritePriority: 5e-6, outputPriority: 20e-6},
+		{model: "gpt-6-sol", input: 2e-6, cached: 0.2e-6, cacheWrite: 2.5e-6, output: 10e-6, inputPriority: 4e-6, cachedPriority: 0.4e-6, cacheWritePriority: 5e-6, outputPriority: 20e-6},
+		{model: "gpt-6-luna", input: 0.1e-6, cached: 0.01e-6, cacheWrite: 0.125e-6, output: 0.5e-6, inputPriority: 0.2e-6, cachedPriority: 0.02e-6, cacheWritePriority: 0.25e-6, outputPriority: 1e-6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
@@ -689,4 +692,27 @@ func TestListModelNamesByProvider_EmptyCatalog(t *testing.T) {
 	got := svc.ListModelNamesByProvider("openai")
 	require.NotNil(t, got)
 	require.Empty(t, got)
+}
+
+func TestBillingService_GPT6FallbackPrices(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, &PricingService{pricingData: map[string]*LiteLLMModelPricing{}})
+	tests := map[string]float64{
+		"gpt-6":       10e-6,
+		"gpt-6-astra": 10e-6,
+		"gpt-6.1-sol": 2e-6,
+		"gpt-6-sol":   2e-6,
+		"gpt-6-luna":  0.1e-6,
+	}
+	for model, input := range tests {
+		t.Run(model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.InDelta(t, input, pricing.InputPricePerToken, 1e-12)
+		})
+	}
+
+	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.True(t, openAISubscriptionLongContextExempt(oauth, &OpenAIForwardResult{UpstreamModel: "gpt-6.1-sol"}))
+	require.False(t, openAISubscriptionLongContextExempt(oauth, &OpenAIForwardResult{UpstreamModel: "gpt-6-sol"}))
+	require.False(t, openAISubscriptionLongContextExempt(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, &OpenAIForwardResult{UpstreamModel: "gpt-6.1-sol"}))
 }

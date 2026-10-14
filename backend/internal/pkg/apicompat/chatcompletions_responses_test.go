@@ -616,6 +616,26 @@ func TestChatCompletionsToResponses_TemperatureStrippedForReasoningModel(t *test
 	assert.NotContains(t, string(b), `"top_p"`)
 }
 
+func TestChatCompletionsToResponses_GPT6SolNoneKeepsSampling(t *testing.T) {
+	temp := 0.2
+	req := &ChatCompletionsRequest{
+		Model:           "gpt-6-sol",
+		Messages:        []ChatMessage{{Role: "user", Content: json.RawMessage(`"Hi"`)}},
+		Temperature:     &temp,
+		TopP:            &temp,
+		ReasoningEffort: "none",
+	}
+	resp, err := ChatCompletionsToResponses(req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Temperature)
+	assert.InDelta(t, 0.2, *resp.Temperature, 1e-9)
+
+	req.Model = "gpt-6.1-sol"
+	req.ReasoningEffort = "none"
+	_, err = ChatCompletionsToResponses(req)
+	require.Error(t, err)
+}
+
 func TestChatCompletionsToResponses_TemperaturePreservedForNonReasoningModel(t *testing.T) {
 	temp := 0.7
 	req := &ChatCompletionsRequest{

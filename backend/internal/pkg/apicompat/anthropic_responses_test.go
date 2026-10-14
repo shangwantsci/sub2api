@@ -1577,9 +1577,26 @@ func TestAnthropicToResponses_TemperatureStrippedForReasoningModel(t *testing.T)
 	assert.NotContains(t, string(b), `"top_p"`)
 }
 
+func TestAnthropicToResponses_GPT61SolKeepsMaxEffort(t *testing.T) {
+	req := &AnthropicRequest{
+		Model:        "gpt-6.1-sol",
+		MaxTokens:    1024,
+		Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"Hello"`)}},
+		OutputConfig: &AnthropicOutputConfig{Effort: "max"},
+	}
+	resp, err := AnthropicToResponses(req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.Reasoning)
+	assert.Equal(t, "max", resp.Reasoning.Effort)
+
+	req.OutputConfig.Effort = "none"
+	_, err = AnthropicToResponses(req)
+	require.Error(t, err)
+}
+
 func TestAnthropicToResponses_TemperatureStrippedForAllGpt5Variants(t *testing.T) {
 	temp := 1.0
-	models := []string{"gpt-5.2", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.5"}
+	models := []string{"gpt-5.2", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.5", "gpt-6", "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			req := &AnthropicRequest{

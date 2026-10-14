@@ -105,6 +105,11 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	// derive a stable seed from the final upstream model family.
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
+	chatReq.Model = upstreamModel
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	compatPromptCacheInjected := false
@@ -145,6 +150,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		for _, field := range cursorResponsesUnsupportedFields {
 			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
 				responsesBody = stripped
+			}
+		}
+		if shouldStripGPT6ResponsesSampling(upstreamModel, gjson.GetBytes(responsesBody, "reasoning.effort").String()) {
+			for _, field := range []string{"temperature", "top_p", "top_logprobs", "logprobs"} {
+				if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
+					responsesBody = stripped
+				}
 			}
 		}
 		responsesBody, normalizedServiceTier, err := normalizeResponsesBodyServiceTier(responsesBody)
