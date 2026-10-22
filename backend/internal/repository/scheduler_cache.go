@@ -833,44 +833,16 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	return filtered
 }
 
+// schedulerProjectedExtraKeys 是精简投影保留的 extra 键，来自 service 层的登记表：
+// 选号阶段读取的 extra 键必须登记在那里，见 service.SchedulerProjectedExtraKeys。
+var schedulerProjectedExtraKeys = service.SchedulerProjectedExtraKeys()
+
 func filterSchedulerExtra(extra map[string]any) map[string]any {
 	if len(extra) == 0 {
 		return nil
 	}
-	keys := []string{
-		"mixed_scheduling",
-		"window_cost_limit",
-		"window_cost_sticky_reserve",
-		"max_sessions",
-		"session_idle_timeout_minutes",
-		"openai_oauth_responses_websockets_v2_enabled",
-		"openai_oauth_responses_websockets_v2_mode",
-		"openai_apikey_responses_websockets_v2_enabled",
-		"openai_apikey_responses_websockets_v2_mode",
-		"responses_websockets_v2_enabled",
-		"openai_ws_enabled",
-		"openai_ws_force_http",
-		"openai_responses_mode",
-		"openai_responses_supported",
-		"codex_5h_used_percent",
-		"codex_7d_used_percent",
-		"codex_5h_reset_at",
-		"codex_7d_reset_at",
-		"codex_5h_reset_after_seconds",
-		"codex_7d_reset_after_seconds",
-		"codex_usage_updated_at",
-		"auto_pause_5h_threshold",
-		"auto_pause_7d_threshold",
-		"auto_pause_5h_disabled",
-		"auto_pause_7d_disabled",
-		"model_rate_limits",
-		"model_access_denials",
-		"passive_usage_7d_oi_utilization",
-		"passive_usage_7d_oi_reset",
-		"passive_usage_sampled_at",
-	}
 	filtered := make(map[string]any)
-	for _, key := range keys {
+	for _, key := range schedulerProjectedExtraKeys {
 		if value, ok := extra[key]; ok && value != nil {
 			filtered[key] = value
 		}
