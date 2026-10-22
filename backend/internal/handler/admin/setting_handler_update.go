@@ -312,10 +312,6 @@ type UpdateSettingsRequest struct {
 	// 风控中心功能开关
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
 
-	// 本地内容安全过滤
-	EnableContentSafetyFilter *bool   `json:"enable_content_safety_filter"`
-	ContentSafetyGuardMode    *string `json:"content_safety_guard_mode"`
-
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    *bool `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds *int  `json:"cyber_session_block_ttl_seconds"`
@@ -1569,18 +1565,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.RiskControlEnabled
 		}(),
-		EnableContentSafetyFilter: func() bool {
-			if req.EnableContentSafetyFilter != nil {
-				return *req.EnableContentSafetyFilter
-			}
-			return previousSettings.EnableContentSafetyFilter
-		}(),
-		ContentSafetyGuardMode: func() string {
-			if req.ContentSafetyGuardMode != nil {
-				return service.NormalizeContentSafetyGuardMode(*req.ContentSafetyGuardMode)
-			}
-			return previousSettings.ContentSafetyGuardMode
-		}(),
 		CyberSessionBlockEnabled: func() bool {
 			if req.CyberSessionBlockEnabled != nil {
 				return *req.CyberSessionBlockEnabled
@@ -1920,8 +1904,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SubscriptionExpiryNotifyEnabled:                        updatedSettings.SubscriptionExpiryNotifyEnabled,
 		AccountQuotaNotifyEnabled:                              updatedSettings.AccountQuotaNotifyEnabled,
 		AccountQuotaNotifyEmails:                               dto.NotifyEmailEntriesFromService(updatedSettings.AccountQuotaNotifyEmails),
-		EnableContentSafetyFilter:                              updatedSettings.EnableContentSafetyFilter,
-		ContentSafetyGuardMode:                                 updatedSettings.ContentSafetyGuardMode,
 		PaymentEnabled:                                         updatedPaymentCfg.Enabled,
 		PaymentMinAmount:                                       updatedPaymentCfg.MinAmount,
 		PaymentMaxAmount:                                       updatedPaymentCfg.MaxAmount,

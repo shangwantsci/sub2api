@@ -410,12 +410,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.ClaudeMimicryGuardMode != after.ClaudeMimicryGuardMode {
 		changed = append(changed, "claude_mimicry_guard_mode")
 	}
-	if before.EnableContentSafetyFilter != after.EnableContentSafetyFilter {
-		changed = append(changed, "enable_content_safety_filter")
-	}
-	if before.ContentSafetyGuardMode != after.ContentSafetyGuardMode {
-		changed = append(changed, "content_safety_guard_mode")
-	}
 	if before.EnableClaudeOAuthSystemPromptInjection != after.EnableClaudeOAuthSystemPromptInjection {
 		changed = append(changed, "enable_claude_oauth_system_prompt_injection")
 	}

@@ -120,6 +120,13 @@ func contentModerationProvider(apiKey *service.APIKey) string {
 	return strings.TrimSpace(apiKey.Group.Platform)
 }
 
+func contentReviewPolicyForAPIKey(apiKey *service.APIKey) string {
+	if apiKey == nil || apiKey.Group == nil {
+		return service.GroupPolicyInherit
+	}
+	return apiKey.Group.AnthropicContentReviewPolicy()
+}
+
 func contentModerationRequestID(ctx context.Context) string {
 	if ctx == nil {
 		return ""

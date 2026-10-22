@@ -973,8 +973,8 @@ export default {
       },
       anthropicPolicies: {
         title: 'Anthropic 客户策略',
-        contentReview: '内容安全与敏感词审查',
-        contentReviewHint: '控制本地内容安全和风控中心审查；启用时仍沿用全局审查模式、关键词和阈值。',
+        contentReview: '风控中心内容审计',
+        contentReviewHint: '仅作用于风控中心的内容审计：继承=按风控中心的分组范围；开启=强制纳入审计；关闭=该分组不审计。开启时仍需风控中心与内容审计已启用，并沿用全局审查模式、关键词和阈值。',
         systemPrompt: 'Claude OAuth System 注入',
         systemPromptHint: '仅影响第三方客户端经 OAuth/SetupToken 的伪装路径；“仅必要身份”只注入动态 billing 与 Claude Code 身份块，不注入长扩展提示词。',
         inherit: '继承全局',

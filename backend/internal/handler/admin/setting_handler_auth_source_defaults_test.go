@@ -602,7 +602,7 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "force_email_on_third_party_signup")
 }
 
-func TestSettingHandler_UpdateSettings_MimicryAndContentSafety(t *testing.T) {
+func TestSettingHandler_UpdateSettings_Mimicry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{
 		service.SettingKeyPromoCodeEnabled: "true",
@@ -611,11 +611,9 @@ func TestSettingHandler_UpdateSettings_MimicryAndContentSafety(t *testing.T) {
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":           true,
-		"claude_code_mimicry_profile":  claude.DefaultClaudeCodeMimicryProfileID,
-		"claude_mimicry_guard_mode":    "block",
-		"enable_content_safety_filter": false,
-		"content_safety_guard_mode":    "warn",
+		"promo_code_enabled":          true,
+		"claude_code_mimicry_profile": claude.DefaultClaudeCodeMimicryProfileID,
+		"claude_mimicry_guard_mode":   "block",
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -630,8 +628,6 @@ func TestSettingHandler_UpdateSettings_MimicryAndContentSafety(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.lastUpdates[service.SettingKeyClaudeCodeMimicryProfile])
 	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyClaudeMimicryGuardMode])
-	require.Equal(t, "false", repo.lastUpdates[service.SettingKeyEnableContentSafetyFilter])
-	require.Equal(t, "warn", repo.lastUpdates[service.SettingKeyContentSafetyGuardMode])
 
 	var resp response.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -639,18 +635,14 @@ func TestSettingHandler_UpdateSettings_MimicryAndContentSafety(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, data["claude_code_mimicry_profile"])
 	require.Equal(t, "block", data["claude_mimicry_guard_mode"])
-	require.Equal(t, false, data["enable_content_safety_filter"])
-	require.Equal(t, "warn", data["content_safety_guard_mode"])
 }
 
-func TestSettingHandler_UpdateSettings_PreservesOmittedMimicryAndContentSafety(t *testing.T) {
+func TestSettingHandler_UpdateSettings_PreservesOmittedMimicry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{
-		service.SettingKeyPromoCodeEnabled:          "true",
-		service.SettingKeyClaudeCodeMimicryProfile:  claude.DefaultClaudeCodeMimicryProfileID,
-		service.SettingKeyClaudeMimicryGuardMode:    "block",
-		service.SettingKeyEnableContentSafetyFilter: "false",
-		service.SettingKeyContentSafetyGuardMode:    "warn",
+		service.SettingKeyPromoCodeEnabled:         "true",
+		service.SettingKeyClaudeCodeMimicryProfile: claude.DefaultClaudeCodeMimicryProfileID,
+		service.SettingKeyClaudeMimicryGuardMode:   "block",
 	}}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
@@ -667,11 +659,9 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedMimicryAndContentSafety(t
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.lastUpdates[service.SettingKeyClaudeCodeMimicryProfile])
 	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyClaudeMimicryGuardMode])
-	require.Equal(t, "false", repo.lastUpdates[service.SettingKeyEnableContentSafetyFilter])
-	require.Equal(t, "warn", repo.lastUpdates[service.SettingKeyContentSafetyGuardMode])
 }
 
-func TestSettingHandler_UpdateSettings_NormalizesMimicryAndContentSafety(t *testing.T) {
+func TestSettingHandler_UpdateSettings_NormalizesMimicry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{
 		service.SettingKeyPromoCodeEnabled: "true",
@@ -680,11 +670,9 @@ func TestSettingHandler_UpdateSettings_NormalizesMimicryAndContentSafety(t *test
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":           true,
-		"claude_code_mimicry_profile":  "  unknown-profile  ",
-		"claude_mimicry_guard_mode":    " BLOCK ",
-		"enable_content_safety_filter": true,
-		"content_safety_guard_mode":    " invalid ",
+		"promo_code_enabled":          true,
+		"claude_code_mimicry_profile": "  unknown-profile  ",
+		"claude_mimicry_guard_mode":   " BLOCK ",
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -698,22 +686,16 @@ func TestSettingHandler_UpdateSettings_NormalizesMimicryAndContentSafety(t *test
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.lastUpdates[service.SettingKeyClaudeCodeMimicryProfile])
 	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyClaudeMimicryGuardMode])
-	require.Equal(t, "true", repo.lastUpdates[service.SettingKeyEnableContentSafetyFilter])
-	require.Equal(t, "block", repo.lastUpdates[service.SettingKeyContentSafetyGuardMode])
 }
 
-func TestDiffSettings_DetectsMimicryAndContentSafety(t *testing.T) {
+func TestDiffSettings_DetectsMimicry(t *testing.T) {
 	before := &service.SystemSettings{
-		ClaudeCodeMimicryProfile:  "legacy-profile",
-		ClaudeMimicryGuardMode:    "warn",
-		EnableContentSafetyFilter: true,
-		ContentSafetyGuardMode:    "block",
+		ClaudeCodeMimicryProfile: "legacy-profile",
+		ClaudeMimicryGuardMode:   "warn",
 	}
 	after := &service.SystemSettings{
-		ClaudeCodeMimicryProfile:  claude.DefaultClaudeCodeMimicryProfileID,
-		ClaudeMimicryGuardMode:    "block",
-		EnableContentSafetyFilter: false,
-		ContentSafetyGuardMode:    "warn",
+		ClaudeCodeMimicryProfile: claude.DefaultClaudeCodeMimicryProfileID,
+		ClaudeMimicryGuardMode:   "block",
 	}
 	authDefaults := &service.AuthSourceDefaultSettings{}
 
@@ -722,7 +704,5 @@ func TestDiffSettings_DetectsMimicryAndContentSafety(t *testing.T) {
 	require.Equal(t, []string{
 		service.SettingKeyClaudeCodeMimicryProfile,
 		service.SettingKeyClaudeMimicryGuardMode,
-		service.SettingKeyEnableContentSafetyFilter,
-		service.SettingKeyContentSafetyGuardMode,
 	}, changed)
 }

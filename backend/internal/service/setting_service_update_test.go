@@ -512,47 +512,37 @@ func TestSettingService_UpdateSettings_RejectsInvalidPaymentVisibleMethodSource(
 	require.Nil(t, repo.updates)
 }
 
-func TestSettingService_InitializeDefaultSettings_MimicryAndContentSafetyDefaults(t *testing.T) {
+func TestSettingService_InitializeDefaultSettings_MimicryDefaults(t *testing.T) {
 	repo := &settingInitializeRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
 
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.updates[SettingKeyClaudeCodeMimicryProfile])
 	require.Equal(t, claudeMimicryGuardWarn, repo.updates[SettingKeyClaudeMimicryGuardMode])
-	require.Equal(t, "true", repo.updates[SettingKeyEnableContentSafetyFilter])
-	require.Equal(t, ContentSafetyGuardModeBlock, repo.updates[SettingKeyContentSafetyGuardMode])
 }
 
-func TestSettingService_ParseSettings_MimicryAndContentSafetyDefaults(t *testing.T) {
+func TestSettingService_ParseSettings_MimicryDefaults(t *testing.T) {
 	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
 
 	got := svc.parseSettings(map[string]string{})
 
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, got.ClaudeCodeMimicryProfile)
 	require.Equal(t, claudeMimicryGuardWarn, got.ClaudeMimicryGuardMode)
-	require.True(t, got.EnableContentSafetyFilter)
-	require.Equal(t, ContentSafetyGuardModeBlock, got.ContentSafetyGuardMode)
 }
 
-func TestSettingService_UpdateSettings_MimicryAndContentSafetyRoundTrip(t *testing.T) {
+func TestSettingService_UpdateSettings_MimicryRoundTrip(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		ClaudeCodeMimicryProfile:  "unknown-profile",
-		ClaudeMimicryGuardMode:    " BLOCK ",
-		EnableContentSafetyFilter: false,
-		ContentSafetyGuardMode:    " WARN ",
+		ClaudeCodeMimicryProfile: "unknown-profile",
+		ClaudeMimicryGuardMode:   " BLOCK ",
 	})
 	require.NoError(t, err)
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.updates[SettingKeyClaudeCodeMimicryProfile])
 	require.Equal(t, claudeMimicryGuardBlock, repo.updates[SettingKeyClaudeMimicryGuardMode])
-	require.Equal(t, "false", repo.updates[SettingKeyEnableContentSafetyFilter])
-	require.Equal(t, ContentSafetyGuardModeWarn, repo.updates[SettingKeyContentSafetyGuardMode])
 
 	got := svc.parseSettings(repo.updates)
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, got.ClaudeCodeMimicryProfile)
 	require.Equal(t, claudeMimicryGuardBlock, got.ClaudeMimicryGuardMode)
-	require.False(t, got.EnableContentSafetyFilter)
-	require.Equal(t, ContentSafetyGuardModeWarn, got.ContentSafetyGuardMode)
 }

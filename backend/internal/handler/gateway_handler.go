@@ -48,7 +48,6 @@ type GatewayHandler struct {
 	usageRecordWorkerPool          *service.UsageRecordWorkerPool
 	errorPassthroughService        *service.ErrorPassthroughService
 	contentModerationService       *service.ContentModerationService
-	contentSafetyGuard             *service.ContentSafetyGuard
 	concurrencyHelper              *ConcurrencyHelper
 	userMsgQueueHelper             *UserMsgQueueHelper
 	maxAccountSwitches             int
@@ -114,7 +113,6 @@ func NewGatewayHandler(
 		usageRecordWorkerPool:          usageRecordWorkerPool,
 		errorPassthroughService:        errorPassthroughService,
 		contentModerationService:       contentModerationService,
-		contentSafetyGuard:             service.NewContentSafetyGuard(settingService),
 		concurrencyHelper:              NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
 		userMsgQueueHelper:             umqHelper,
 		maxAccountSwitches:             maxAccountSwitches,
@@ -223,10 +221,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 验证 model 必填
 	if reqModel == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
-		return
-	}
-
-	if h.checkContentSafety(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body) {
 		return
 	}
 
@@ -1912,10 +1906,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
-
-	if h.checkContentSafety(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, parsedReq.Model, body) {
-		return
-	}
 
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)

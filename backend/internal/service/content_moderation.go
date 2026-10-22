@@ -298,6 +298,10 @@ type ContentModerationModelFilter struct {
 	Models []string `json:"models"`
 }
 
+// ContentModerationCheckInput 是网关请求进入风控中心内容审计时携带的上下文。
+// GroupPolicy 取自分组的 content_review_policy，只决定该分组是否参与风控中心审计：
+// disabled 不审计；enabled 强制纳入分组范围（仍受风控总开关、审计开关、模式与模型范围约束）；
+// inherit 按风控中心的 all_groups / group_ids 判定。
 type ContentModerationCheckInput struct {
 	RequestID   string
 	UserID      int64

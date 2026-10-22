@@ -975,8 +975,8 @@ export default {
       },
       anthropicPolicies: {
         title: 'Anthropic Customer Policies',
-        contentReview: 'Content Safety and Keyword Review',
-        contentReviewHint: 'Controls local safety checks and risk-control moderation. Enabled groups still use the global mode, keywords, and thresholds.',
+        contentReview: 'Risk Control Content Moderation',
+        contentReviewHint: 'Only affects Risk Control content moderation: Inherit follows the Risk Control group scope, Enabled forces this group into moderation, and Disabled exempts it. Enabled groups still require Risk Control and content moderation to be turned on and use the global mode, keywords, and thresholds.',
         systemPrompt: 'Claude OAuth System Injection',
         systemPromptHint: 'Only affects third-party clients using the OAuth/SetupToken mimic path. Identity only injects the dynamic billing and Claude Code identity blocks without the long expansion prompt.',
         inherit: 'Inherit Global',
