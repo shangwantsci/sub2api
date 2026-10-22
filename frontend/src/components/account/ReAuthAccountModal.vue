@@ -126,9 +126,7 @@
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
         :show-cookie-option="isAnthropic"
-        :show-chrome-cookie-option="
-          isAnthropic && addMethod === 'oauth' && deploymentLicenseStore.canUseChromeCookieAuth
-        "
+        :show-chrome-cookie-option="isAnthropic && addMethod === 'oauth'"
         :allow-multiple="false"
         :method-label="t('admin.accounts.inputMethod')"
         :platform="isOpenAI ? 'openai' : isGemini ? 'gemini' : isAntigravity ? 'antigravity' : 'anthropic'"
@@ -200,12 +198,8 @@ import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
-import { useDeploymentLicenseStore } from '@/stores'
 
 // Type for exposed OAuthAuthorizationFlow component
-// Customer deployments may have the Chrome cookie capability withheld.
-const deploymentLicenseStore = useDeploymentLicenseStore()
-
 // Note: defineExpose automatically unwraps refs, so we use the unwrapped types
 interface OAuthFlowExposed {
   authCode: string

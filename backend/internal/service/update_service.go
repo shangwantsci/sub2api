@@ -69,9 +69,8 @@ type UpdateService struct {
 	disabled       bool
 }
 
-// NewUpdateService creates a new UpdateService. Set disabled for managed
-// customer images, which must not replace their licensed binary with an
-// upstream public release.
+// NewUpdateService creates a new UpdateService. When disabled is true, update
+// checks, updates and rollbacks are refused with ErrManagedUpdateDisabled.
 func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string, disabled bool) *UpdateService {
 	return &UpdateService{
 		cache:          cache,

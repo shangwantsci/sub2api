@@ -64,11 +64,8 @@ func providePrivacyClientFactory() service.PrivacyClientFactory {
 
 func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	return service.BuildInfo{
-		Version:           buildInfo.Version,
-		Commit:            buildInfo.Commit,
-		BuildType:         buildInfo.BuildType,
-		LicensePublicKey:  buildInfo.LicensePublicKey,
-		ManagedCustomerID: buildInfo.ManagedCustomerID,
+		Version:   buildInfo.Version,
+		BuildType: buildInfo.BuildType,
 	}
 }
 
@@ -83,7 +80,6 @@ func provideCleanup(
 	opsSystemLogSink *service.OpsSystemLogSink,
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
-	deploymentLicense *service.DeploymentLicenseService,
 	accountExpiry *service.AccountExpiryService,
 	accountNurturing *service.AccountNurturingService,
 	proxyExpiry *service.ProxyExpiryService,
@@ -189,12 +185,6 @@ func provideCleanup(
 			}},
 			{"TokenRefreshService", func() error {
 				tokenRefresh.Stop()
-				return nil
-			}},
-			{"DeploymentLicenseService", func() error {
-				if deploymentLicense != nil {
-					deploymentLicense.Stop()
-				}
 				return nil
 			}},
 			{"AccountExpiryService", func() error {

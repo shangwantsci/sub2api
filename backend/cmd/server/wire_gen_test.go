@@ -61,7 +61,6 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		opsSystemLogSinkSvc,
 		schedulerSnapshotSvc,
 		tokenRefreshSvc,
-		nil, // deploymentLicense
 		accountExpirySvc,
 		accountNurturingSvc,
 		proxyExpirySvc,

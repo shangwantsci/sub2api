@@ -2,10 +2,6 @@
 package routes
 
 import (
-	"context"
-	"net/http"
-	"time"
-
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -20,28 +16,11 @@ func RegisterAdminRoutes(
 	h *handler.Handlers,
 	adminAuth middleware.AdminAuthMiddleware,
 	settingService *service.SettingService,
-	deploymentLicense *service.DeploymentLicenseService,
 ) {
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
-		admin.GET("/deployment-license/status", func(c *gin.Context) {
-			c.JSON(http.StatusOK, deploymentLicense.Snapshot())
-		})
-		admin.POST("/deployment-license/refresh", func(c *gin.Context) {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-			defer cancel()
-			if err := deploymentLicense.RefreshNow(ctx); err != nil {
-				c.JSON(http.StatusBadGateway, gin.H{
-					"error":  "deployment license refresh failed",
-					"status": deploymentLicense.Snapshot(),
-				})
-				return
-			}
-			c.JSON(http.StatusOK, deploymentLicense.Snapshot())
-		})
-
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 

@@ -35,12 +35,6 @@ var (
 	Commit    = "unknown"
 	Date      = "unknown"
 	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
-	// LicensePublicKey is optionally pinned by customer-image CI. Normal open
-	// source builds leave it empty and deployment licensing remains disabled.
-	LicensePublicKey = ""
-	// ManagedCustomerID is pinned by customer-image CI. A non-community value
-	// makes deployment licensing mandatory even if local config tries to turn it off.
-	ManagedCustomerID = "community"
 )
 
 func init() {
@@ -150,11 +144,8 @@ func runMainServer() {
 	}
 
 	buildInfo := handler.BuildInfo{
-		Version:           Version,
-		Commit:            Commit,
-		BuildType:         BuildType,
-		LicensePublicKey:  LicensePublicKey,
-		ManagedCustomerID: ManagedCustomerID,
+		Version:   Version,
+		BuildType: BuildType,
 	}
 
 	app, err := initializeApplication(buildInfo)
