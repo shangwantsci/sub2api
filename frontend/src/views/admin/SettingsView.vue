@@ -4746,21 +4746,21 @@
                 />
               </div>
 
-              <!-- 旧版人格门控：只作用于没有 persona_preset 的旧账号 -->
+              <!-- 账号养号：全局总开关（默认关）。账号上还要单独勾选才会参与 -->
               <div class="flex items-center justify-between">
                 <div>
                   <label
                     class="text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
-                    {{ t("admin.settings.gatewayForwarding.personaGating") }}
+                    {{ t("admin.settings.gatewayForwarding.accountNurturing") }}
                   </label>
                   <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                     {{
-                      t("admin.settings.gatewayForwarding.personaGatingHint")
+                      t("admin.settings.gatewayForwarding.accountNurturingHint")
                     }}
                   </p>
                 </div>
-                <Toggle v-model="form.enable_persona_gating" />
+                <Toggle v-model="form.account_nurturing_enabled" />
               </div>
 
               <!-- Antigravity UA 版本 -->
@@ -5839,6 +5839,9 @@
               </button>
             </div>
           </div>
+
+          <!-- 容量档位模板：独立保存（不走页面底部的「保存设置」），新建 / 批量账号时选档位就是复制这里的数值 -->
+          <CapacityPresetsCard />
 	        </div>
 	        <!-- /Tab: General -->
 
@@ -7685,6 +7688,7 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import ProviderSettingsPanel from "@/components/admin/provider/ProviderSettingsPanel.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
+import CapacityPresetsCard from "@/views/admin/settings/CapacityPresetsCard.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
@@ -8567,7 +8571,7 @@ const form = reactive<SettingsForm>({
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
-  enable_persona_gating: false,
+  account_nurturing_enabled: false,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   // codex_cli_only 加固
@@ -9884,7 +9888,7 @@ async function saveSettings() {
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       enable_client_dateline_normalization:
         form.enable_client_dateline_normalization,
-      enable_persona_gating: form.enable_persona_gating,
+      account_nurturing_enabled: form.account_nurturing_enabled,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
       openai_codex_user_agent:

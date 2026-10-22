@@ -113,19 +113,6 @@ export interface ProviderHostingTypeSetting {
   sort: number
 }
 
-export interface ProviderCapacityTierSetting {
-  tier: string
-  label: string
-  concurrency: number
-  max_sessions: number
-  base_rpm: number
-  /** 0 表示不限。 */
-  window_cost_limit: number
-  enabled: boolean
-  /** 防封预设：balanced / aggressive / conservative / off。空表示不写入。 */
-  persona_preset?: string
-}
-
 export interface ProviderCustomTierCapsSetting {
   concurrency: number
   max_sessions: number
@@ -137,7 +124,14 @@ export interface ProviderSettings {
   portal_enabled: boolean
   hosting_types: ProviderHostingTypeSetting[]
   default_group_id: number
-  capacity_tiers: ProviderCapacityTierSetting[]
+  /**
+   * 对供货商开放的容量档位（取自容量档位模板的 key）。
+   *
+   * 档位的数值只存在于模板里（设置 → 常规），这里只记「哪些模板开放」，
+   * 两处各写各的列，避免互相回滚。default_tier 必须落在这个列表内。
+   */
+  enabled_tier_keys: string[]
+  /** 默认档位：模板 key，必须在 enabled_tier_keys 内。 */
   default_tier: string
   custom_tier_enabled: boolean
   custom_tier_caps: ProviderCustomTierCapsSetting

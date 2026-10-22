@@ -488,6 +488,8 @@ function mountView() {
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
         OpenAIFastPolicyUserSelector: true,
+        // 容量档位模板卡自带独立保存与接口，这里只确认它挂在 general 页签里
+        CapacityPresetsCard: true,
       },
     },
   });
@@ -817,6 +819,95 @@ describe("admin SettingsView payment visible method controls", () => {
         rewrite_message_cache_control: true,
       }),
     );
+  });
+
+  it("mounts the capacity presets card inside the general tab (it saves on its own)", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll("capacity-presets-card-stub")).toHaveLength(1);
+  });
+
+  describe("account nurturing global switch", () => {
+    /** 网关页签里「账号养号」那一行的开关（Toggle 在 spec 里被替换成复选框）。 */
+    function nurturingToggle(wrapper: ReturnType<typeof mountView>): HTMLInputElement {
+      const label = wrapper
+        .findAll("label")
+        .find((node) => node.text() === "admin.settings.gatewayForwarding.accountNurturing");
+      expect(label, "网关页签里应有「账号养号」开关").toBeDefined();
+      const toggle = label!.element.parentElement?.parentElement?.querySelector("input.toggle-stub");
+      expect(toggle).toBeTruthy();
+      return toggle as HTMLInputElement;
+    }
+
+    it("is off by default and submits an explicit false", async () => {
+      getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+      const wrapper = mountView();
+      await flushPromises();
+      expect(nurturingToggle(wrapper).checked).toBe(false);
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledTimes(1);
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ account_nurturing_enabled: false }),
+      );
+    });
+
+    it("loads the saved value and submits it back", async () => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        account_nurturing_enabled: true,
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+      expect(nurturingToggle(wrapper).checked).toBe(true);
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ account_nurturing_enabled: true }),
+      );
+    });
+
+    it("submits true after the admin turns it on", async () => {
+      getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+      const wrapper = mountView();
+      await flushPromises();
+      const toggle = nurturingToggle(wrapper);
+      toggle.checked = true;
+      toggle.dispatchEvent(new Event("change"));
+      await flushPromises();
+
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ account_nurturing_enabled: true }),
+      );
+    });
+
+    it("no longer submits the removed persona gating switch", async () => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        enable_persona_gating: true,
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledTimes(1);
+      expect(updateSettings.mock.calls[0][0]).not.toHaveProperty("enable_persona_gating");
+    });
   });
 
   it("submits Claude OAuth system prompt injection gateway settings", async () => {

@@ -2,7 +2,7 @@
 //
 // This text is shown to external account suppliers. It must never reveal how the
 // platform processes accounts (content review, system prompt injection, persona,
-// TLS fingerprinting, Chrome authorization). Hosting type labels and descriptions
+// nurturing, adaptive throttling, TLS fingerprinting, Chrome authorization). Hosting type labels and descriptions
 // are authored by the admin in settings, not hardcoded here.
 //
 // Vue I18n parses bare braces as placeholder expressions, so never put raw JSON here.

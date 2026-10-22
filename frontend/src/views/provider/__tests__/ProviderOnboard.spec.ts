@@ -10,7 +10,7 @@ function readSource(relative: string): string {
 }
 
 /**
- * 供号商上号页必须彻底不含 Chrome OAuth 与人格。
+ * 供号商上号页必须彻底不含 Chrome OAuth、人格，以及养号与动态降速。
  *
  * 后端已经在 service 层硬拒绝（AssertProviderOAuthClientAllowed / SanitizeProviderExtra），
  * 这里守的是前端：一旦有人为了「顺手支持一下」在上号页加回 chrome 选项或人格字段，
@@ -29,9 +29,9 @@ describe('ProviderOnboard source', () => {
     }
   })
 
-  it('never exposes persona configuration', () => {
+  it('never exposes persona, nurturing or adaptive throttle configuration', () => {
     const lowered = stripComments(source).toLowerCase()
-    for (const needle of ['persona', '人格']) {
+    for (const needle of ['persona', '人格', 'nurtur', '养号', 'adaptive', '动态降速']) {
       expect(lowered).not.toContain(needle)
     }
   })
@@ -73,6 +73,10 @@ describe('Provider portal copy', () => {
         'chrome',
         'persona',
         '人格',
+        'nurtur',
+        '养号',
+        'adaptive',
+        '动态降速',
         'tls',
         'content_review',
         'system prompt',

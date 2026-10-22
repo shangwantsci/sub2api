@@ -964,7 +964,14 @@ export interface Account {
   rpm_sticky_buffer?: number | null
   user_msg_queue_mode?: string | null  // "serialize" | "throttle" | null
 
-  // TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效）
+  // 动态降速后的有效值（仅 Anthropic OAuth/SetupToken 账号返回）。
+  // 由后端按 5h/7d 利用率折算，前端只展示，不自己重算公式。
+  effective_concurrency?: number | null
+  effective_base_rpm?: number | null
+  throttle_factor?: number | null // 1 = 全速；< 1 = 降速中
+
+  // TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效）。
+  // 缺省/true/false 三态要读 account.extra.enable_tls_fingerprint 的原值，这里只作展示用的折叠值。
   enable_tls_fingerprint?: boolean | null
   tls_fingerprint_profile_id?: number | null
 

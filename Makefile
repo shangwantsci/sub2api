@@ -6,7 +6,22 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
-	src/views/admin/__tests__/SettingsView.spec.ts
+	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/components/account/__tests__/accountCapacity.guard.spec.ts \
+	src/components/account/__tests__/capacityBuilder.spec.ts \
+	src/components/account/__tests__/CreateAccountModal.spec.ts \
+	src/components/account/__tests__/CreateAccountModal.capacity.spec.ts \
+	src/components/account/__tests__/EditAccountModal.spec.ts \
+	src/components/account/__tests__/EditAccountModal.capacity.spec.ts \
+	src/components/account/__tests__/BulkEditAccountModal.spec.ts \
+	src/components/account/__tests__/BulkEditAccountModal.capacity.spec.ts \
+	src/components/account/__tests__/AccountCapacityCell.spec.ts \
+	src/components/admin/provider/__tests__/ProviderSettingsPanel.spec.ts \
+	src/views/admin/settings/__tests__/CapacityPresetsCard.spec.ts \
+	src/composables/__tests__/useCapacityPresets.spec.ts \
+	src/i18n/__tests__/capacityI18nKeys.spec.ts \
+	src/i18n/__tests__/messageCompilation.spec.ts \
+	src/views/provider/__tests__/ProviderOnboard.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

@@ -44,8 +44,8 @@
               {{ t('admin.providerSettings.defaultTier') }}
             </label>
             <select id="ps-default-tier" v-model="settings.default_tier" class="input">
-              <option v-for="tier in enabledTiers" :key="tier.tier" :value="tier.tier">
-                {{ tier.label }}
+              <option v-for="preset in openedPresets" :key="preset.key" :value="preset.key">
+                {{ preset.label }}
               </option>
             </select>
             <p v-if="errors.default_tier" class="mt-1 text-xs text-red-600">
@@ -253,6 +253,10 @@
       </section>
 
       <!-- ========== 速率档位 ========== -->
+      <!--
+        档位数值来自「设置 → 常规」的容量档位模板，这里只读，只管「哪些档位对供货商开放」。
+        两处各写各的列：数值归模板接口，开放范围归本面板（enabled_tier_keys），谁都不会回滚谁。
+      -->
       <section class="space-y-4 rounded-lg border border-gray-200 p-5 dark:border-dark-700">
         <div>
           <h3 class="font-semibold text-gray-900 dark:text-dark-100">
@@ -265,7 +269,15 @@
           </p>
         </div>
 
-        <div class="overflow-x-auto">
+        <p
+          v-if="!presetsReady"
+          class="text-sm text-gray-500 dark:text-dark-400"
+          data-testid="provider-tiers-unavailable"
+        >
+          {{ presetsFailed ? t('admin.providerSettings.tiersPresetsUnavailable') : t('common.loading') }}
+        </p>
+
+        <div v-else class="overflow-x-auto">
           <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-dark-700">
             <thead class="bg-gray-50 dark:bg-dark-800">
               <tr>
@@ -291,72 +303,35 @@
                   {{ t('admin.providerSettings.colWindowCost') }}
                 </th>
                 <th class="px-3 py-2 text-left text-xs uppercase text-gray-500">
-                  {{ t('admin.providerSettings.colPersonaPreset') }}
+                  {{ t('admin.providerSettings.colAdaptive') }}
                 </th>
                 <th class="px-3 py-2 text-right text-xs uppercase text-gray-500"></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
-              <tr v-for="tier in settings.capacity_tiers" :key="tier.tier">
-                <td class="px-3 py-2"><input v-model="tier.enabled" type="checkbox" /></td>
-                <td class="px-3 py-2 font-medium text-gray-900 dark:text-dark-100">{{ tier.tier }}</td>
-                <td class="px-3 py-2">
-                  <input v-model.trim="tier.label" type="text" class="input w-24 py-1 text-sm" />
-                </td>
+              <tr v-for="preset in presets" :key="preset.key" data-testid="provider-tier-row">
                 <td class="px-3 py-2">
                   <input
-                    v-model.number="tier.concurrency"
-                    type="number"
-                    min="1"
-                    :max="MAX_CONCURRENCY"
-                    class="input w-20 py-1 text-sm"
-                    :class="errors[`tier_concurrency_${tier.tier}`] ? 'border-red-500' : ''"
+                    type="checkbox"
+                    data-testid="provider-tier-open"
+                    :checked="isTierOpen(preset.key)"
+                    @change="toggleTierOpen(preset.key, ($event.target as HTMLInputElement).checked)"
                   />
                 </td>
-                <td class="px-3 py-2">
-                  <input
-                    v-model.number="tier.max_sessions"
-                    type="number"
-                    min="0"
-                    :max="MAX_SESSIONS"
-                    class="input w-20 py-1 text-sm"
-                    :class="errors[`tier_sessions_${tier.tier}`] ? 'border-red-500' : ''"
-                  />
-                </td>
-                <td class="px-3 py-2">
-                  <input
-                    v-model.number="tier.base_rpm"
-                    type="number"
-                    min="0"
-                    :max="MAX_RPM"
-                    class="input w-20 py-1 text-sm"
-                    :class="errors[`tier_rpm_${tier.tier}`] ? 'border-red-500' : ''"
-                  />
-                </td>
-                <td class="px-3 py-2">
-                  <input
-                    v-model.number="tier.window_cost_limit"
-                    type="number"
-                    min="0"
-                    :max="MAX_WINDOW_COST"
-                    class="input w-24 py-1 text-sm"
-                    :class="errors[`tier_window_${tier.tier}`] ? 'border-red-500' : ''"
-                  />
-                </td>
-                <td class="px-3 py-2">
-                  <select v-model="tier.persona_preset" class="input w-28 py-1 text-sm">
-                    <option value="">{{ t('admin.providerSettings.personaPresetNone') }}</option>
-                    <option value="off">{{ t('admin.providerSettings.personaPresetOff') }}</option>
-                    <option value="conservative">{{ t('admin.providerSettings.personaPresetConservative') }}</option>
-                    <option value="balanced">{{ t('admin.providerSettings.personaPresetBalanced') }}</option>
-                    <option value="aggressive">{{ t('admin.providerSettings.personaPresetAggressive') }}</option>
-                  </select>
+                <td class="px-3 py-2 font-medium text-gray-900 dark:text-dark-100">{{ preset.key }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-dark-200">{{ preset.label }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-dark-200">{{ preset.concurrency }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-dark-200">{{ preset.max_sessions }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-dark-200">{{ preset.base_rpm }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-dark-200">{{ preset.window_cost_limit }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-dark-200">
+                  {{ preset.adaptive_throttle ? t('admin.providerSettings.adaptiveOn') : t('admin.providerSettings.adaptiveOff') }}
                 </td>
                 <td class="px-3 py-2 text-right">
                   <button
                     type="button"
                     class="whitespace-nowrap text-sm text-indigo-600 hover:underline dark:text-indigo-400"
-                    @click="askApplyToExisting(tier.tier)"
+                    @click="askApplyToExisting(preset.key)"
                   >
                     {{ t('admin.providerSettings.applyToExisting') }}
                   </button>
@@ -365,7 +340,7 @@
             </tbody>
           </table>
         </div>
-        <p class="text-xs text-gray-400">{{ t('admin.providerSettings.windowCostZeroHint') }}</p>
+        <p v-if="presetsReady" class="text-xs text-gray-400">{{ t('admin.providerSettings.windowCostZeroHint') }}</p>
         <p v-if="errors.tiers" class="text-sm text-red-600">{{ errors.tiers }}</p>
       </section>
 
@@ -492,6 +467,8 @@ import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave } from 'vue-router'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api'
+import { useCapacityPresets } from '@/composables/useCapacityPresets'
+import { MAX_CONCURRENCY, MAX_RPM, MAX_SESSIONS, MAX_WINDOW_COST } from '@/constants/capacity'
 import type {
   ProviderGroupPolicyView,
   ProviderHostingTypeSetting,
@@ -501,12 +478,17 @@ import type {
 const { t } = useI18n()
 
 // 与后端 provider_settings.go 的护栏保持一致。两边都校验，前端只是提前反馈。
-// 与后端 providerMaxAutoProxyMaxAccounts 一致。
+// 与后端 providerMaxAutoProxyMaxAccounts 一致。容量类的上限（并发 / 会话 / RPM / 5h 额度）
+// 与设置页的档位模板卡共用 @/constants/capacity。
 const MAX_AUTO_PROXY_ACCOUNTS = 50
-const MAX_CONCURRENCY = 50
-const MAX_SESSIONS = 50
-const MAX_RPM = 500
-const MAX_WINDOW_COST = 1000
+
+// 容量档位模板（共享缓存）：数值只读，本面板只决定哪些模板对供货商开放
+const {
+  presets,
+  ready: presetsReady,
+  failed: presetsFailed,
+  ensureLoaded: ensurePresetsLoaded
+} = useCapacityPresets()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -571,7 +553,25 @@ const resolvedPriorities = computed(() => {
   }
   return out
 })
-const enabledTiers = computed(() => settings.value?.capacity_tiers.filter((t2) => t2.enabled) ?? [])
+
+const isTierOpen = (key: string) => settings.value?.enabled_tier_keys.includes(key) ?? false
+
+/** 对供货商开放的模板，按模板表的顺序；默认档位下拉只列这些。 */
+const openedPresets = computed(() => presets.value.filter((preset) => isTierOpen(preset.key)))
+
+/** 勾选 / 取消勾选某个模板是否对供货商开放，并保持与模板表一致的顺序，避免来回勾选后无端变「有未保存的修改」。 */
+function toggleTierOpen(key: string, open: boolean) {
+  const s = settings.value
+  if (!s) return
+  const wanted = new Set(s.enabled_tier_keys)
+  if (open) wanted.add(key)
+  else wanted.delete(key)
+  const known = presets.value.map((preset) => preset.key)
+  s.enabled_tier_keys = [
+    ...known.filter((k) => wanted.has(k)),
+    ...s.enabled_tier_keys.filter((k) => !known.includes(k) && wanted.has(k))
+  ]
+}
 
 function groupName(id: number): string {
   return availableGroups.value.find((g) => g.id === id)?.name ?? String(id)
@@ -626,28 +626,16 @@ function validate(): boolean {
     })
   }
 
-  let anyTierEnabled = false
-  for (const tier of s.capacity_tiers) {
-    if (tier.enabled) anyTierEnabled = true
-    // 并发下限是 1：后端并发服务把 0 当作「不限并发」，填 0 的效果与直觉相反。
-    if (tier.concurrency < 1 || tier.concurrency > MAX_CONCURRENCY) {
-      next[`tier_concurrency_${tier.tier}`] = 'x'
+  // 档位数值不在这里编辑（归容量档位模板），这里只校验「开放哪些」：至少开放一个，
+  // 默认档位必须是已开放且存在于模板表里的。模板没加载出来时没法判断，交给后端校验。
+  if (presetsReady.value) {
+    const open = openedPresets.value
+    if (open.length === 0) {
+      next.tiers = t('admin.providerSettings.tiersHint')
     }
-    if (tier.max_sessions < 0 || tier.max_sessions > MAX_SESSIONS) {
-      next[`tier_sessions_${tier.tier}`] = 'x'
+    if (!open.some((preset) => preset.key === s.default_tier)) {
+      next.default_tier = t('common.required')
     }
-    if (tier.base_rpm < 0 || tier.base_rpm > MAX_RPM) {
-      next[`tier_rpm_${tier.tier}`] = 'x'
-    }
-    if (tier.window_cost_limit < 0 || tier.window_cost_limit > MAX_WINDOW_COST) {
-      next[`tier_window_${tier.tier}`] = 'x'
-    }
-  }
-  if (!anyTierEnabled) {
-    next.tiers = t('admin.providerSettings.tiersHint')
-  }
-  if (!s.capacity_tiers.some((tier) => tier.enabled && tier.tier === s.default_tier)) {
-    next.default_tier = t('common.required')
   }
   // 站点开着时才强制要求托管类型齐备，关闭状态允许慢慢配。
   if (s.portal_enabled) {
@@ -663,12 +651,10 @@ function validate(): boolean {
 async function load() {
   loading.value = true
   try {
-    const data = await adminAPI.providers.getSettings()
+    const [data] = await Promise.all([adminAPI.providers.getSettings(), ensurePresetsLoaded()])
     availableGroups.value = data.available_groups ?? []
     const { available_groups: _ignored, ...rest } = data
-    for (const tier of rest.capacity_tiers ?? []) {
-      tier.persona_preset = tier.persona_preset || ''
-    }
+    rest.enabled_tier_keys = rest.enabled_tier_keys ?? []
     settings.value = rest
     savedSnapshot.value = JSON.stringify(rest)
   } catch (error) {

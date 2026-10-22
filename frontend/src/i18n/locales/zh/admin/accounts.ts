@@ -185,6 +185,9 @@ export default {
           exceeded: '配额已用完，账号暂停调度',
           normal: '配额正常'
         },
+        // 动态降速：有效值由后端按 5h / 7d 用量折算，这里只展示
+        throttled: '降速中：按 5h / 7d 用量折算，当前有效值 {effective}（配置值 {configured}，系数 {percent}%）',
+        presetBadgeTitle: '容量档位：{label}（由并发、会话数、RPM、5h 额度反推）'
       },
       clearRateLimit: '清除速率限制',
       resetQuota: '重置配额',
@@ -456,7 +459,13 @@ export default {
         failed: '批量更新失败',
         noSelection: '请选择要编辑的账号',
         noFieldsSelected: '请至少选择一个要更新的字段',
-        mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。'
+        mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。',
+        capacityPreset: {
+          label: '容量档位',
+          hint: '把所选档位的并发、会话数、RPM、5h 额度和动态降速一次性写进选中的账号，其它项不动。',
+          orderHint: '与「并发」「RPM」同时勾选时，先写档位，再用并发 / RPM 的填写值覆盖档位里的同名项。',
+          rpmOverrideHint: 'RPM 填 0 或留空表示不限。与上方「容量档位」同时勾选时，这里的 RPM 会覆盖档位里的 RPM。'
+        }
       },
       bulkDeleteTitle: '批量删除账号',
       bulkDeleteConfirm: '确定要删除选中的 {count} 个账号吗？此操作无法撤销。',
@@ -728,86 +737,29 @@ export default {
 	  autoPause5hDisabled: '禁用 5h 自动暂停',
 	  autoPause7dDisabled: '禁用 7d 自动暂停',
 	  autoPauseDisabledHint: '开启后该账号永不进入自动暂停（即使全局默认阈值已配置）。',
-      // 防封预设 (Anthropic OAuth/SetupToken)
-      persona: {
-        label: '防封策略',
-        hint: '选择防封预设档位，系统自动控制并发和 RPM（基于利用率动态调节），并在使用高峰期穿插养号活动。配了就生效，无需额外开关。',
-        preset: '防封档位',
-        presetHint: '选择适合该账号的防封策略。并发和 RPM 会根据 5h/7d 利用率自动动态调节，不需要手动设置。',
-        presetOptions: {
-          none: '不设置（手动配置）',
-          off: '关闭防封',
-          aggressive: '激进（并发 5，每分钟 50 次）',
-          balanced: '均衡（并发 3，每分钟 30 次，推荐）',
-          conservative: '保守（并发 2，每分钟 15 次）',
-        },
-        presetShort: {
-          aggressive: '激进',
-          balanced: '均衡',
-          conservative: '保守',
-        },
-        advancedToggle: '高级设置',
-        advancedHint: '手动覆盖预设参数。留空使用预设默认值。',
-        timezone: '时区 (IANA)',
-        timezonePlaceholder: '请选择时区',
-        timezoneHint: '预设模式默认美东时区。也可手动选择。',
-        locale: 'Locale',
-        localeHint: '预设模式默认 en-US。仅作组织标记，不写入出站请求头。',
-        customOption: '历史自定义值：{value}',
-        timezoneOptions: {
-          auto: '自动（根据代理出口国家，推荐）',
-          china: '东八区（上海 / 北京，UTC+8）',
-          singapore: '新加坡（UTC+8）',
-          japan: '日本（东京，UTC+9）',
-          usEastern: '美国东部（纽约，UTC-5 / UTC-4）',
-          usCentral: '美国中部（芝加哥，UTC-6 / UTC-5）',
-          usMountain: '美国山地（丹佛，UTC-7 / UTC-6）',
-          usPacific: '美国西部（洛杉矶，UTC-8 / UTC-7）',
-        },
-        localeOptions: {
-          auto: '自动（跟随代理国家 / 时区）',
-          zhCN: '简体中文（zh-CN）',
-          enUS: '美国英语（en-US）',
-          enSG: '新加坡英语（en-SG）',
-          jaJP: '日语（ja-JP）',
-        },
-        activeStart: '活跃起始小时 (0-23)',
-        activeEnd: '活跃结束小时 (1-24)',
-        activeHint: '作息窗口（当地时区）。预设模式下不使用作息限制。',
-        maxConcurrency: '并发上限（覆盖预设）',
-        dailyCap: '日请求上限 (0=不限)',
-        dailyCapHint: '预设模式默认不限。动态并发+RPM 已自动控制节奏。',
-        createDefaultHint: '推荐选择"均衡"档位。系统自动根据利用率动态调节并发和 RPM，并在使用高峰期自动养号。',
-      },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: '配额控制',
         hint: '配置费用窗口、会话限制、客户端亲和等调度控制。',
+        disguiseTitle: '请求伪装',
+        disguiseHint: 'TLS 指纹、会话 ID、缓存 TTL 与自定义转发地址，与容量节流相互独立。',
         windowCost: {
           label: '5h窗口费用控制',
-          hint: '限制账号在5小时窗口内的费用使用',
-          limit: '费用阈值',
-          limitPlaceholder: '50',
-          limitHint: '达到阈值后不参与新请求调度',
+          limitHint: '达到阈值后不参与新请求调度；0 表示不限',
           stickyReserve: '粘性预留额度',
           stickyReservePlaceholder: '10',
           stickyReserveHint: '为粘性会话预留的额外额度'
         },
         sessionLimit: {
-          label: '会话数量控制',
-          hint: '限制同时活跃的会话数量',
           maxSessions: '最大会话数',
-          maxSessionsPlaceholder: '3',
-          maxSessionsHint: '同时活跃的最大会话数量',
+          maxSessionsHint: '同时活跃的最大会话数量；0 表示不限',
           idleTimeout: '空闲超时',
           idleTimeoutPlaceholder: '5',
           idleTimeoutHint: '会话空闲超时后自动释放'
         },
         rpmLimit: {
           label: 'RPM 限制',
-          hint: '限制每分钟请求数量，保护上游账号',
           baseRpm: '基础 RPM',
-          baseRpmPlaceholder: '15',
           baseRpmHint: '每分钟最大请求数，0 或留空表示不限制',
           strategy: 'RPM 策略',
           strategyTiered: '三区模型',
@@ -816,8 +768,8 @@ export default {
           strategyStickyExemptHint: '超限后仅允许粘性会话',
           strategyHint: '三区模型: 超限后逐步限制; 粘性豁免: 已有会话不受限',
           stickyBuffer: '粘性缓冲区',
-          stickyBufferPlaceholder: '默认: base RPM 的 20%',
-          stickyBufferHint: '超过 base RPM 后，粘性会话额外允许的请求数。为空则使用默认值（base RPM 的 20%，最小为 1）',
+          stickyBufferPlaceholder: '留空 = 自动',
+          stickyBufferHint: '超过基础 RPM 后，粘性会话额外允许的请求数。留空由系统自动取「并发数 + 会话数」（不低于基础 RPM 的 20%，至少为 1）',
           userMsgQueue: '用户消息限速',
           userMsgQueueHint: '对用户消息施加发送限制，避免触发上游 RPM 限制',
           umqModeOff: '关闭',
@@ -827,6 +779,7 @@ export default {
         tlsFingerprint: {
           label: 'TLS 指纹模拟',
           hint: '模拟 Node.js/Claude Code 客户端的 TLS 指纹',
+          unsetHint: '这个账号没有显式设置：Claude Code 伪装路径下默认使用内置指纹。拨动开关后会写入明确的开或关。',
           defaultProfile: '内置默认',
           randomProfile: '随机'
         },
@@ -849,6 +802,22 @@ export default {
           label: '客户端亲和调度',
           hint: '启用后，新会话会优先调度到该客户端之前使用过的账号，避免频繁切换账号'
         }
+      },
+      // 「容量与节流」卡（新建 / 编辑 Claude OAuth、SetupToken 账号共用）
+      capacityFields: {
+        title: '容量与节流',
+        hint: '档位只是把数值一次性填进账号，之后账号上的数值才是实际生效值；数值填 0 表示对应限制不限。',
+        preset: '容量档位',
+        presetOption: '{label}（并发 {concurrency} · 会话 {sessions} · RPM {rpm} · 5h {cost}）',
+        presetCustom: '自定义',
+        presetHint: '选档位会覆盖并发、会话数、RPM、5h 额度和动态降速；手动改任何数值后这里会自动变成「自定义」。',
+        presetsUnavailable: '档位模板暂时没有加载出来（可到「系统设置 → 常规」查看），请直接填写下面的数值。',
+        unlimited: '不限',
+        adaptiveThrottle: '动态降速',
+        adaptiveThrottleHint: '按账号 5h / 7d 用量自动降低并发与 RPM：用量越接近上限，实际放行越少。数值为 0（不限）的项不受影响。',
+        nurturing: '账号养号',
+        nurturingHint: '账号空闲时自动发少量正常请求，让账号保持活跃。需要先在「系统设置 → 网关」打开全局养号开关才会生效。',
+        nurturingGlobalOff: '全局养号开关未开启，这里暂时不能修改。'
       },
       affinityNoClients: '无亲和客户端',
       affinityClients: '{count} 个亲和客户端：',

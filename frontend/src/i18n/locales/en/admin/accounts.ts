@@ -230,6 +230,9 @@ export default {
           exceeded: 'Quota exceeded, account paused',
           normal: 'Quota normal'
         },
+        // Adaptive throttle: the effective value is scaled by the backend from 5h / 7d usage; display only
+        throttled: 'Throttled: scaled by 5h / 7d usage, effective value {effective} (configured {configured}, factor {percent}%)',
+        presetBadgeTitle: 'Capacity preset: {label} (derived from concurrency, sessions, RPM and 5h cost limit)'
       },
       tempUnschedulable: {
         title: 'Temp Unschedulable',
@@ -354,7 +357,13 @@ export default {
         failed: 'Bulk update failed',
         noSelection: 'Please select accounts to edit',
         noFieldsSelected: 'Select at least one field to update',
-        mixedPlatformWarning: 'Selected accounts span multiple platforms ({platforms}). Model mapping presets shown are combined — ensure mappings are appropriate for each platform.'
+        mixedPlatformWarning: 'Selected accounts span multiple platforms ({platforms}). Model mapping presets shown are combined — ensure mappings are appropriate for each platform.',
+        capacityPreset: {
+          label: 'Capacity preset',
+          hint: 'Writes the preset concurrency, sessions, RPM, 5h cost limit and adaptive throttle into the selected accounts in one go. Everything else stays untouched.',
+          orderHint: 'When combined with the Concurrency or RPM blocks, the preset is written first and the values you fill in there then override the matching items.',
+          rpmOverrideHint: 'Enter 0 or leave empty for no RPM limit. When combined with Capacity preset above, this RPM overrides the preset RPM.'
+        }
       },
       bulkDeleteTitle: 'Bulk Delete Accounts',
       bulkDeleteConfirm: 'Delete the selected {count} account(s)? This action cannot be undone.',
@@ -636,85 +645,29 @@ export default {
 	  autoPause5hDisabled: 'Disable 5h auto-pause',
 	  autoPause7dDisabled: 'Disable 7d auto-pause',
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
-      persona: {
-        label: 'Anti-ban policy',
-        hint: 'Pick a preset. Concurrency and RPM scale down automatically as 5h/7d utilization rises, and nurturing runs while the account is actually in use. A preset takes effect on its own.',
-        preset: 'Preset',
-        presetHint: 'Concurrency and requests-per-minute follow 5h/7d utilization. You do not set those by hand.',
-        presetOptions: {
-          none: 'Unset (manual)',
-          off: 'Off',
-          aggressive: 'Aggressive (concurrency 5, 50 req/min)',
-          balanced: 'Balanced (concurrency 3, 30 req/min, recommended)',
-          conservative: 'Conservative (concurrency 2, 15 req/min)',
-        },
-        presetShort: {
-          aggressive: 'Aggressive',
-          balanced: 'Balanced',
-          conservative: 'Conservative',
-        },
-        advancedToggle: 'Advanced',
-        advancedHint: 'Override preset values. Leave blank to keep the preset default.',
-        timezone: 'Timezone (IANA)',
-        timezonePlaceholder: 'Select a timezone',
-        timezoneHint: 'Presets default to US Eastern. You can override it here.',
-        locale: 'Locale',
-        localeHint: 'Presets default to en-US. Organizational metadata only; never sent as an outbound header.',
-        customOption: 'Legacy custom value: {value}',
-        timezoneOptions: {
-          auto: 'Auto (from proxy exit country, recommended)',
-          china: 'UTC+8 (Shanghai / Beijing)',
-          singapore: 'Singapore (UTC+8)',
-          japan: 'Japan (Tokyo, UTC+9)',
-          usEastern: 'US Eastern (New York, UTC-5 / UTC-4)',
-          usCentral: 'US Central (Chicago, UTC-6 / UTC-5)',
-          usMountain: 'US Mountain (Denver, UTC-7 / UTC-6)',
-          usPacific: 'US Pacific (Los Angeles, UTC-8 / UTC-7)',
-        },
-        localeOptions: {
-          auto: 'Auto (from proxy country / timezone)',
-          zhCN: 'Simplified Chinese (zh-CN)',
-          enUS: 'US English (en-US)',
-          enSG: 'Singapore English (en-SG)',
-          jaJP: 'Japanese (ja-JP)',
-        },
-        activeStart: 'Active start hour (0-23)',
-        activeEnd: 'Active end hour (1-24)',
-        activeHint: 'Legacy active-hours window. Presets do not use it.',
-        maxConcurrency: 'Concurrency override',
-        dailyCap: 'Daily request cap (0=unlimited)',
-        dailyCapHint: 'Presets leave this unlimited. Dynamic concurrency and RPM already slow the account down.',
-        createDefaultHint: 'Balanced is the default. Concurrency and RPM scale with utilization, and nurturing follows real usage.',
-      },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: 'Quota Control',
         hint: 'Configure cost window, session limits, client affinity and other scheduling controls.',
+        disguiseTitle: 'Request disguise',
+        disguiseHint: 'TLS fingerprint, session ID, cache TTL and custom relay URL. Independent of capacity and throttling.',
         windowCost: {
           label: '5h Window Cost Limit',
-          hint: 'Limit account cost usage within the 5-hour window',
-          limit: 'Cost Threshold',
-          limitPlaceholder: '50',
-          limitHint: 'Account will not participate in new scheduling after reaching threshold',
+          limitHint: 'Account will not participate in new scheduling after reaching threshold; 0 means unlimited',
           stickyReserve: 'Sticky Reserve',
           stickyReservePlaceholder: '10',
           stickyReserveHint: 'Additional reserve for sticky sessions'
         },
         sessionLimit: {
-          label: 'Session Count Limit',
-          hint: 'Limit the number of active concurrent sessions',
           maxSessions: 'Max Sessions',
-          maxSessionsPlaceholder: '3',
-          maxSessionsHint: 'Maximum number of active concurrent sessions',
+          maxSessionsHint: 'Maximum number of active concurrent sessions; 0 means unlimited',
           idleTimeout: 'Idle Timeout',
           idleTimeoutPlaceholder: '5',
           idleTimeoutHint: 'Sessions will be released after idle timeout'
         },
         rpmLimit: {
           label: 'RPM Limit',
-          hint: 'Limit requests per minute to protect upstream accounts',
           baseRpm: 'Base RPM',
-          baseRpmPlaceholder: '15',
           baseRpmHint: 'Max requests per minute, 0 or empty means no limit',
           strategy: 'RPM Strategy',
           strategyTiered: 'Tiered Model',
@@ -723,8 +676,8 @@ export default {
           strategyStickyExemptHint: 'Only sticky sessions allowed when over limit',
           strategyHint: 'Tiered: gradually restrict when exceeded; Sticky Exempt: existing sessions unrestricted',
           stickyBuffer: 'Sticky Buffer',
-          stickyBufferPlaceholder: 'Default: 20% of base RPM',
-          stickyBufferHint: 'Extra requests allowed for sticky sessions after exceeding base RPM. Leave empty to use default (20% of base RPM, min 1)',
+          stickyBufferPlaceholder: 'Empty = automatic',
+          stickyBufferHint: 'Extra requests allowed for sticky sessions after exceeding base RPM. Leave empty to let the system use concurrency + sessions (at least 20% of base RPM, minimum 1)',
           userMsgQueue: 'User Message Rate Control',
           userMsgQueueHint: 'Rate-limit user messages to avoid triggering upstream RPM limits',
           umqModeOff: 'Off',
@@ -734,6 +687,7 @@ export default {
         tlsFingerprint: {
           label: 'TLS Fingerprint Simulation',
           hint: 'Simulate Node.js/Claude Code client TLS fingerprint',
+          unsetHint: 'Not set explicitly on this account: the Claude Code mimic path uses the built-in fingerprint by default. Flipping the switch writes an explicit on or off value.',
           defaultProfile: 'Built-in Default',
           randomProfile: 'Random'
         },
@@ -756,6 +710,22 @@ export default {
           label: 'Client Affinity Scheduling',
           hint: 'When enabled, new sessions prefer accounts previously used by this client to reduce account switching'
         }
+      },
+      // Capacity and throttling card (shared by create / edit for Claude OAuth and SetupToken accounts)
+      capacityFields: {
+        title: 'Capacity and throttling',
+        hint: 'A preset just copies its numbers into the account once; the numbers on the account are what actually take effect. A value of 0 means that limit is off.',
+        preset: 'Capacity preset',
+        presetOption: '{label} (concurrency {concurrency} · sessions {sessions} · RPM {rpm} · 5h {cost})',
+        presetCustom: 'Custom',
+        presetHint: 'Picking a preset overwrites concurrency, sessions, RPM, 5h cost limit and adaptive throttle. Editing any number by hand switches this back to Custom.',
+        presetsUnavailable: 'The preset list could not be loaded (see Settings, General). Please fill in the numbers below directly.',
+        unlimited: 'Unlimited',
+        adaptiveThrottle: 'Adaptive throttle',
+        adaptiveThrottleHint: 'Automatically lowers concurrency and RPM as the 5h / 7d usage of the account rises: the closer to the limit, the less traffic it gets. Limits set to 0 (unlimited) are not affected.',
+        nurturing: 'Account nurturing',
+        nurturingHint: 'Sends a few normal requests while the account is idle to keep it active. It only takes effect after the global nurturing switch is turned on under Settings, Gateway.',
+        nurturingGlobalOff: 'The global nurturing switch is off, so this cannot be changed for now.'
       },
       affinityNoClients: 'No affinity clients',
       affinityClients: '{count} affinity clients:',

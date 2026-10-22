@@ -567,7 +567,7 @@ export interface SystemSettings {
   enable_anthropic_cache_ttl_1h_injection: boolean;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
-  enable_persona_gating: boolean;
+  account_nurturing_enabled: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
   // codex_cli_only 加固
@@ -848,7 +848,7 @@ export interface UpdateSettingsRequest {
   enable_anthropic_cache_ttl_1h_injection?: boolean;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
-  enable_persona_gating?: boolean;
+  account_nurturing_enabled?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   // codex_cli_only 加固
@@ -1351,6 +1351,47 @@ export async function updateBetaPolicySettings(
   return data;
 }
 
+// ==================== Capacity Presets ====================
+
+/**
+ * 容量档位模板的一行。
+ *
+ * 选档位 = 把这些数值一次性复制写进账号，账号上不存档位名（档位名由数值反推）。
+ * key 创建后只读且不可为 "custom"；0 表示对应限制不限（并发除外，并发至少为 1）。
+ */
+export interface CapacityPreset {
+  key: string;
+  label: string;
+  concurrency: number;
+  max_sessions: number;
+  base_rpm: number;
+  /** 美元，0 表示不限 */
+  window_cost_limit: number;
+  adaptive_throttle: boolean;
+}
+
+export interface CapacityPresetsSettings {
+  presets: CapacityPreset[];
+  default_key: string;
+}
+
+export async function getCapacityPresets(): Promise<CapacityPresetsSettings> {
+  const { data } = await apiClient.get<CapacityPresetsSettings>(
+    "/admin/settings/capacity-presets",
+  );
+  return data;
+}
+
+export async function updateCapacityPresets(
+  settings: CapacityPresetsSettings,
+): Promise<CapacityPresetsSettings> {
+  const { data } = await apiClient.put<CapacityPresetsSettings>(
+    "/admin/settings/capacity-presets",
+    settings,
+  );
+  return data;
+}
+
 // ==================== Claude Code Calibrated Profile ====================
 
 /**
@@ -1507,6 +1548,8 @@ export const settingsAPI = {
   updateRectifierSettings,
   getBetaPolicySettings,
   updateBetaPolicySettings,
+  getCapacityPresets,
+  updateCapacityPresets,
   getClaudeCalibratedProfile,
   publishClaudeCalibratedProfile,
   clearClaudeCalibratedProfile,

@@ -1,7 +1,23 @@
 <template>
   <div class="flex flex-col gap-0.5">
-    <!-- 并发槽位 -->
-    <CapacityBadge :color-class="concurrencyClass" :current="currentConcurrency" :max="account.concurrency">
+    <!-- 档位标签：只对 Claude OAuth/SetupToken 账号显示，由并发 / 会话数 / RPM / 5h 额度反推；
+         模板没加载或数值对不上任何档位时不显示，绝不显示「自定义」 -->
+    <span
+      v-if="presetLabel"
+      data-testid="capacity-preset-badge"
+      class="inline-flex w-fit items-center rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-400"
+      :title="t('admin.accounts.capacity.presetBadgeTitle', { label: presetLabel })"
+    >
+      {{ presetLabel }}
+    </span>
+
+    <!-- 并发槽位（动态降速时 max 是后端折算后的有效并发） -->
+    <CapacityBadge
+      :color-class="concurrencyClass"
+      :tooltip="concurrencyTooltip"
+      :current="currentConcurrency"
+      :max="displayConcurrency"
+    >
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
       </svg>
@@ -21,24 +37,12 @@
       </svg>
     </CapacityBadge>
 
-    <!-- RPM 限制 -->
-    <CapacityBadge v-if="showRpmLimit" :color-class="rpmClass" :tooltip="rpmTooltip" :current="currentRPM" :max="account.base_rpm!" :suffix="rpmStrategyTag">
+    <!-- RPM 限制（动态降速时 max 是后端折算后的有效 RPM） -->
+    <CapacityBadge v-if="showRpmLimit" :color-class="rpmClass" :tooltip="rpmTooltip" :current="currentRPM" :max="displayRpm" :suffix="rpmStrategyTag">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
       </svg>
     </CapacityBadge>
-
-    <!-- 人格 Persona（启用时显示时区档 + 在班/下班） -->
-    <span
-      v-if="showPersona"
-      :class="['inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium', personaClass]"
-      :title="personaTooltip"
-    >
-      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-      </svg>
-      {{ personaLabel }}
-    </span>
 
     <!-- API Key 账号配额限制 -->
     <QuotaBadge v-if="showDailyQuota" :used="account.quota_daily_used ?? 0" :limit="account.quota_daily_limit!" label="D" />
@@ -48,11 +52,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import CapacityBadge from '@/components/account/CapacityBadge.vue'
 import QuotaBadge from '@/components/account/QuotaBadge.vue'
+import {
+  isCapacityManagedAccount,
+  matchPreset,
+  storedViewFromAccount
+} from '@/components/account/capacityBuilder'
+import { useCapacityPresets } from '@/composables/useCapacityPresets'
 
 const props = defineProps<{
   account: Account
@@ -60,12 +70,50 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+// ====== 动态降速 ======
+// 有效并发 / 有效 RPM 与降速系数都由后端折算后随账号返回（仅 Claude OAuth/SetupToken），
+// 这里只展示，不重算公式。系数 < 1 就是「降速中」。
+const throttleFactor = computed(() => props.account.throttle_factor)
+const isThrottled = computed(
+  () => typeof throttleFactor.value === 'number' && throttleFactor.value < 1
+)
+
+function throttledTooltip(effective: number, configured: number): string {
+  return t('admin.accounts.capacity.throttled', {
+    effective,
+    configured,
+    percent: Math.round((throttleFactor.value ?? 1) * 100)
+  })
+}
+
+// ====== 档位标签（由数值反推，仅托管账号；模板没加载 / 对不上则不显示） ======
+const { presets, ready: presetsReady, ensureLoaded } = useCapacityPresets()
+const isManaged = computed(() => isCapacityManagedAccount(props.account))
+
+onMounted(() => {
+  if (isManaged.value) void ensureLoaded()
+})
+
+const presetLabel = computed(() => {
+  if (!isManaged.value || !presetsReady.value) return ''
+  const key = matchPreset(storedViewFromAccount(props.account), presets.value)
+  return presets.value.find((preset) => preset.key === key)?.label ?? ''
+})
+
 // ====== 并发 ======
 const currentConcurrency = computed(() => props.account.current_concurrency || 0)
 
+const displayConcurrency = computed(
+  () => props.account.effective_concurrency ?? props.account.concurrency
+)
+
+const concurrencyTooltip = computed(() =>
+  isThrottled.value ? throttledTooltip(displayConcurrency.value, props.account.concurrency) : undefined
+)
+
 const concurrencyClass = computed(() => {
   const current = currentConcurrency.value
-  const max = props.account.concurrency
+  const max = displayConcurrency.value
   if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
   if (current > 0) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
@@ -144,15 +192,14 @@ const currentRPM = computed(() => props.account.current_rpm ?? 0)
 const rpmStrategy = computed(() => props.account.rpm_strategy || 'tiered')
 const rpmStrategyTag = computed(() => rpmStrategy.value === 'sticky_exempt' ? '[S]' : '[T]')
 
-const rpmBuffer = computed(() => {
-  const base = props.account.base_rpm || 0
-  return props.account.rpm_sticky_buffer ?? (base > 0 ? Math.max(1, Math.floor(base / 5)) : 0)
-})
+// 三区判定按有效 RPM（降速后）算；粘性缓冲由后端算好随账号返回，不随降速缩放
+const displayRpm = computed(() => props.account.effective_base_rpm ?? props.account.base_rpm ?? 0)
+const rpmBuffer = computed(() => props.account.rpm_sticky_buffer ?? 0)
 
 const rpmClass = computed(() => {
   if (!showRpmLimit.value) return ''
   const current = currentRPM.value
-  const base = props.account.base_rpm ?? 0
+  const base = displayRpm.value
   const buffer = rpmBuffer.value
   if (rpmStrategy.value === 'tiered') {
     if (current >= base + buffer) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
@@ -167,18 +214,22 @@ const rpmClass = computed(() => {
 const rpmTooltip = computed(() => {
   if (!showRpmLimit.value) return ''
   const current = currentRPM.value
-  const base = props.account.base_rpm ?? 0
+  const base = displayRpm.value
   const buffer = rpmBuffer.value
+  let zone: string
   if (rpmStrategy.value === 'tiered') {
-    if (current >= base + buffer) return t('admin.accounts.capacity.rpm.tieredBlocked', { buffer })
-    if (current >= base) return t('admin.accounts.capacity.rpm.tieredStickyOnly', { buffer })
-    if (current >= base * 0.8) return t('admin.accounts.capacity.rpm.tieredWarning')
-    return t('admin.accounts.capacity.rpm.tieredNormal')
+    if (current >= base + buffer) zone = t('admin.accounts.capacity.rpm.tieredBlocked', { buffer })
+    else if (current >= base) zone = t('admin.accounts.capacity.rpm.tieredStickyOnly', { buffer })
+    else if (current >= base * 0.8) zone = t('admin.accounts.capacity.rpm.tieredWarning')
+    else zone = t('admin.accounts.capacity.rpm.tieredNormal')
   } else {
-    if (current >= base) return t('admin.accounts.capacity.rpm.stickyExemptOver')
-    if (current >= base * 0.8) return t('admin.accounts.capacity.rpm.stickyExemptWarning')
-    return t('admin.accounts.capacity.rpm.stickyExemptNormal')
+    if (current >= base) zone = t('admin.accounts.capacity.rpm.stickyExemptOver')
+    else if (current >= base * 0.8) zone = t('admin.accounts.capacity.rpm.stickyExemptWarning')
+    else zone = t('admin.accounts.capacity.rpm.stickyExemptNormal')
   }
+  return isThrottled.value
+    ? `${throttledTooltip(displayRpm.value, props.account.base_rpm ?? 0)}\n${zone}`
+    : zone
 })
 
 // 格式化费用显示
@@ -186,33 +237,6 @@ const formatCost = (value: number | null | undefined) => {
   if (value === null || value === undefined) return '0'
   return value.toFixed(2)
 }
-
-// ====== 人格 Persona ======
-const personaExtra = computed(() => (props.account.extra || {}) as Record<string, unknown>)
-const personaPreset = computed(() =>
-  typeof personaExtra.value.persona_preset === 'string' ? (personaExtra.value.persona_preset as string) : ''
-)
-const showPersona = computed(() => {
-  if (personaPreset.value === 'aggressive' || personaPreset.value === 'balanced' || personaPreset.value === 'conservative') {
-    return true
-  }
-  return personaPreset.value !== 'off' && personaExtra.value.persona_enabled === true
-})
-const personaLabel = computed(() => {
-  if (personaPreset.value === 'aggressive' || personaPreset.value === 'balanced' || personaPreset.value === 'conservative') {
-    return t(`admin.accounts.persona.presetShort.${personaPreset.value}`)
-  }
-  return 'persona'
-})
-const personaClass = computed(() =>
-  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-)
-const personaTooltip = computed(() => {
-  if (personaPreset.value === 'aggressive' || personaPreset.value === 'balanced' || personaPreset.value === 'conservative') {
-    return t(`admin.accounts.persona.presetOptions.${personaPreset.value}`)
-  }
-  return t('admin.accounts.persona.label')
-})
 
 // ====== 配额 ======
 const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')

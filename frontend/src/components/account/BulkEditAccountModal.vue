@@ -1055,16 +1055,74 @@
         </div>
       </div>
 
-      <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
-      <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <!-- 容量档位（仅全部为 Anthropic OAuth/SetupToken 时显示）：只列模板，没有「自定义」 -->
+      <div v-if="capacityManaged" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
-          <label
-            id="bulk-edit-rpm-limit-label"
-            class="input-label mb-0"
-            for="bulk-edit-rpm-limit-enabled"
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-capacity-preset-label"
+              class="input-label mb-0"
+              for="bulk-edit-capacity-preset-enabled"
+            >
+              {{ t('admin.accounts.bulkEdit.capacityPreset.label') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.bulkEdit.capacityPreset.hint') }}
+            </p>
+          </div>
+          <input
+            v-model="enableCapacityPreset"
+            id="bulk-edit-capacity-preset-enabled"
+            type="checkbox"
+            :disabled="!capacityPresetsReady"
+            aria-controls="bulk-edit-capacity-preset-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-capacity-preset-body"
+          :class="!enableCapacityPreset && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-capacity-preset-label"
+        >
+          <select
+            v-if="capacityPresetsReady"
+            v-model="capacityPresetKey"
+            data-testid="bulk-edit-capacity-preset-select"
+            class="input w-full"
           >
-            {{ t('admin.accounts.quotaControl.rpmLimit.label') }}
-          </label>
+            <option v-for="preset in capacityPresets" :key="preset.key" :value="preset.key">
+              {{ presetOptionLabel(preset, t) }}
+            </option>
+          </select>
+          <p
+            v-else-if="capacityPresetsFailed"
+            data-testid="bulk-edit-capacity-presets-unavailable"
+            class="input-hint text-amber-600 dark:text-amber-400"
+          >
+            {{ t('admin.accounts.capacityFields.presetsUnavailable') }}
+          </p>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.bulkEdit.capacityPreset.orderHint') }}
+          </p>
+        </div>
+      </div>
+
+      <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
+      <div v-if="capacityManaged" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-rpm-limit-label"
+              class="input-label mb-0"
+              for="bulk-edit-rpm-limit-enabled"
+            >
+              {{ t('admin.accounts.quotaControl.rpmLimit.label') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.bulkEdit.capacityPreset.rpmOverrideHint') }}
+            </p>
+          </div>
           <input
             v-model="enableRpmLimit"
             id="bulk-edit-rpm-limit-enabled"
@@ -1080,36 +1138,18 @@
           role="group"
           aria-labelledby="bulk-edit-rpm-limit-label"
         >
-          <div class="mb-3 flex items-center justify-between">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.quotaControl.rpmLimit.hint') }}</span>
-            <button
-              type="button"
-              @click="rpmLimitEnabled = !rpmLimitEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                rpmLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  rpmLimitEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="rpmLimitEnabled" class="space-y-3">
+          <div class="space-y-3">
             <div>
               <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
               <input
                 v-model.number="bulkBaseRpm"
+                data-testid="bulk-edit-base-rpm"
                 type="number"
-                min="1"
+                min="0"
                 max="1000"
                 step="1"
                 class="input"
-                :placeholder="t('admin.accounts.quotaControl.rpmLimit.baseRpmPlaceholder')"
+                placeholder="0"
               />
               <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpmHint') }}</p>
             </div>
@@ -1156,9 +1196,8 @@
               />
               <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBufferHint') }}</p>
             </div>
-
-            </div>
           </div>
+        </div>
 
         <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
         <div class="mt-4">
@@ -1178,54 +1217,6 @@
               {{ opt.label }}
             </button>
           </div>
-        </div>
-      </div>
-
-      <!-- Persona Preset / 防封档位 (仅 Anthropic OAuth/SetupToken) -->
-      <div
-        v-if="allAnthropicOAuthOrSetupToken"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="mb-3 flex items-center justify-between">
-          <div class="flex-1 pr-4">
-            <label
-              id="bulk-edit-persona-label"
-              class="input-label mb-0"
-              for="bulk-edit-persona-enabled"
-            >
-              {{ t('admin.accounts.persona.label') }}
-            </label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.persona.hint') }}
-            </p>
-          </div>
-          <input
-            v-model="enablePersona"
-            id="bulk-edit-persona-enabled"
-            type="checkbox"
-            aria-controls="bulk-edit-persona-body"
-            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-          />
-        </div>
-        <div
-          id="bulk-edit-persona-body"
-          :class="!enablePersona && 'pointer-events-none opacity-50'"
-          role="group"
-          aria-labelledby="bulk-edit-persona-label"
-        >
-          <select
-            v-model="personaPreset"
-            class="input w-full"
-          >
-            <option value="">{{ t('admin.accounts.persona.presetOptions.none') }}</option>
-            <option value="off">{{ t('admin.accounts.persona.presetOptions.off') }}</option>
-            <option value="aggressive">{{ t('admin.accounts.persona.presetOptions.aggressive') }}</option>
-            <option value="balanced">{{ t('admin.accounts.persona.presetOptions.balanced') }}</option>
-            <option value="conservative">{{ t('admin.accounts.persona.presetOptions.conservative') }}</option>
-          </select>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.persona.presetHint') }}
-          </p>
         </div>
       </div>
 
@@ -1327,6 +1318,16 @@ import {
 } from '@/composables/useModelWhitelist'
 import HeaderOverrideJsonTools from '@/components/account/HeaderOverrideJsonTools.vue'
 import {
+  capacityBulkPatch,
+  isCapacityManagedFilter,
+  isCapacityManagedSelection,
+  presetOptionLabel,
+  presetToValues,
+  rpmBulkPatch,
+  umqBulkPatch
+} from '@/components/account/capacityBuilder'
+import { useCapacityPresets } from '@/composables/useCapacityPresets'
+import {
   buildHeaderOverridesObject,
   getHeaderOverrideTemplate,
   isHeaderOverrideCapable,
@@ -1417,14 +1418,22 @@ const allHeaderOverrideCapable = computed(() => {
   )
 })
 
-// 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
-const allAnthropicOAuthOrSetupToken = computed(() => {
-  return (
-    targetSelectedPlatforms.value.length === 1 &&
-    targetSelectedPlatforms.value[0] === 'anthropic' &&
-    targetSelectedTypes.value.every(t => t === 'oauth' || t === 'setup-token')
-  )
-})
+// 是否全部为 Anthropic OAuth/SetupToken（容量档位、RPM、用户消息限速仅在此条件下显示）。
+// 按选中账号：types 必须非空；按筛选结果：必须由筛选条件显式限定 platform=anthropic 且
+// type 为 oauth/setup-token，不能只信前 100 条预览（预览之外的账号可能是别的平台或类型）。
+const capacityManaged = computed(() =>
+  targetMode.value === 'filtered'
+    ? isCapacityManagedFilter(props.target?.filters)
+    : isCapacityManagedSelection(targetSelectedPlatforms.value, targetSelectedTypes.value)
+)
+
+const {
+  presets: capacityPresets,
+  defaultKey: capacityDefaultKey,
+  ready: capacityPresetsReady,
+  failed: capacityPresetsFailed,
+  ensureLoaded: ensureCapacityPresetsLoaded
+} = useCapacityPresets()
 
 const filteredPresets = computed(() => {
   if (targetSelectedPlatforms.value.length === 0) return []
@@ -1469,7 +1478,7 @@ const enableCodexCLIOnlyAppServer = ref(false)
 const enableOpenAICompactMode = ref(false)
 const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
-const enablePersona = ref(false)
+const enableCapacityPreset = ref(false)
 
 // State - field values
 const submitting = ref(false)
@@ -1530,12 +1539,11 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAICompactModelMappings = ref<ModelMapping[]>([])
-const rpmLimitEnabled = ref(false)
+const capacityPresetKey = ref('')
 const bulkBaseRpm = ref<number | null>(null)
 const bulkRpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
 const bulkRpmStickyBuffer = ref<number | null>(null)
 const userMsgQueueMode = ref<string | null>(null)
-const personaPreset = ref('balanced')
 const umqModeOptions = computed(() => [
   { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },
   { value: 'throttle', label: t('admin.accounts.quotaControl.rpmLimit.umqModeThrottle') },
@@ -1687,6 +1695,16 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.proxy_id = proxyId.value === null ? 0 : proxyId.value
   }
 
+  // 容量档位先写：与下面的「并发」「RPM」细项同时勾选时，细项后写、覆盖档位里的同名项
+  if (capacityManaged.value && enableCapacityPreset.value) {
+    const preset = capacityPresets.value.find((item) => item.key === capacityPresetKey.value)
+    if (preset) {
+      const patch = capacityBulkPatch(presetToValues(preset))
+      updates.concurrency = patch.concurrency
+      Object.assign(ensureExtra(), patch.extra)
+    }
+  }
+
   if (enableConcurrency.value) {
     updates.concurrency = concurrency.value
   }
@@ -1810,41 +1828,21 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     credentialsChanged = true
   }
 
-  // RPM limit settings (写入 extra 字段)
-  if (enableRpmLimit.value) {
-    const extra = ensureExtra()
-    if (rpmLimitEnabled.value && bulkBaseRpm.value != null && bulkBaseRpm.value > 0) {
-      extra.base_rpm = bulkBaseRpm.value
-      extra.rpm_strategy = bulkRpmStrategy.value
-      if (bulkRpmStickyBuffer.value != null && bulkRpmStickyBuffer.value > 0) {
-        extra.rpm_sticky_buffer = bulkRpmStickyBuffer.value
-      }
-    } else {
-      // 关闭 RPM 限制 - 设置 base_rpm 为 0，并用空值覆盖关联字段
-      // 后端使用 JSONB || merge 语义，不会删除已有 key，
-      // 所以必须显式发送空值来重置（后端读取时会 fallback 到默认值）
-      extra.base_rpm = 0
-      extra.rpm_strategy = ''
-      extra.rpm_sticky_buffer = 0
-    }
-    updates.extra = extra
+  // RPM（写入 extra）：RPM 为 0 / 留空 = 关闭，后端是 JSONB 合并语义删不了键，由 rpmBulkPatch 显式写空值重置
+  if (capacityManaged.value && enableRpmLimit.value) {
+    Object.assign(
+      ensureExtra(),
+      rpmBulkPatch({
+        baseRpm: bulkBaseRpm.value,
+        strategy: bulkRpmStrategy.value,
+        stickyBuffer: bulkRpmStickyBuffer.value
+      })
+    )
   }
 
-  // Persona preset (写入 extra 字段)
-  if (enablePersona.value) {
-    const extra = ensureExtra()
-    if (personaPreset.value) {
-      extra.persona_preset = personaPreset.value
-    } else {
-      extra.persona_preset = ''
-    }
-  }
-
-  // UMQ mode（独立于 RPM 保存）
-  if (userMsgQueueMode.value !== null) {
-    const umqExtra = ensureExtra()
-    umqExtra.user_msg_queue_mode = userMsgQueueMode.value  // '' = 清除账号级覆盖
-    umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
+  // 用户消息限速（独立于 RPM 保存）：null = 本次不改，'' = 清除账号级覆盖
+  if (capacityManaged.value && userMsgQueueMode.value !== null) {
+    Object.assign(ensureExtra(), umqBulkPatch(userMsgQueueMode.value))
   }
 
   if (credentialsChanged) {
@@ -1920,9 +1918,9 @@ const handleSubmit = async () => {
     enableCodexCLIOnlyAppServer.value ||
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
-    enableRpmLimit.value ||
-    enablePersona.value ||
-    userMsgQueueMode.value !== null
+    (capacityManaged.value && enableCapacityPreset.value) ||
+    (capacityManaged.value && enableRpmLimit.value) ||
+    (capacityManaged.value && userMsgQueueMode.value !== null)
 
   if (!hasAnyFieldEnabled) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
@@ -2024,6 +2022,27 @@ const handleMixedChannelCancel = () => {
   pendingUpdatesForConfirm.value = null
 }
 
+// 打开弹窗时确保档位模板已加载（失败时静默降级：档位块显示「不可用」提示，其余批量项照常可用）
+watch(
+  () => props.show,
+  (show) => {
+    if (show) void ensureCapacityPresetsLoaded()
+  },
+  { immediate: true }
+)
+
+// 下拉默认选中设置里的默认档位（没有就取第一个），只是预选，不勾选「应用」
+watch(
+  [capacityPresetsReady, capacityPresetKey],
+  ([ready, key]) => {
+    if (!ready) return
+    if (capacityPresets.value.some((preset) => preset.key === key)) return
+    const preferred = capacityPresets.value.find((preset) => preset.key === capacityDefaultKey.value)
+    capacityPresetKey.value = (preferred ?? capacityPresets.value[0]).key
+  },
+  { immediate: true }
+)
+
 // Reset form when modal closes
 watch(
   () => props.show,
@@ -2050,7 +2069,7 @@ watch(
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
-      enablePersona.value = false
+      enableCapacityPreset.value = false
 
       // Reset all values
       baseUrl.value = ''
@@ -2076,12 +2095,11 @@ watch(
       codexCLIOnlyAppServerEnabled.value = false
       openAICompactMode.value = 'auto'
       openAICompactModelMappings.value = []
-      rpmLimitEnabled.value = false
+      capacityPresetKey.value = ''
       bulkBaseRpm.value = null
       bulkRpmStrategy.value = 'tiered'
       bulkRpmStickyBuffer.value = null
       userMsgQueueMode.value = null
-      personaPreset.value = 'balanced'
 
       // Reset mixed channel warning state
       showMixedChannelWarning.value = false

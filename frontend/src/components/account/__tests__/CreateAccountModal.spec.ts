@@ -223,24 +223,6 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 
-  it('uses selectable persona timezone/locale presets with proxy-auto defaults', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'admin.accounts.claudeCode')
-    await flushPromises()
-
-    const timezone = wrapper.get<HTMLSelectElement>('[data-testid="persona-timezone-select"]')
-    const locale = wrapper.get<HTMLSelectElement>('[data-testid="persona-locale-select"]')
-    expect(timezone.element.value).toBe('')
-    expect(locale.element.value).toBe('')
-    expect(timezone.text()).toContain('admin.accounts.persona.timezoneOptions.auto')
-    expect(timezone.text()).toContain('admin.accounts.persona.timezoneOptions.china')
-    expect(timezone.text()).toContain('admin.accounts.persona.timezoneOptions.usEastern')
-
-    await timezone.setValue('Asia/Shanghai')
-    await flushPromises()
-    expect(locale.element.value).toBe('zh-CN')
-  })
-
   it('leaves Codex session import billing ownership to the backend', async () => {
     const wrapper = await openCodexImportStep()
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')

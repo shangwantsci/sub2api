@@ -1454,9 +1454,10 @@
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div>
+        <!-- Claude OAuth/SetupToken 的并发在「容量与节流」卡里，这里只服务其它类型 -->
+        <div v-if="!isCapacityManaged">
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
-          <input v-model.number="form.concurrency" type="number" min="1" class="input"
+          <input v-model.number="form.concurrency" data-testid="account-concurrency" type="number" min="1" class="input"
             @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
         </div>
         <div>
@@ -2103,246 +2104,38 @@
         </div>
       </div>
 
-      <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
+      <!-- 容量与节流 + 请求伪装 (仅 Anthropic OAuth/SetupToken) -->
       <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="isCapacityManaged"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
-          <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
+        <AccountCapacityFields
+          v-model:concurrency="capacityState.concurrency"
+          v-model:maxSessions="capacityState.maxSessions"
+          v-model:sessionIdleTimeout="capacityState.sessionIdleTimeout"
+          v-model:windowCostLimit="capacityState.windowCostLimit"
+          v-model:windowCostStickyReserve="capacityState.windowCostStickyReserve"
+          v-model:baseRpm="capacityState.baseRpm"
+          v-model:rpmStrategy="capacityState.rpmStrategy"
+          v-model:rpmStickyBuffer="capacityState.rpmStickyBuffer"
+          v-model:userMsgQueueMode="capacityState.userMsgQueueMode"
+          v-model:adaptiveThrottle="capacityState.adaptiveThrottle"
+          v-model:nurturing="capacityState.nurturing"
+          :presets="capacityPresets"
+          :presets-ready="capacityPresetsReady"
+          :presets-failed="capacityPresetsFailed"
+          :matched-key="capacityMatchedKey"
+          :nurturing-global-enabled="capacityNurturingGlobal"
+          id-prefix="edit-capacity"
+          @pick="capacity.applyPreset"
+          @touch="capacity.markTouched"
+        />
+
+        <div class="mb-3 pt-2">
+          <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.disguiseTitle') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.quotaControl.hint') }}
+            {{ t('admin.accounts.quotaControl.disguiseHint') }}
           </p>
-        </div>
-
-        <!-- Window Cost Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.windowCost.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.quotaControl.windowCost.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="windowCostEnabled = !windowCostEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                windowCostEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  windowCostEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="windowCostEnabled" class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.limit') }}</label>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                <input
-                  v-model.number="windowCostLimit"
-                  type="number"
-                  min="0"
-                  step="1"
-                  class="input pl-7"
-                  :placeholder="t('admin.accounts.quotaControl.windowCost.limitPlaceholder')"
-                />
-              </div>
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.windowCost.limitHint') }}</p>
-            </div>
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.stickyReserve') }}</label>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                <input
-                  v-model.number="windowCostStickyReserve"
-                  type="number"
-                  min="0"
-                  step="1"
-                  class="input pl-7"
-                  :placeholder="t('admin.accounts.quotaControl.windowCost.stickyReservePlaceholder')"
-                />
-              </div>
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.windowCost.stickyReserveHint') }}</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Session Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionLimit.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.quotaControl.sessionLimit.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="sessionLimitEnabled = !sessionLimitEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                sessionLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  sessionLimitEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="sessionLimitEnabled" class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessions') }}</label>
-              <input
-                v-model.number="maxSessions"
-                type="number"
-                min="1"
-                step="1"
-                class="input"
-                :placeholder="t('admin.accounts.quotaControl.sessionLimit.maxSessionsPlaceholder')"
-              />
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessionsHint') }}</p>
-            </div>
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.idleTimeout') }}</label>
-              <div class="relative">
-                <input
-                  v-model.number="sessionIdleTimeout"
-                  type="number"
-                  min="1"
-                  step="1"
-                  class="input pr-12"
-                  :placeholder="t('admin.accounts.quotaControl.sessionLimit.idleTimeoutPlaceholder')"
-                />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">{{ t('common.minutes') }}</span>
-              </div>
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.sessionLimit.idleTimeoutHint') }}</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- RPM Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.rpmLimit.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.quotaControl.rpmLimit.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="rpmLimitEnabled = !rpmLimitEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                rpmLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  rpmLimitEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="rpmLimitEnabled" class="space-y-4">
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
-              <input
-                v-model.number="baseRpm"
-                type="number"
-                min="1"
-                max="1000"
-                step="1"
-                class="input"
-                :placeholder="t('admin.accounts.quotaControl.rpmLimit.baseRpmPlaceholder')"
-              />
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpmHint') }}</p>
-            </div>
-
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.strategy') }}</label>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  @click="rpmStrategy = 'tiered'"
-                  :class="[
-                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
-                    rpmStrategy === 'tiered'
-                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-                  ]"
-                >
-                  <div class="text-center">
-                    <div>{{ t('admin.accounts.quotaControl.rpmLimit.strategyTiered') }}</div>
-                    <div class="mt-0.5 text-[10px] opacity-70">{{ t('admin.accounts.quotaControl.rpmLimit.strategyTieredHint') }}</div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  @click="rpmStrategy = 'sticky_exempt'"
-                  :class="[
-                    'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
-                    rpmStrategy === 'sticky_exempt'
-                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-                  ]"
-                >
-                  <div class="text-center">
-                    <div>{{ t('admin.accounts.quotaControl.rpmLimit.strategyStickyExempt') }}</div>
-                    <div class="mt-0.5 text-[10px] opacity-70">{{ t('admin.accounts.quotaControl.rpmLimit.strategyStickyExemptHint') }}</div>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            <div v-if="rpmStrategy === 'tiered'">
-              <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
-              <input
-                v-model.number="rpmStickyBuffer"
-                type="number"
-                min="1"
-                step="1"
-                class="input"
-                :placeholder="t('admin.accounts.quotaControl.rpmLimit.stickyBufferPlaceholder')"
-              />
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBufferHint') }}</p>
-            </div>
-
-          </div>
-
-          <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
-          <div class="mt-4">
-            <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueue') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 mb-2">
-              {{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueueHint') }}
-            </p>
-            <div class="flex space-x-2">
-              <button type="button" v-for="opt in umqModeOptions" :key="opt.value"
-                @click="userMsgQueueMode = opt.value"
-                :class="[
-                  'px-3 py-1.5 text-sm rounded-md border transition-colors',
-                  userMsgQueueMode === opt.value
-                    ? 'bg-primary-600 text-white border-primary-600'
-                    : 'bg-white dark:bg-dark-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-500 hover:bg-gray-50 dark:hover:bg-dark-600'
-                ]">
-                {{ opt.label }}
-              </button>
-            </div>
-          </div>
         </div>
 
         <!-- TLS Fingerprint -->
@@ -2353,10 +2146,18 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.quotaControl.tlsFingerprint.hint') }}
               </p>
+              <p
+                v-if="tlsFingerprintUnset && !tlsFingerprintTouched"
+                data-testid="tls-fingerprint-unset-hint"
+                class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+              >
+                {{ t('admin.accounts.quotaControl.tlsFingerprint.unsetHint') }}
+              </p>
             </div>
             <button
               type="button"
-              @click="tlsFingerprintEnabled = !tlsFingerprintEnabled"
+              data-testid="tls-fingerprint-toggle"
+              @click="toggleTlsFingerprint"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
                 tlsFingerprintEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
@@ -2404,79 +2205,6 @@
                 ]"
               />
             </button>
-          </div>
-        </div>
-
-        <!-- 防封策略（预设档位 + 可选高级设置） -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.persona.label') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.persona.hint') }}
-            </p>
-          </div>
-          <div class="mt-3 space-y-3">
-            <!-- 防封档位下拉框 -->
-            <div>
-              <label class="input-label">{{ t('admin.accounts.persona.preset') }}</label>
-              <select
-                v-model="personaPreset"
-                class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
-              >
-                <option value="">{{ t('admin.accounts.persona.presetOptions.none') }}</option>
-                <option value="off">{{ t('admin.accounts.persona.presetOptions.off') }}</option>
-                <option value="aggressive">{{ t('admin.accounts.persona.presetOptions.aggressive') }}</option>
-                <option value="balanced">{{ t('admin.accounts.persona.presetOptions.balanced') }}</option>
-                <option value="conservative">{{ t('admin.accounts.persona.presetOptions.conservative') }}</option>
-              </select>
-              <p class="input-hint">{{ t('admin.accounts.persona.presetHint') }}</p>
-            </div>
-
-            <!-- 高级设置折叠区 -->
-            <div v-if="personaPreset !== 'off'">
-              <button
-                type="button"
-                class="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                @click="personaAdvancedOpen = !personaAdvancedOpen"
-              >
-                <svg :class="['h-3 w-3 transition-transform', personaAdvancedOpen ? 'rotate-90' : '']" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
-                {{ t('admin.accounts.persona.advancedToggle') }}
-              </button>
-              <div v-if="personaAdvancedOpen" class="mt-2 space-y-3 border-l-2 border-gray-200 pl-3 dark:border-dark-500">
-                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.persona.advancedHint') }}</p>
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.persona.timezone') }}</label>
-                  <Select
-                    v-model="personaTimezone"
-                    data-testid="persona-timezone-select"
-                    :options="personaTimezoneOptions"
-                    :searchable="false"
-                  />
-                  <p class="input-hint">{{ t('admin.accounts.persona.timezoneHint') }}</p>
-                </div>
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.persona.locale') }}</label>
-                  <Select
-                    v-model="personaLocale"
-                    data-testid="persona-locale-select"
-                    :options="personaLocaleOptions"
-                    :searchable="false"
-                  />
-                  <p class="input-hint">{{ t('admin.accounts.persona.localeHint') }}</p>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.persona.maxConcurrency') }}</label>
-                    <input v-model.number="personaMaxConcurrency" type="number" min="0" class="input" placeholder="" />
-                  </div>
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.persona.dailyCap') }}</label>
-                    <input v-model.number="personaDailyCap" type="number" min="0" class="input" placeholder="0" />
-                  </div>
-                </div>
-                <p class="input-hint">{{ t('admin.accounts.persona.dailyCapHint') }}</p>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -2699,12 +2427,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
+import { useAccountCapacity } from '@/composables/useAccountCapacity'
 import type {
   Account,
   Proxy,
@@ -2723,7 +2452,9 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
+import AccountCapacityFields from '@/components/account/AccountCapacityFields.vue'
 import HeaderOverrideJsonTools from '@/components/account/HeaderOverrideJsonTools.vue'
+import { isCapacityManagedAccount } from '@/components/account/capacityBuilder'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,
@@ -2743,12 +2474,6 @@ import {
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
-import {
-  PERSONA_LOCALE_PRESETS,
-  PERSONA_TIMEZONE_PRESETS,
-  buildPersonaSelectOptions,
-  defaultPersonaLocaleForTimezone,
-} from '@/constants/persona'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -2973,56 +2698,14 @@ const mixedChannelWarningRawMessage = ref('')
 const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
 
-// Quota control state (Anthropic OAuth/SetupToken only)
-const windowCostEnabled = ref(false)
-const windowCostLimit = ref<number | null>(null)
-const windowCostStickyReserve = ref<number | null>(null)
-const sessionLimitEnabled = ref(false)
-const maxSessions = ref<number | null>(null)
-const sessionIdleTimeout = ref<number | null>(null)
-const rpmLimitEnabled = ref(false)
-const baseRpm = ref<number | null>(null)
-const rpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
-const rpmStickyBuffer = ref<number | null>(null)
-
-// 防封策略 (Anthropic OAuth/SetupToken only; stored in account.extra).
-// 配了 preset 就自动生效，无需全局开关。
-const personaPreset = ref('')
-const personaAdvancedOpen = ref(false)
-const personaEnabled = ref(false)
-const personaTimezone = ref('')
-const personaLocale = ref('')
-const personaActiveStart = ref<number | null>(null)
-const personaActiveEnd = ref<number | null>(null)
-const personaMaxConcurrency = ref<number | null>(null)
-const personaDailyCap = ref<number | null>(null)
-const personaTimezoneOptions = computed(() =>
-  buildPersonaSelectOptions(
-    PERSONA_TIMEZONE_PRESETS,
-    personaTimezone.value,
-    (key, params) => t(key, params || {}),
-  ),
-)
-const personaLocaleOptions = computed(() =>
-  buildPersonaSelectOptions(
-    PERSONA_LOCALE_PRESETS,
-    personaLocale.value,
-    (key, params) => t(key, params || {}),
-  ),
-)
-watch(personaTimezone, (next, previous) => {
-  const previousDefault = defaultPersonaLocaleForTimezone(previous)
-  if (!personaLocale.value || personaLocale.value === previousDefault) {
-    personaLocale.value = defaultPersonaLocaleForTimezone(next)
-  }
-})
-const userMsgQueueMode = ref('')
-const umqModeOptions = computed(() => [
-  { value: '', label: t('admin.accounts.quotaControl.rpmLimit.umqModeOff') },
-  { value: 'throttle', label: t('admin.accounts.quotaControl.rpmLimit.umqModeThrottle') },
-  { value: 'serialize', label: t('admin.accounts.quotaControl.rpmLimit.umqModeSerialize') },
-])
+// 请求伪装状态（Anthropic OAuth/SetupToken only）。容量与节流全部在 useAccountCapacity 里。
+//
+// TLS 指纹是三态（缺省 / true / false）。读 account.extra.enable_tls_fingerprint 的原值：
+// - tlsFingerprintUnset：账号上没有显式值（Claude 伪装路径下等于默认使用内置指纹）
+// - tlsFingerprintTouched：用户拨动过开关。没拨动就不写不删，拨动了才写显式布尔
 const tlsFingerprintEnabled = ref(false)
+const tlsFingerprintUnset = ref(false)
+const tlsFingerprintTouched = ref(false)
 const tlsFingerprintProfileId = ref<number | null>(null)
 const tlsFingerprintProfiles = ref<{ id: number; name: string }[]>([])
 const sessionIdMaskingEnabled = ref(false)
@@ -3350,6 +3033,24 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+// 容量与节流（Claude OAuth/SetupToken）。并发与 form.concurrency 共用同一个 ref。
+const capacity = useAccountCapacity({ concurrency: toRef(form, 'concurrency') })
+const {
+  state: capacityState,
+  presets: capacityPresets,
+  presetsReady: capacityPresetsReady,
+  presetsFailed: capacityPresetsFailed,
+  matchedKey: capacityMatchedKey,
+  nurturingGlobalEnabled: capacityNurturingGlobal
+} = capacity
+
+const isCapacityManaged = computed(() => isCapacityManagedAccount(props.account))
+
+function toggleTlsFingerprint() {
+  tlsFingerprintEnabled.value = !tlsFingerprintEnabled.value
+  tlsFingerprintTouched.value = true
+}
 
 const statusOptions = computed(() => {
   const options = [
@@ -3760,6 +3461,8 @@ watch(
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
       loadGroupSchedulingPriorities()
+      // 档位模板与全局养号开关；加载失败时降级（不显示档位标签、养号置灰），不影响编辑
+      if (isCapacityManagedAccount(newAccount)) void capacity.ensureReady()
     }
   },
   { immediate: true }
@@ -4003,96 +3706,32 @@ function loadTempUnschedRules(credentials?: Record<string, unknown>) {
   })
 }
 
-// Load quota control settings from account (Anthropic OAuth/SetupToken only)
+// Load capacity & disguise settings from account (Anthropic OAuth/SetupToken only)
 function loadQuotaControlSettings(account: Account) {
-  // Reset all quota control state first
-  windowCostEnabled.value = false
-  windowCostLimit.value = null
-  windowCostStickyReserve.value = null
-  sessionLimitEnabled.value = false
-  maxSessions.value = null
-  sessionIdleTimeout.value = null
-  rpmLimitEnabled.value = false
-  baseRpm.value = null
-  rpmStrategy.value = 'tiered'
-  rpmStickyBuffer.value = null
-  userMsgQueueMode.value = ''
+  // 先全部复位，再按账号载入
+  capacity.reset()
   tlsFingerprintEnabled.value = false
+  tlsFingerprintUnset.value = false
+  tlsFingerprintTouched.value = false
   tlsFingerprintProfileId.value = null
   sessionIdMaskingEnabled.value = false
   cacheTTLOverrideEnabled.value = false
   cacheTTLOverrideTarget.value = '5m'
   customBaseUrlEnabled.value = false
   customBaseUrl.value = ''
-  personaPreset.value = ''
-  personaAdvancedOpen.value = false
-  personaEnabled.value = false
-  personaTimezone.value = ''
-  personaLocale.value = ''
-  personaActiveStart.value = null
-  personaActiveEnd.value = null
-  personaMaxConcurrency.value = null
-  personaDailyCap.value = null
 
-  // Remaining quota control settings only apply to Anthropic accounts
-  if (account.platform !== 'anthropic') {
+  // 以下设置只对 Anthropic OAuth/SetupToken 账号生效
+  if (!isCapacityManagedAccount(account)) {
     return
   }
 
-  // Window cost / session limit only apply to Anthropic OAuth/SetupToken accounts
-  if (account.type !== 'oauth' && account.type !== 'setup-token') {
-    return
-  }
+  // 容量与节流：并发读账号列，其余读 extra 里的显式值
+  capacity.loadFromAccount(account)
 
-  // Load from extra field (via backend DTO fields)
-  if (account.window_cost_limit != null && account.window_cost_limit > 0) {
-    windowCostEnabled.value = true
-    windowCostLimit.value = account.window_cost_limit
-    windowCostStickyReserve.value = account.window_cost_sticky_reserve ?? 10
-  }
-
-  if (account.max_sessions != null && account.max_sessions > 0) {
-    sessionLimitEnabled.value = true
-    maxSessions.value = account.max_sessions
-    sessionIdleTimeout.value = account.session_idle_timeout_minutes ?? 5
-  }
-
-  // 防封策略: read directly from extra (backend DTO does not promote persona_* keys).
-  {
-    const ex = (account.extra || {}) as Record<string, unknown>
-    if (typeof ex.persona_preset === 'string' && ex.persona_preset) {
-      personaPreset.value = ex.persona_preset as string
-    } else {
-      personaPreset.value = ''
-    }
-    personaEnabled.value = ex.persona_enabled === true
-    if (typeof ex.persona_timezone === 'string') personaTimezone.value = ex.persona_timezone
-    if (typeof ex.persona_locale === 'string') personaLocale.value = ex.persona_locale
-    if (typeof ex.persona_active_start_hour === 'number') personaActiveStart.value = ex.persona_active_start_hour
-    if (typeof ex.persona_active_end_hour === 'number') personaActiveEnd.value = ex.persona_active_end_hour
-    if (typeof ex.persona_max_concurrency === 'number') personaMaxConcurrency.value = ex.persona_max_concurrency
-    if (typeof ex.persona_daily_request_cap === 'number') personaDailyCap.value = ex.persona_daily_request_cap
-    // 有高级字段被手动设置时自动展开高级区域
-    if (personaTimezone.value || personaLocale.value || personaMaxConcurrency.value || personaDailyCap.value) {
-      personaAdvancedOpen.value = true
-    }
-  }
-
-  // RPM limit
-  if (account.base_rpm != null && account.base_rpm > 0) {
-    rpmLimitEnabled.value = true
-    baseRpm.value = account.base_rpm
-    rpmStrategy.value = (account.rpm_strategy as 'tiered' | 'sticky_exempt') || 'tiered'
-    rpmStickyBuffer.value = account.rpm_sticky_buffer ?? null
-  }
-
-  // UMQ mode（独立于 RPM 加载，防止编辑无 RPM 账号时丢失已有配置）
-  userMsgQueueMode.value = account.user_msg_queue_mode ?? ''
-
-  // Load TLS fingerprint setting
-  if (account.enable_tls_fingerprint === true) {
-    tlsFingerprintEnabled.value = true
-  }
+  // TLS 指纹三态：读 extra 里的原值。缺省时开关显示为关，并提示「未显式设置」
+  const tlsRaw = (account.extra as Record<string, unknown> | undefined)?.enable_tls_fingerprint
+  tlsFingerprintUnset.value = typeof tlsRaw !== 'boolean'
+  tlsFingerprintEnabled.value = tlsRaw === true
   tlsFingerprintProfileId.value = account.tls_fingerprint_profile_id ?? null
 
   // Load session ID masking setting
@@ -4620,111 +4259,25 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    // For Anthropic OAuth/SetupToken accounts, handle quota control settings in extra
-    if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
+    // For Anthropic OAuth/SetupToken accounts, handle capacity & disguise settings in extra
+    if (isCapacityManaged.value) {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
 
-      // Window cost limit settings
-      if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-        newExtra.window_cost_limit = windowCostLimit.value
-        newExtra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-      } else {
-        delete newExtra.window_cost_limit
-        delete newExtra.window_cost_sticky_reserve
-      }
+      // 容量与节流（PUT 整体替换 extra：数值为 0 的限制会被删键，开关写显式布尔）
+      capacity.writeToExtra(newExtra)
 
-      // Session limit settings
-      if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-        newExtra.max_sessions = maxSessions.value
-        newExtra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-      } else {
-        delete newExtra.max_sessions
-        delete newExtra.session_idle_timeout_minutes
+      // TLS 指纹三态：开关没动不写不删（缺省 / 旧值原样保留），动了才写显式布尔
+      if (tlsFingerprintTouched.value) {
+        newExtra.enable_tls_fingerprint = tlsFingerprintEnabled.value
       }
-
-      // 防封策略 (merge into extra like the quota-control keys).
-      // 预设模式：写入 persona_preset，后端自动推导其余参数。
-      if (personaPreset.value) {
-        newExtra.persona_preset = personaPreset.value
-        // preset 非 off 时，高级覆盖参数（留空则用预设默认值）
-        if (personaPreset.value !== 'off') {
-          if (personaTimezone.value.trim()) newExtra.persona_timezone = personaTimezone.value.trim()
-          else delete newExtra.persona_timezone
-          if (personaLocale.value.trim()) newExtra.persona_locale = personaLocale.value.trim()
-          else delete newExtra.persona_locale
-          if (personaMaxConcurrency.value != null && personaMaxConcurrency.value > 0) newExtra.persona_max_concurrency = personaMaxConcurrency.value
-          else delete newExtra.persona_max_concurrency
-          if (personaDailyCap.value != null && personaDailyCap.value > 0) newExtra.persona_daily_request_cap = personaDailyCap.value
-          else delete newExtra.persona_daily_request_cap
-        }
-        // preset 模式下清理旧字段
-        delete newExtra.persona_enabled
-        delete newExtra.persona_active_start_hour
-        delete newExtra.persona_active_end_hour
-      } else if (personaEnabled.value) {
-        // 旧模式兼容：无 preset 但手动启用了 persona
-        newExtra.persona_enabled = true
-        if (personaTimezone.value.trim()) newExtra.persona_timezone = personaTimezone.value.trim()
-        else delete newExtra.persona_timezone
-        if (personaLocale.value.trim()) newExtra.persona_locale = personaLocale.value.trim()
-        else delete newExtra.persona_locale
-        if (personaActiveStart.value != null) newExtra.persona_active_start_hour = personaActiveStart.value
-        else delete newExtra.persona_active_start_hour
-        if (personaActiveEnd.value != null) newExtra.persona_active_end_hour = personaActiveEnd.value
-        else delete newExtra.persona_active_end_hour
-        if (personaMaxConcurrency.value != null) newExtra.persona_max_concurrency = personaMaxConcurrency.value
-        else delete newExtra.persona_max_concurrency
-        if (personaDailyCap.value != null) newExtra.persona_daily_request_cap = personaDailyCap.value
-        else delete newExtra.persona_daily_request_cap
-        delete newExtra.persona_preset
-      } else {
-        delete newExtra.persona_preset
-        delete newExtra.persona_enabled
-        delete newExtra.persona_timezone
-        delete newExtra.persona_locale
-        delete newExtra.persona_active_start_hour
-        delete newExtra.persona_active_end_hour
-        delete newExtra.persona_max_concurrency
-        delete newExtra.persona_daily_request_cap
-      }
-
-      // RPM limit settings
-      if (rpmLimitEnabled.value) {
-        const DEFAULT_BASE_RPM = 15
-        newExtra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-          ? baseRpm.value
-          : DEFAULT_BASE_RPM
-        newExtra.rpm_strategy = rpmStrategy.value
-        if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-          newExtra.rpm_sticky_buffer = rpmStickyBuffer.value
-        } else {
-          delete newExtra.rpm_sticky_buffer
-        }
-      } else {
-        delete newExtra.base_rpm
-        delete newExtra.rpm_strategy
-        delete newExtra.rpm_sticky_buffer
-      }
-
-      // UMQ mode（独立于 RPM 保存）
-      if (userMsgQueueMode.value) {
-        newExtra.user_msg_queue_mode = userMsgQueueMode.value
-      } else {
-        delete newExtra.user_msg_queue_mode
-      }
-      delete newExtra.user_msg_queue_enabled  // 清理旧字段
-
-      // TLS fingerprint setting
       if (tlsFingerprintEnabled.value) {
-        newExtra.enable_tls_fingerprint = true
         if (tlsFingerprintProfileId.value) {
           newExtra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
         } else {
           delete newExtra.tls_fingerprint_profile_id
         }
-      } else {
-        delete newExtra.enable_tls_fingerprint
+      } else if (tlsFingerprintTouched.value) {
         delete newExtra.tls_fingerprint_profile_id
       }
 
