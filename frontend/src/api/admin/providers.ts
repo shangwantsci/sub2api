@@ -199,18 +199,69 @@ export async function updateSettings(payload: ProviderSettings): Promise<Provide
   return data
 }
 
-export async function getTierAffectedCount(tier: string): Promise<{ tier: string; affected: number }> {
-  const { data } = await apiClient.get<{ tier: string; affected: number }>(
-    `/admin/provider-settings/tiers/${encodeURIComponent(tier)}/affected-count`
-  )
-  return data
+/**
+ * 「应用到存量」会改写的六项数值，取值与预览接口返回的 changes[].field 一一对应。
+ * load_factor 是有效负载因子（账号没设负载因子时等于并发）：应用时会和并发一起对齐，所以必须在预览里可见。
+ */
+export type ProviderTierChangeField =
+  | 'concurrency'
+  | 'max_sessions'
+  | 'base_rpm'
+  | 'window_cost_limit'
+  | 'adaptive_throttle'
+  | 'load_factor'
+
+export interface ProviderTierChange {
+  field: ProviderTierChangeField
+  /** 数字或布尔：adaptive_throttle 是布尔；window_cost_limit 是美元，0 表示不限。 */
+  from: number | boolean
+  to: number | boolean
 }
 
-export async function applyTierToExisting(
+export interface ProviderTierPreviewSample {
+  account_id: number
+  name: string
+  changes: ProviderTierChange[]
+}
+
+export interface ProviderTierApplyPreview {
   tier: string
+  /** 该档位下的账号总数。 */
+  matched: number
+  /** 按当前模板写入后确实有数值会变的账号数；0 表示没有可改的。 */
+  will_change: number
+  /** 将被改动的账号样例：后端最多给 20 条、只含将改动的、按 id 升序。 */
+  samples: ProviderTierPreviewSample[]
+}
+
+/**
+ * 预览「应用到存量」：只读，不写任何账号。
+ *
+ * 管理员确认时拿到的 will_change 会原样作为 applyTierToExisting 的 expectedChanged，
+ * 后端据此识别「预览之后数据又变了」。
+ */
+export async function getTierApplyPreview(tier: string): Promise<ProviderTierApplyPreview> {
+  const { data } = await apiClient.get<ProviderTierApplyPreview>(
+    `/admin/provider-settings/tiers/${encodeURIComponent(tier)}/apply-preview`
+  )
+  // Go 的空切片可能序列化成 null，统一成空数组，页面就不用到处判空
+  return { ...data, samples: data.samples ?? [] }
+}
+
+/**
+ * 把档位模板写到该档位的存量账号。
+ *
+ * expectedChanged 必填（取自刚才预览的 will_change）：后端会重新计算，
+ * 与实际将改动的账号数不一致就返回 HTTP 409（reason 为 PRESET_APPLY_CONFLICT）且不写任何账号，
+ * 调用方应据此重新拉预览让管理员再确认一次。
+ */
+export async function applyTierToExisting(
+  tier: string,
+  expectedChanged: number
 ): Promise<{ matched: number; updated: number }> {
   const { data } = await apiClient.post<{ matched: number; updated: number }>(
-    `/admin/provider-settings/tiers/${encodeURIComponent(tier)}/apply-existing`
+    `/admin/provider-settings/tiers/${encodeURIComponent(tier)}/apply-existing`,
+    { expected_changed: expectedChanged }
   )
   return data
 }
@@ -227,7 +278,7 @@ const providersAPI = {
   exportSettlement,
   getSettings,
   updateSettings,
-  getTierAffectedCount,
+  getTierApplyPreview,
   applyTierToExisting,
 }
 

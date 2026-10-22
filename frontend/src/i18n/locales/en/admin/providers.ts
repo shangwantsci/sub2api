@@ -28,6 +28,9 @@ export default {
     generate: 'Generate',
     disable: 'Disable',
     enable: 'Enable',
+    disableConfirmTitle: 'Disable provider',
+    disableConfirmMessage:
+      'After disabling {provider}, this provider can no longer sign in, and all {total} of their accounts ({active} running) are paused automatically: they are no longer scheduled and produce no new usage. Re-enabling only resumes the accounts paused by this action; accounts you paused by hand stay paused. Pending settlement amounts are not affected and can still be settled.',
     batchPartialFailure:
       'Settled {settled}, {failed} failed: {detail}. The failed providers were not closed for this period; resolve the issue and retry.',
     voidReasonRequired: 'A reason is required to void a settlement',
@@ -158,11 +161,29 @@ export default {
     adaptiveOff: 'Off',
     colWindowCost: '5-hour window cap',
     windowCostZeroHint: '0 means unlimited',
+    // "Apply to existing": preview the real number of changes first, then let the admin confirm.
     applyToExisting: 'Apply to existing',
-    applyConfirmTitle: 'Apply to existing accounts',
-    applyConfirmMessage:
-      'This tier currently has {count} accounts. Concurrency, sessions, requests per minute, the window cap and adaptive throttle will be updated from the current preset; every other setting on the accounts stays as it is.',
-    applyResult: 'Updated {updated} of {matched} accounts',
+    applyConfirmTitle: 'Apply to existing accounts: tier {tier}',
+    applyConfirmMessage: 'Accounts that will change: {willChange} (out of {matched} in this tier).',
+    applyOverwriteWarning:
+      'This overwrites the concurrency, sessions, RPM, 5h cost limit, adaptive throttle and load factor that were adjusted by hand on these accounts with the preset values (the load factor is aligned together with the concurrency).',
+    applyNoMatched: 'This tier has no accounts yet, so there is nothing to apply.',
+    applyNoChange: 'No account needs changing: all {matched} in this tier already match the current preset.',
+    applySamplesMore: 'Only {shown} of them are listed; {rest} more will also change.',
+    // Keys mirror the field names in the changes returned by the preview endpoint
+    applyField: {
+      concurrency: 'Concurrency',
+      max_sessions: 'Sessions',
+      base_rpm: 'RPM',
+      window_cost_limit: '5h cost limit',
+      adaptive_throttle: 'Adaptive throttle',
+      load_factor: 'Load factor',
+    },
+    applyConfirmButton: 'Confirm and apply ({count})',
+    applyPreviewLoading: 'Working out which accounts will change...',
+    applyConflict: 'The account data changed while you were confirming. Please review it again.',
+    applyResult: 'Accounts updated: {updated} (out of {matched} in this tier)',
+    applyPreviewFailed: 'Failed to load the preview',
     applyFailed: 'Failed to apply',
 
     sectionCustomTier: 'Custom tier',

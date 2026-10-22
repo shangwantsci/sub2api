@@ -24,7 +24,10 @@ FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/adminLargeFilesI18nKeys.spec.ts \
 	src/views/provider/__tests__/ProviderOnboard.spec.ts \
 	src/views/public/__tests__/PoolHealthView.spec.ts \
-	src/api/__tests__/poolHealth.spec.ts
+	src/api/__tests__/poolHealth.spec.ts \
+	src/api/__tests__/admin.providers.spec.ts \
+	src/i18n/__tests__/providerI18nKeys.spec.ts \
+	src/views/admin/__tests__/ProvidersView.disable.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

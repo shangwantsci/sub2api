@@ -325,7 +325,7 @@ func registerProviderAdminRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		settings.GET("", h.Admin.Provider.GetSettings)
 		settings.PUT("", h.Admin.Provider.UpdateSettings)
-		settings.GET("/tiers/:tier/affected-count", h.Admin.Provider.GetTierAffectedCount)
+		settings.GET("/tiers/:tier/apply-preview", h.Admin.Provider.PreviewTierApplication)
 		settings.POST("/tiers/:tier/apply-existing", h.Admin.Provider.ApplyTierToExisting)
 	}
 }

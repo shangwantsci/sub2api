@@ -651,6 +651,24 @@
         </div>
       </template>
     </BaseDialog>
+
+    <!-- 停用确认：停用会连带暂停该供号商名下所有可调度账号，影响面比「禁止登录」大得多，不能点一下就执行 -->
+    <ConfirmDialog
+      :show="disableTarget !== null"
+      :title="t('admin.providers.disableConfirmTitle')"
+      :message="
+        t('admin.providers.disableConfirmMessage', {
+          provider: disableTarget?.email ?? '',
+          total: disableTarget?.accounts_total ?? 0,
+          active: disableTarget?.accounts_active ?? 0,
+        })
+      "
+      :confirm-text="t('admin.providers.disable')"
+      :cancel-text="t('common.cancel')"
+      danger
+      @confirm="confirmDisable"
+      @cancel="disableTarget = null"
+    />
   </AppLayout>
 </template>
 
@@ -660,6 +678,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api'
@@ -767,10 +786,28 @@ async function handleResetPassword() {
   }
 }
 
-// 停用后该供号商无法登录，其账号也不再产生新用量；
+// 停用 = 该供号商无法登录，且后端会把其名下所有可调度的账号自动暂停（不再被调度，也就不再产生新用量）。
+// 重新启用时只恢复当初被这次停用自动暂停的账号；管理员手动暂停过的账号保持暂停，不会被顺带放出来。
 // 已产生的待结算金额不受影响，仍可正常结算。
-async function toggleProviderStatus(row: ProviderSummary) {
-  const next = row.status === 'active' ? 'disabled' : 'active'
+// 切换后重新加载列表，「在跑 / 暂停」的账号数随之更新。
+// 停用要先确认（影响面是该供号商的全部账号）；启用只是恢复，直接执行。
+const disableTarget = ref<ProviderSummary | null>(null)
+
+function toggleProviderStatus(row: ProviderSummary) {
+  if (row.status === 'active') {
+    disableTarget.value = row
+    return
+  }
+  void applyProviderStatus(row, 'active')
+}
+
+function confirmDisable() {
+  const row = disableTarget.value
+  disableTarget.value = null
+  if (row) void applyProviderStatus(row, 'disabled')
+}
+
+async function applyProviderStatus(row: ProviderSummary, next: 'active' | 'disabled') {
   errorMessage.value = ''
   try {
     await adminAPI.users.update(row.user_id, { status: next })

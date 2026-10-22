@@ -291,12 +291,17 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	// 供号商停用 / 启用要连带其名下账号，否则只是封了登录，账号仍在号池里被调度并继续产生用量。
+	// 此时 status 已经落库：级联失败的错误先攒着，等下面既有的善后动作（并发调整记录）做完再返回，
+	// 不能让它们被跳过。失败时 user 随错误一并返回，表示用户本身的修改已经生效。
+	cascadeErr := s.syncProviderAccountsWithUserStatus(ctx, user, oldStatus, input)
+
 	concurrencyDiff := user.Concurrency - oldConcurrency
 	if concurrencyDiff != 0 {
 		code, err := GenerateRedeemCode()
 		if err != nil {
 			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
+			return user, cascadeErr
 		}
 		adjustmentRecord := &RedeemCode{
 			Code:   code,
@@ -312,7 +317,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
-	return user, nil
+	return user, cascadeErr
 }
 
 func sameInt64Set(a, b []int64) bool {

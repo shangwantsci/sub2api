@@ -27,6 +27,9 @@ export default {
     generate: '随机生成',
     disable: '停用',
     enable: '启用',
+    disableConfirmTitle: '停用供号商',
+    disableConfirmMessage:
+      '停用 {provider} 后，该供号商将无法登录，其名下共 {total} 个账号（其中 {active} 个在跑）会被自动暂停，不再被调度，也不再产生新用量。重新启用时只恢复这次自动暂停的账号，你手动暂停过的账号保持暂停。已产生的待结算金额不受影响，仍可正常结算。',
     batchPartialFailure:
       '已结算 {settled} 个，{failed} 个失败：{detail}。失败的供号商本期金额未封账，请处理后重试。',
     voidReasonRequired: '请填写作废原因',
@@ -155,11 +158,29 @@ export default {
     adaptiveOff: '关',
     colWindowCost: '5 小时额度上限',
     windowCostZeroHint: '0 表示不限',
+    // 「应用到存量」：先预览真实改动数，再由管理员确认。
     applyToExisting: '应用到存量',
-    applyConfirmTitle: '应用到存量账号',
-    applyConfirmMessage:
-      '该档位当前有 {count} 个账号，将按当前模板更新并发、会话数、每分钟请求数、额度上限和动态降速；账号上的其它设置保持不变。',
-    applyResult: '已更新 {updated} / {matched} 个账号',
+    applyConfirmTitle: '应用到存量账号：档位 {tier}',
+    applyConfirmMessage: '将改动 {willChange} 个账号（该档位共 {matched} 个账号）。',
+    applyOverwriteWarning:
+      '这会用模板数值覆盖这些账号上已手工调整过的并发、会话数、RPM、5h 额度、动态降速和负载因子（负载因子随并发一起对齐）。',
+    applyNoMatched: '该档位下还没有账号，没有可应用的对象。',
+    applyNoChange: '没有需要改动的账号：该档位下的 {matched} 个账号已经与当前模板一致。',
+    applySamplesMore: '仅列出其中 {shown} 个，另有 {rest} 个账号也会被改动。',
+    // 键名与预览接口返回的 changes 里的 field 一一对应
+    applyField: {
+      concurrency: '并发',
+      max_sessions: '会话数',
+      base_rpm: 'RPM',
+      window_cost_limit: '5h 额度',
+      adaptive_throttle: '动态降速',
+      load_factor: '负载因子',
+    },
+    applyConfirmButton: '确认应用到 {count} 个账号',
+    applyPreviewLoading: '正在计算将改动的账号...',
+    applyConflict: '账号数据在你确认期间发生了变化，请重新确认。',
+    applyResult: '已更新 {updated} 个账号（该档位共 {matched} 个）',
+    applyPreviewFailed: '获取预览失败',
     applyFailed: '应用失败',
 
     sectionCustomTier: '自定义档',

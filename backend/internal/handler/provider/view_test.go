@@ -55,6 +55,8 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 			"nurturing_enabled":          true,
 			"enable_tls_fingerprint":     true,
 			"session_id_masking_enabled": true,
+			// 停用供号商级联暂停账号时打的内部标记：供号商不该察觉自己的号是被平台暂停的。
+			"provider_suspended": true,
 			// 这四项凑齐正好等于 3 档，用来验证标签能正确反推到固定档。
 			"max_sessions":      3,
 			"base_rpm":          30,
@@ -100,6 +102,8 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 		"oauth_client", "claude_chrome",
 		// 内部处理配置：动态降速与养号都是平台决定的，供号商不该察觉
 		"adaptive", "throttle", "nurtur",
+		// 停用供号商时打的暂停标记（extra.provider_suspended）也是纯内部状态
+		"provider_suspended", "suspend",
 		"enable_tls_fingerprint", "session_id_masking",
 		"intercept_warmup_requests", "privacy_mode",
 		"extra",

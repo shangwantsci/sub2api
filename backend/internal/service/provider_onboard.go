@@ -479,16 +479,25 @@ type ProviderTierApplyResult struct {
 	Updated int `json:"updated"`
 }
 
-// ApplyTierToExistingProviderAccounts 把某档位的最新参数回填到该档现有账号。
+// ApplyTierToExistingProviderAccounts 把某档位的最新参数回填到「确实会变」的存量账号。
 //
-// 走 BulkUpdate 的增量写：一条 SQL 覆盖所有命中账号（没有读改写竞态），extra 是 JSONB 顶层合并，
+// 先用 PlanPresetApplication 重新算出将改动的账号；条数与管理员确认时看到的 expectedChanged
+// 不相等（预览之后账号被改过、或模板又变了）就返回 409 PRESET_APPLY_CONFLICT，什么都不写：
+// 管理员确认的是一个具体的数字，实际执行的范围必须就是它。
+// 只对将改动的账号写，已经与模板一致的账号一行 SQL 都不碰。
+//
+// 走 BulkUpdate 的增量写：一条 SQL 覆盖所有将改动的账号（没有读改写竞态），extra 是 JSONB 顶层合并，
 // 只写 max_sessions / base_rpm / window_cost_limit / adaptive_throttle 四个键，其余持久设置
 // （window_cost_sticky_reserve、quota_*、privacy_mode、nurturing_enabled……）原样保留；
-// 并发列与 load_factor 一起写成档位并发（与上号时的赋值一致）。
+// 并发列与 load_factor 一起写成档位并发（与上号时的赋值一致，保持负载排序的分母与并发对齐）；
+// load_factor 也在计划的比较范围内，手调过的负载因子被重置这件事在预览里是看得见的。
 // 动态降速写显式 true/false，因为合并删不了键。
+//
+// Matched 是该档位的账号总数，Updated 是 BulkUpdate 实际更新的行数。
 func (s *adminServiceImpl) ApplyTierToExistingProviderAccounts(
 	ctx context.Context,
 	tier ResolvedProviderTier,
+	expectedChanged int,
 ) (ProviderTierApplyResult, error) {
 	result := ProviderTierApplyResult{}
 	accounts, err := s.accountRepo.ListByProviderTier(ctx, tier.Tier)
@@ -496,13 +505,21 @@ func (s *adminServiceImpl) ApplyTierToExistingProviderAccounts(
 		return result, err
 	}
 	result.Matched = len(accounts)
-	if len(accounts) == 0 {
+
+	plan := PlanPresetApplication(tier, accounts)
+	if len(plan) != expectedChanged {
+		return result, infraerrors.Conflict("PRESET_APPLY_CONFLICT",
+			fmt.Sprintf("the number of accounts that would change is now %d, not the %d you confirmed; review the preview and confirm again",
+				len(plan), expectedChanged)).
+			WithMetadata(map[string]string{"will_change": strconv.Itoa(len(plan))})
+	}
+	if len(plan) == 0 {
 		return result, nil
 	}
 
-	ids := make([]int64, 0, len(accounts))
-	for i := range accounts {
-		ids = append(ids, accounts[i].ID)
+	ids := make([]int64, 0, len(plan))
+	for i := range plan {
+		ids = append(ids, plan[i].AccountID)
 	}
 	concurrency := tier.Concurrency
 	loadFactor := tier.Concurrency
@@ -524,11 +541,6 @@ func (s *adminServiceImpl) ApplyTierToExistingProviderAccounts(
 	}
 	result.Updated = int(updated)
 	return result, nil
-}
-
-// CountProviderAccountsByTier 返回某档位当前的账号数，供设置页二次确认预览。
-func (s *adminServiceImpl) CountProviderAccountsByTier(ctx context.Context, tier string) (int, error) {
-	return s.accountRepo.CountByProviderTier(ctx, strings.TrimSpace(tier))
 }
 
 // ListAccountsByProvider 返回某供号商名下的账号。

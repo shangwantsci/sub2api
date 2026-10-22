@@ -529,12 +529,12 @@ func (s *stubAdminService) CheckMixedChannelRisk(ctx context.Context, currentAcc
 	return s.checkMixedErr
 }
 
-func (s *stubAdminService) ApplyTierToExistingProviderAccounts(ctx context.Context, tier service.ResolvedProviderTier) (service.ProviderTierApplyResult, error) {
-	return service.ProviderTierApplyResult{}, nil
+func (s *stubAdminService) PreviewTierApplication(ctx context.Context, tier service.ResolvedProviderTier) (service.ProviderTierApplyPreview, error) {
+	return service.ProviderTierApplyPreview{}, nil
 }
 
-func (s *stubAdminService) CountProviderAccountsByTier(ctx context.Context, tier string) (int, error) {
-	return 0, nil
+func (s *stubAdminService) ApplyTierToExistingProviderAccounts(ctx context.Context, tier service.ResolvedProviderTier, expectedChanged int) (service.ProviderTierApplyResult, error) {
+	return service.ProviderTierApplyResult{}, nil
 }
 
 func (s *stubAdminService) ListAccountsByProvider(ctx context.Context, providerUserID int64) ([]service.Account, error) {

@@ -77,9 +77,9 @@ type AccountRepository interface {
 
 	// ListByProvider 返回某供号商名下未删除的账号，按创建时间倒序。
 	ListByProvider(ctx context.Context, providerUserID int64) ([]Account, error)
-	// ListByProviderTier 返回某档位下未删除的供号商账号，供「应用到存量」回填。
+	// ListByProviderTier 返回某档位下未删除的供号商账号（含 extra），供「应用到存量」的预览与回填。
 	ListByProviderTier(ctx context.Context, tier string) ([]Account, error)
-	// CountByProviderTier 返回某档位当前账号数，供设置页二次确认预览。
+	// CountByProviderTier 返回某档位当前账号数，供保存模板表时检查某个 key 是否仍被账号引用。
 	CountByProviderTier(ctx context.Context, tier string) (int, error)
 	// UpdateProviderAccountTier 改单个账号所属档位，同时写 provider_tier 列。
 	//

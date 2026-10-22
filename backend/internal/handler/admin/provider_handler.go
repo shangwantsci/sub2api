@@ -331,51 +331,89 @@ func (h *ProviderHandler) UpdateSettings(c *gin.Context) {
 	response.Success(c, settings)
 }
 
-// GetTierAffectedCount 预览某档位当前的账号数，供「应用到存量」二次确认。
-// GET /api/v1/admin/provider-settings/tiers/:tier/affected-count
-func (h *ProviderHandler) GetTierAffectedCount(c *gin.Context) {
-	tier := c.Param("tier")
-	if tier == "" {
-		response.BadRequest(c, "tier is required")
-		return
-	}
-	count, err := h.accountRepo.CountByProviderTier(c.Request.Context(), tier)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{"tier": tier, "affected": count})
-}
-
-// ApplyTierToExisting 把某档位最新参数回填到该档现有账号。
-// POST /api/v1/admin/provider-settings/tiers/:tier/apply-existing
+// resolveTierForApply 校验 :tier 并解析成模板参数；失败时已写好响应并返回 false。
 //
-// 走 BulkUpdate 的增量写，只改并发与 max_sessions / base_rpm / window_cost_limit /
-// adaptive_throttle 四个 extra 键，其余持久设置（nurturing_enabled 等）原样保留。
-func (h *ProviderHandler) ApplyTierToExisting(c *gin.Context) {
+// 预览与应用共用这一套校验，两者对「哪个档位可以回填」的判断因此完全一致：
+// custom 档的账号各有各的参数，不能批量回填；其余档位必须是存在且对供货商开放的模板。
+func (h *ProviderHandler) resolveTierForApply(c *gin.Context) (service.ResolvedProviderTier, bool) {
 	tier := c.Param("tier")
 	if tier == "" {
 		response.BadRequest(c, "tier is required")
-		return
+		return service.ResolvedProviderTier{}, false
 	}
 	if tier == service.ProviderTierCustom {
 		response.ErrorFrom(c, infraerrors.BadRequest("CUSTOM_TIER_NOT_BACKFILLABLE",
 			"custom tier accounts have per-account parameters and cannot be bulk updated"))
-		return
+		return service.ResolvedProviderTier{}, false
 	}
 
-	ctx := c.Request.Context()
-	settings, err := h.settingService.GetProviderSettings(ctx)
+	settings, err := h.settingService.GetProviderSettings(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
-		return
+		return service.ResolvedProviderTier{}, false
 	}
 	resolved, err := service.ResolveProviderTier(settings, tier, nil)
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return service.ResolvedProviderTier{}, false
+	}
+	return resolved, true
+}
+
+// PreviewTierApplication 预览「应用到存量」：该档位有多少账号、其中多少会被改动、改动了哪几项。
+// GET /api/v1/admin/provider-settings/tiers/:tier/apply-preview
+//
+// 只读，不写任何数据。响应 data：
+//
+//	{"tier":"3","matched":12,"will_change":5,"samples":[{"account_id":101,"name":"a@x.com",
+//	  "changes":[{"field":"concurrency","from":10,"to":3},{"field":"load_factor","from":10,"to":3}]}]}
+//
+// changes[].field 取值固定为 concurrency / max_sessions / base_rpm / window_cost_limit /
+// adaptive_throttle / load_factor，并按这个顺序出现。samples 只含将改动的账号，最多 20 个，
+// 按账号 id 升序。管理员确认时把 will_change 原样带回 apply-existing 的 expected_changed。
+func (h *ProviderHandler) PreviewTierApplication(c *gin.Context) {
+	resolved, ok := h.resolveTierForApply(c)
+	if !ok {
 		return
 	}
-	result, err := h.adminService.ApplyTierToExistingProviderAccounts(ctx, resolved)
+	preview, err := h.adminService.PreviewTierApplication(c.Request.Context(), resolved)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, preview)
+}
+
+// ApplyTierRequest 是「应用到存量」的请求体。
+type ApplyTierRequest struct {
+	// ExpectedChanged 是管理员在预览里确认过的将改动账号数（apply-preview 的 will_change）。
+	// 必填；用指针区分「没带」与「带了 0」。
+	ExpectedChanged *int `json:"expected_changed"`
+}
+
+// ApplyTierToExisting 把某档位最新参数回填到该档中参数与模板不同的账号。
+// POST /api/v1/admin/provider-settings/tiers/:tier/apply-existing
+//
+// 请求体 {"expected_changed": 5} 必填（缺失、格式不对或为负 → 400 EXPECTED_CHANGED_REQUIRED）。
+// 服务端重新计算将改动的账号数，与 expected_changed 不相等 → 409 PRESET_APPLY_CONFLICT 且不写任何数据；
+// 相等才执行，且只写将改动的账号。响应 {"matched":12,"updated":5}。
+//
+// 走 BulkUpdate 的增量写，只改并发、load_factor（写成档位并发）两列与 max_sessions / base_rpm /
+// window_cost_limit / adaptive_throttle 四个 extra 键，其余持久设置（nurturing_enabled 等）原样保留。
+func (h *ProviderHandler) ApplyTierToExisting(c *gin.Context) {
+	var req ApplyTierRequest
+	// 空请求体（旧版前端不带 body）与格式错误一样，都等于没有给出确认过的数字，不能放行。
+	if err := c.ShouldBindJSON(&req); err != nil || req.ExpectedChanged == nil || *req.ExpectedChanged < 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("EXPECTED_CHANGED_REQUIRED",
+			"expected_changed is required and must be a non-negative integer; use will_change from apply-preview"))
+		return
+	}
+
+	resolved, ok := h.resolveTierForApply(c)
+	if !ok {
+		return
+	}
+	result, err := h.adminService.ApplyTierToExistingProviderAccounts(c.Request.Context(), resolved, *req.ExpectedChanged)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

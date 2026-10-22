@@ -97,11 +97,14 @@ type AdminService interface {
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
-	// ApplyTierToExistingProviderAccounts 把某档位最新参数回填到该档现有供号商账号。
-	// 走 BulkUpdate 的增量写，只改并发与档位相关的 extra 键，nurturing_enabled 等其它持久设置原样保留。
-	ApplyTierToExistingProviderAccounts(ctx context.Context, tier ResolvedProviderTier) (ProviderTierApplyResult, error)
-	// CountProviderAccountsByTier 返回某档位当前账号数，供设置页二次确认预览。
-	CountProviderAccountsByTier(ctx context.Context, tier string) (int, error)
+	// PreviewTierApplication 只读地算出把某档位模板套到存量供号商账号上的影响范围
+	// （该档账号数、其中会被改动的账号数与最多 20 个样例），供「应用到存量」确认前展示。
+	PreviewTierApplication(ctx context.Context, tier ResolvedProviderTier) (ProviderTierApplyPreview, error)
+	// ApplyTierToExistingProviderAccounts 把某档位最新参数回填到该档中参数与模板不同的供号商账号。
+	// expectedChanged 是管理员确认时看到的将改动账号数，服务端重算后不相等就返回 409 且不写任何数据。
+	// 走 BulkUpdate 的增量写，只改并发、load_factor（写成档位并发）与档位相关的 extra 键，
+	// nurturing_enabled 等其它持久设置原样保留。
+	ApplyTierToExistingProviderAccounts(ctx context.Context, tier ResolvedProviderTier, expectedChanged int) (ProviderTierApplyResult, error)
 	// ListAccountsByProvider 返回某供号商名下的账号，供管理端按供号商筛选。
 	ListAccountsByProvider(ctx context.Context, providerUserID int64) ([]Account, error)
 	// MinSchedulablePriorityByGroup 返回每个分组当前的调度优先级门槛，

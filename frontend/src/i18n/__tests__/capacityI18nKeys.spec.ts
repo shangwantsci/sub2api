@@ -120,6 +120,51 @@ describe('容量模型相关 i18n key', () => {
     })
   }
 
+  // 「应用到存量」（先预览、再确认）：键名以 apply 开头的词条整体检查，以后再加词条不用回来改这份清单。
+  // 占位符也要一致：少一个参数界面只会悄悄显示成「将改动  个账号」，没有任何报错。
+  const providerSettingsApplyKeys = (bundle: unknown) =>
+    Object.keys((resolve(bundle, 'admin.providerSettings') ?? {}) as Record<string, unknown>).filter((key) =>
+      key.startsWith('apply')
+    )
+  const placeholdersOf = (text: unknown) => [...new Set(String(text).match(/\{\w+\}/g) ?? [])].sort()
+
+  it('admin.providerSettings.apply*：zh 与 en 的词条一一对应，占位符一致', () => {
+    const keys = [...new Set([...providerSettingsApplyKeys(zh), ...providerSettingsApplyKeys(en)])].sort()
+    // 没抓到几条说明前缀或路径失效了，下面的循环会空转通过
+    expect(keys.length).toBeGreaterThan(8)
+
+    for (const key of keys) {
+      const path = `admin.providerSettings.${key}`
+      const zhNode = resolve(zh, path)
+      const enNode = resolve(en, path)
+      expect(zhNode, `zh 缺少 ${path}`).toBeDefined()
+      expect(enNode, `en 缺少 ${path}`).toBeDefined()
+
+      const zhLeaves = leafKeys(zhNode, path).sort()
+      expect(leafKeys(enNode, path).sort(), `${path} 的叶子 key 在 zh 与 en 不一致`).toEqual(zhLeaves)
+      for (const leaf of zhLeaves) {
+        expect(placeholdersOf(resolve(en, leaf)), `${leaf} 的占位符在 zh 与 en 不一致`).toEqual(
+          placeholdersOf(resolve(zh, leaf))
+        )
+      }
+    }
+  })
+
+  it('applyField 的键名恰好是预览接口 changes[].field 的全部取值，zh 与 en 都有', () => {
+    for (const bundle of [zh, en]) {
+      const labels = resolve(bundle, 'admin.providerSettings.applyField') as Record<string, unknown>
+      expect(Object.keys(labels).sort()).toEqual([
+        'adaptive_throttle',
+        'base_rpm',
+        'concurrency',
+        'load_factor',
+        'max_sessions',
+        'window_cost_limit'
+      ])
+      for (const label of Object.values(labels)) expect(typeof label).toBe('string')
+    }
+  })
+
   // 人格 / 防封档位 / 旧版人格门控已整体移除，词条也要一起清掉
   const REMOVED = [
     'admin.accounts.persona',

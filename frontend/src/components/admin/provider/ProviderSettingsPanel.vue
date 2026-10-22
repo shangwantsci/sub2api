@@ -330,10 +330,16 @@
                 <td class="px-3 py-2 text-right">
                   <button
                     type="button"
-                    class="whitespace-nowrap text-sm text-indigo-600 hover:underline dark:text-indigo-400"
+                    class="whitespace-nowrap text-sm text-indigo-600 hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50 dark:text-indigo-400"
+                    data-testid="provider-tier-apply"
+                    :disabled="applyBusy"
                     @click="askApplyToExisting(preset.key)"
                   >
-                    {{ t('admin.providerSettings.applyToExisting') }}
+                    {{
+                      applyPreviewLoading && applyTier === preset.key
+                        ? t('common.loading')
+                        : t('admin.providerSettings.applyToExisting')
+                    }}
                   </button>
                 </td>
               </tr>
@@ -429,6 +435,15 @@
           <span v-else-if="savedMessage" class="text-emerald-600 dark:text-emerald-400">
             {{ savedMessage }}
           </span>
+          <!-- 「应用到存量」的结果单独显示：有未保存的修改时 savedMessage 会被上面的提示顶掉，
+               而这条结果管理员必须看得到。 -->
+          <span
+            v-if="applyNotice"
+            class="ml-3 text-emerald-600 dark:text-emerald-400"
+            data-testid="apply-notice"
+          >
+            {{ applyNotice }}
+          </span>
           <span v-if="errorMessage" class="text-red-600 dark:text-red-400">{{ errorMessage }}</span>
         </div>
         <button type="button" class="btn-primary" :disabled="!dirty || saving" @click="handleSave">
@@ -437,23 +452,135 @@
       </div>
     </template>
 
-    <!-- 应用到存量：先预览影响面再执行 -->
+    <!--
+      应用到存量：先预览真实改动数，管理员确认后才写账号。
+      确认时带上预览的 will_change，后端重算不一致会返回 409（预览之后数据变了），此时自动重新预览。
+    -->
     <BaseDialog
       :show="applyDialogOpen"
-      :title="t('admin.providerSettings.applyConfirmTitle')"
-      width="narrow"
-      @close="applyDialogOpen = false"
+      :title="t('admin.providerSettings.applyConfirmTitle', { tier: applyTierText })"
+      width="normal"
+      @close="closeApplyDialog"
     >
-      <p class="text-sm text-gray-600 dark:text-dark-300">
-        {{ t('admin.providerSettings.applyConfirmMessage', { count: applyAffectedCount }) }}
-      </p>
+      <div class="space-y-4">
+        <p
+          v-if="applyConflict"
+          class="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+          role="alert"
+          data-testid="apply-conflict"
+        >
+          {{ t('admin.providerSettings.applyConflict') }}
+        </p>
+
+        <p
+          v-if="applyPreviewLoading"
+          class="text-sm text-gray-500 dark:text-dark-400"
+          data-testid="apply-preview-loading"
+        >
+          {{ t('admin.providerSettings.applyPreviewLoading') }}
+        </p>
+
+        <template v-else-if="applyPreview">
+          <p
+            v-if="applyPreview.matched === 0"
+            class="text-sm text-gray-600 dark:text-dark-300"
+            data-testid="apply-no-match"
+          >
+            {{ t('admin.providerSettings.applyNoMatched') }}
+          </p>
+          <p
+            v-else-if="applyPreview.will_change === 0"
+            class="text-sm text-gray-600 dark:text-dark-300"
+            data-testid="apply-no-change"
+          >
+            {{ t('admin.providerSettings.applyNoChange', { matched: applyPreview.matched }) }}
+          </p>
+          <template v-else>
+            <p class="text-sm font-medium text-gray-900 dark:text-dark-100" data-testid="apply-summary">
+              {{
+                t('admin.providerSettings.applyConfirmMessage', {
+                  willChange: applyPreview.will_change,
+                  matched: applyPreview.matched
+                })
+              }}
+            </p>
+            <p
+              class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+              role="alert"
+              data-testid="apply-warning"
+            >
+              {{ t('admin.providerSettings.applyOverwriteWarning') }}
+            </p>
+            <ul
+              class="max-h-64 divide-y divide-gray-200 overflow-y-auto rounded-md border border-gray-200 dark:divide-dark-700 dark:border-dark-700"
+              data-testid="apply-samples"
+            >
+              <li
+                v-for="sample in applyPreview.samples"
+                :key="sample.account_id"
+                class="px-3 py-2"
+                data-testid="apply-sample"
+              >
+                <div class="text-sm font-medium text-gray-900 dark:text-dark-100">
+                  {{ sample.name }}
+                  <span class="text-xs font-normal text-gray-400">#{{ sample.account_id }}</span>
+                </div>
+                <ul class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-dark-300">
+                  <li v-for="change in sample.changes" :key="change.field" data-testid="apply-change">
+                    {{ describeChange(change) }}
+                  </li>
+                </ul>
+              </li>
+            </ul>
+            <p
+              v-if="applyPreview.will_change > applyPreview.samples.length"
+              class="text-xs text-gray-500 dark:text-dark-400"
+              data-testid="apply-samples-more"
+            >
+              {{
+                t('admin.providerSettings.applySamplesMore', {
+                  shown: applyPreview.samples.length,
+                  rest: applyPreview.will_change - applyPreview.samples.length
+                })
+              }}
+            </p>
+          </template>
+        </template>
+
+        <p
+          v-if="applyError"
+          class="text-sm text-red-600 dark:text-red-400"
+          role="alert"
+          data-testid="apply-error"
+        >
+          {{ applyError }}
+        </p>
+      </div>
       <template #footer>
         <div class="flex justify-end gap-3">
-          <button type="button" class="btn-secondary" @click="applyDialogOpen = false">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            data-testid="apply-cancel"
+            :disabled="applying"
+            @click="closeApplyDialog"
+          >
             {{ t('common.cancel') }}
           </button>
-          <button type="button" class="btn-primary" :disabled="applying" @click="handleApplyToExisting">
-            {{ applying ? t('common.loading') : t('admin.providerSettings.applyToExisting') }}
+          <button
+            type="button"
+            class="btn btn-danger"
+            data-testid="apply-confirm"
+            :disabled="!canConfirmApply"
+            @click="handleApplyToExisting"
+          >
+            {{
+              applying
+                ? t('common.loading')
+                : canConfirmApply
+                  ? t('admin.providerSettings.applyConfirmButton', { count: applyPreview?.will_change ?? 0 })
+                  : t('common.confirm')
+            }}
           </button>
         </div>
       </template>
@@ -473,6 +600,8 @@ import type {
   ProviderGroupPolicyView,
   ProviderHostingTypeSetting,
   ProviderSettings,
+  ProviderTierApplyPreview,
+  ProviderTierChange,
 } from '@/api/admin/providers'
 
 const { t } = useI18n()
@@ -499,9 +628,14 @@ const errors = ref<Record<string, string>>({})
 const errorMessage = ref('')
 const savedMessage = ref('')
 
+// 「应用到存量」：applyPreviewLoading 是预览请求在途（含 409 之后的重新预览），applying 是应用请求在途
 const applyDialogOpen = ref(false)
-const applyAffectedCount = ref(0)
 const applyTier = ref('')
+const applyPreview = ref<ProviderTierApplyPreview | null>(null)
+const applyPreviewLoading = ref(false)
+const applyConflict = ref(false)
+const applyError = ref('')
+const applyNotice = ref('')
 
 // 用序列化快照判断脏状态，避免为每个字段单独挂 watcher。
 const savedSnapshot = ref('')
@@ -684,32 +818,130 @@ async function handleSave() {
   }
 }
 
-async function askApplyToExisting(tier: string) {
-  applyTier.value = tier
-  applyAffectedCount.value = 0
+// ========== 应用到存量：先预览，再确认 ==========
+//
+// 「应用到存量」会用模板数值覆盖账号上已手工调整过的并发 / 会话数 / RPM / 5h 额度 / 动态降速，
+// 所以不能一点就写：先拉预览（只读）展示真实改动数与样例，管理员确认后才调应用接口，
+// 并把预览的 will_change 作为 expected_changed 带上。预览到确认之间账号数据又变了，
+// 后端重算不一致会返回 409 且不写任何账号，这里自动重新预览，让管理员对新的数字再决定一次。
+
+/** 预览或应用请求在途：此时所有「应用到存量」入口都禁用，防止重复点击。 */
+const applyBusy = computed(() => applyPreviewLoading.value || applying.value)
+
+/** 只有拿到预览、确实有账号会变、且没有请求在途时才允许确认。 */
+const canConfirmApply = computed(
+  () => !applyBusy.value && (applyPreview.value?.will_change ?? 0) > 0
+)
+
+/** 对话框标题里的档位：模板 key，查得到显示名就带上。 */
+const applyTierText = computed(() => {
+  const label = presets.value.find((preset) => preset.key === applyTier.value)?.label
+  return label ? `${applyTier.value} (${label})` : applyTier.value
+})
+
+function changeFieldLabel(field: string): string {
+  switch (field) {
+    case 'concurrency':
+      return t('admin.providerSettings.applyField.concurrency')
+    case 'max_sessions':
+      return t('admin.providerSettings.applyField.max_sessions')
+    case 'base_rpm':
+      return t('admin.providerSettings.applyField.base_rpm')
+    case 'window_cost_limit':
+      return t('admin.providerSettings.applyField.window_cost_limit')
+    case 'adaptive_throttle':
+      return t('admin.providerSettings.applyField.adaptive_throttle')
+    case 'load_factor':
+      return t('admin.providerSettings.applyField.load_factor')
+    default:
+      // 后端以后新增了字段而前端还没跟上：宁可显示字段名，也不要显示空白
+      return field
+  }
+}
+
+/**
+ * 把预览里的数值写成人话：布尔显示开 / 关；额度加美元符号；
+ * 0 表示不限（并发除外，与档位下拉 presetOptionLabel 的写法一致）。
+ */
+function formatChangeValue(field: string, value: number | boolean): string {
+  if (typeof value === 'boolean') {
+    return t(value ? 'admin.providerSettings.adaptiveOn' : 'admin.providerSettings.adaptiveOff')
+  }
+  if (value > 0) return field === 'window_cost_limit' ? `$${value}` : String(value)
+  return field === 'concurrency' ? String(value) : t('admin.accounts.capacityFields.unlimited')
+}
+
+function describeChange(change: ProviderTierChange): string {
+  return `${changeFieldLabel(change.field)} ${formatChangeValue(change.field, change.from)} → ${formatChangeValue(change.field, change.to)}`
+}
+
+/** 拉取预览并写入 applyPreview。失败返回错误文案，成功返回空串。 */
+async function fetchApplyPreview(tier: string): Promise<string> {
+  applyPreviewLoading.value = true
+  // 旧预览在新预览回来之前不能留着：否则管理员可能对着过期的数字点确认
+  applyPreview.value = null
   try {
-    const result = await adminAPI.providers.getTierAffectedCount(tier)
-    applyAffectedCount.value = result.affected
-  } catch {
-    applyAffectedCount.value = 0
+    applyPreview.value = await adminAPI.providers.getTierApplyPreview(tier)
+    return ''
+  } catch (error) {
+    return (error as { message?: string })?.message || t('admin.providerSettings.applyPreviewFailed')
+  } finally {
+    applyPreviewLoading.value = false
+  }
+}
+
+async function askApplyToExisting(tier: string) {
+  if (applyBusy.value) return
+  applyTier.value = tier
+  applyConflict.value = false
+  applyError.value = ''
+  applyNotice.value = ''
+  errorMessage.value = ''
+
+  const failure = await fetchApplyPreview(tier)
+  if (failure) {
+    // 拿不到预览就没有东西可确认：不弹框，错误放进底部原有的错误行
+    errorMessage.value = failure
+    return
   }
   applyDialogOpen.value = true
 }
 
+/** 应用请求在途时不允许关闭，否则结果提示会落在一个已经看不到的对话框上。 */
+function closeApplyDialog() {
+  if (applying.value) return
+  applyDialogOpen.value = false
+}
+
 async function handleApplyToExisting() {
+  const preview = applyPreview.value
+  if (!preview || preview.will_change <= 0 || applyBusy.value) return
+
   applying.value = true
+  applyError.value = ''
+  applyConflict.value = false
+  let conflicted = false
   try {
-    const result = await adminAPI.providers.applyTierToExisting(applyTier.value)
-    savedMessage.value = t('admin.providerSettings.applyResult', {
+    const result = await adminAPI.providers.applyTierToExisting(applyTier.value, preview.will_change)
+    applyNotice.value = t('admin.providerSettings.applyResult', {
       updated: result.updated,
       matched: result.matched,
     })
     applyDialogOpen.value = false
   } catch (error) {
-    errorMessage.value =
-      (error as { message?: string })?.message || t('admin.providerSettings.applyFailed')
+    // 409 不是普通失败：说明预览之后账号数据变了，后端没有写任何账号，需要重新预览再确认
+    if ((error as { status?: number })?.status === 409) {
+      conflicted = true
+    } else {
+      applyError.value = (error as { message?: string })?.message || t('admin.providerSettings.applyFailed')
+    }
   } finally {
     applying.value = false
+  }
+
+  if (conflicted) {
+    applyConflict.value = true
+    applyError.value = await fetchApplyPreview(applyTier.value)
   }
 }
 
