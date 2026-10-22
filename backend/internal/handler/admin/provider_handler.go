@@ -350,7 +350,8 @@ func (h *ProviderHandler) GetTierAffectedCount(c *gin.Context) {
 // ApplyTierToExisting 把某档位最新参数回填到该档现有账号。
 // POST /api/v1/admin/provider-settings/tiers/:tier/apply-existing
 //
-// 只增量合并档位相关的 extra 键，persona_* 等其它持久设置原样保留。
+// 走 BulkUpdate 的增量写，只改并发与 max_sessions / base_rpm / window_cost_limit /
+// adaptive_throttle 四个 extra 键，其余持久设置（nurturing_enabled 等）原样保留。
 func (h *ProviderHandler) ApplyTierToExisting(c *gin.Context) {
 	tier := c.Param("tier")
 	if tier == "" {
@@ -380,4 +381,34 @@ func (h *ProviderHandler) ApplyTierToExisting(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+// GetCapacityPresets 返回容量档位模板表（设置缺失时返回种子值）。
+// GET /api/v1/admin/settings/capacity-presets
+func (h *ProviderHandler) GetCapacityPresets(c *gin.Context) {
+	presets, err := h.settingService.GetCapacityPresets(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, presets)
+}
+
+// UpdateCapacityPresets 整体保存容量档位模板表。校验在 service 层，不依赖前端。
+// PUT /api/v1/admin/settings/capacity-presets
+//
+// 已存在的 key 若仍有供货商账号的 provider_tier 记着它，不能被改名或删除。
+// 改模板只影响之后套用的账号，存量账号要用「应用到存量」或批量编辑才会变。
+func (h *ProviderHandler) UpdateCapacityPresets(c *gin.Context) {
+	var req service.CapacityPresets
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	saved, err := h.settingService.SaveCapacityPresets(c.Request.Context(), req, h.accountRepo)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, saved)
 }

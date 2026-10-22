@@ -164,7 +164,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				return nil, err
 			}
 
-			result, err := s.tryAcquireAccountSlot(ctx, account.ID, s.effectiveAccountConcurrency(ctx, account))
+			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.EffectiveConcurrency())
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -186,7 +186,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if waitingCount < cfg.StickySessionMaxWaiting {
 					return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 						AccountID:      account.ID,
-						MaxConcurrency: s.effectiveAccountConcurrency(ctx, account),
+						MaxConcurrency: account.EffectiveConcurrency(),
 						Timeout:        cfg.StickySessionWaitTimeout,
 						MaxWaiting:     cfg.StickySessionMaxWaiting,
 					})
@@ -194,7 +194,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 			return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 				AccountID:      account.ID,
-				MaxConcurrency: s.effectiveAccountConcurrency(ctx, account),
+				MaxConcurrency: account.EffectiveConcurrency(),
 				Timeout:        cfg.FallbackWaitTimeout,
 				MaxWaiting:     cfg.FallbackMaxWaiting,
 			})
@@ -336,10 +336,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if !s.isAccountSchedulableForRPM(ctx, account, false) {
 				continue
 			}
-			// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-			if !s.isAccountPersonaSchedulable(ctx, account) {
-				continue
-			}
 			routingCandidates = append(routingCandidates, account)
 		}
 
@@ -378,13 +374,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, stickyAccount, requestedModel)) &&
 							s.isAccountSchedulableForModelSelection(ctx, stickyAccount, requestedModel) &&
 							s.isAccountSchedulableForQuota(stickyAccount) &&
-							s.isAccountSchedulableForWindowCost(ctx, stickyAccount, true) &&
-							s.isAccountPersonaSchedulable(ctx, stickyAccount)
+							s.isAccountSchedulableForWindowCost(ctx, stickyAccount, true)
 
 						rpmPass := gatePass && s.isAccountSchedulableForRPM(ctx, stickyAccount, true)
 
 						if rpmPass { // 粘性会话窗口费用+RPM 检查
-							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, s.effectiveAccountConcurrency(ctx, stickyAccount))
+							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.EffectiveConcurrency())
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
@@ -417,7 +412,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 										// 直接返回会导致后续转发缺少凭证而鉴权失败。
 										return s.newSelectionResult(ctx, stickyAccount, false, nil, &AccountWaitPlan{
 											AccountID:      stickyAccountID,
-											MaxConcurrency: s.effectiveAccountConcurrency(ctx, stickyAccount),
+											MaxConcurrency: stickyAccount.EffectiveConcurrency(),
 											Timeout:        cfg.StickySessionWaitTimeout,
 											MaxWaiting:     cfg.StickySessionMaxWaiting,
 										})
@@ -437,7 +432,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 						// 记录粘性缓存未命中的结构化日志
 						if stickyCacheMissReason != "" {
-							baseRPM := stickyAccount.GetBaseRPM()
+							// 日志里记降速后实际生效的 RPM 上限，排查「粘性账号为什么被跳过」时看到的才是真正拦住它的数
+							baseRPM := stickyAccount.EffectiveBaseRPM()
 							var currentRPM int
 							if count, ok := rpmFromPrefetchContext(ctx, stickyAccount.ID); ok {
 								currentRPM = count
@@ -454,13 +450,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 
 			// 2. 批量获取负载信息
-			// 使用 effectiveAccountConcurrency 而非 EffectiveLoadFactor，
-			// 确保负载率排序与实际槽位获取使用一致的动态并发值。
+			// 负载率分母 = 官方的 EffectiveLoadFactor() 再乘动态降速系数；
+			// 拿槽位用的硬并发上限是 EffectiveConcurrency()，两者不是一回事。
 			routingLoads := make([]AccountWithConcurrency, 0, len(routingCandidates))
 			for _, acc := range routingCandidates {
 				routingLoads = append(routingLoads, AccountWithConcurrency{
 					ID:             acc.ID,
-					MaxConcurrency: s.effectiveAccountConcurrency(ctx, acc),
+					MaxConcurrency: acc.LoadBalanceCapacity(),
 				})
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
@@ -510,7 +506,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
-					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, s.effectiveAccountConcurrency(ctx, item.account))
+					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.EffectiveConcurrency())
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
@@ -538,7 +534,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					}
 					return s.newSelectionResult(ctx, item.account, false, nil, &AccountWaitPlan{
 						AccountID:      item.account.ID,
-						MaxConcurrency: s.effectiveAccountConcurrency(ctx, item.account),
+						MaxConcurrency: item.account.EffectiveConcurrency(),
 						Timeout:        cfg.StickySessionWaitTimeout,
 						MaxWaiting:     cfg.StickySessionMaxWaiting,
 					})
@@ -582,8 +578,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				quotaOK := s.isAccountSchedulableForQuota(account)
 				windowCostOK := s.isAccountSchedulableForWindowCost(ctx, account, true)
 				rpmOK := s.isAccountSchedulableForRPM(ctx, account, true)
-				// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-				personaOK := s.isAccountPersonaSchedulable(ctx, account)
 				schedulable := s.isAccountSchedulableForSelection(account)
 
 				slog.Debug("sticky.layer1_5_no_routing_checks",
@@ -598,11 +592,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					"quota_ok", quotaOK,
 					"window_cost_ok", windowCostOK,
 					"rpm_ok", rpmOK,
-					"persona_ok", personaOK,
 				)
 
-				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && personaOK && schedulable {
-					result, err := s.tryAcquireAccountSlot(ctx, accountID, s.effectiveAccountConcurrency(ctx, account))
+				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable {
+					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.EffectiveConcurrency())
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -643,7 +636,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							)
 							return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 								AccountID:      accountID,
-								MaxConcurrency: s.effectiveAccountConcurrency(ctx, account),
+								MaxConcurrency: account.EffectiveConcurrency(),
 								Timeout:        cfg.StickySessionWaitTimeout,
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
 							})
@@ -721,10 +714,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 			continue
 		}
-		// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-		if !s.isAccountPersonaSchedulable(ctx, acc) {
-			continue
-		}
 		candidates = append(candidates, acc)
 	}
 
@@ -737,13 +726,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, ErrNoAvailableAccounts
 	}
 
-	// 使用 effectiveAccountConcurrency 而非 EffectiveLoadFactor，
-	// 确保负载率排序与实际槽位获取使用一致的动态并发值。
+	// 负载率分母 = 官方的 EffectiveLoadFactor() 再乘动态降速系数；
+	// 拿槽位用的硬并发上限是 EffectiveConcurrency()，两者不是一回事。
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
 		accountLoads = append(accountLoads, AccountWithConcurrency{
 			ID:             acc.ID,
-			MaxConcurrency: s.effectiveAccountConcurrency(ctx, acc),
+			MaxConcurrency: acc.LoadBalanceCapacity(),
 		})
 	}
 
@@ -783,7 +772,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					break
 				}
 
-				result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, s.effectiveAccountConcurrency(ctx, selected.account))
+				result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.EffectiveConcurrency())
 				if err == nil && result.Acquired {
 					// 会话数量限制检查
 					if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
@@ -811,7 +800,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 		return s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
 			AccountID:      acc.ID,
-			MaxConcurrency: s.effectiveAccountConcurrency(ctx, acc),
+			MaxConcurrency: acc.EffectiveConcurrency(),
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		})
@@ -885,7 +874,7 @@ func (s *GatewayService) tryAcquireMixedTypePool(ctx context.Context, available 
 			break
 		}
 
-		result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, s.effectiveAccountConcurrency(ctx, selected.account))
+		result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.EffectiveConcurrency())
 		if err == nil && result.Acquired {
 			if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
 				result.ReleaseFunc()
@@ -924,7 +913,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
 
 	for _, acc := range ordered {
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.effectiveAccountConcurrency(ctx, acc))
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.EffectiveConcurrency())
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -1495,7 +1484,7 @@ func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account
 
 	var ids []int64
 	for i := range accounts {
-		if accounts[i].IsAnthropicOAuthOrSetupToken() && accounts[i].RPMCeiling() > 0 {
+		if accounts[i].IsAnthropicOAuthOrSetupToken() && accounts[i].GetBaseRPM() > 0 {
 			ids = append(ids, accounts[i].ID)
 		}
 	}
@@ -1512,12 +1501,13 @@ func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account
 
 // isAccountSchedulableForRPM 检查账号是否可根据 RPM 进行调度
 // 仅适用于 Anthropic OAuth/SetupToken 账号
-// 当账号启用了 persona 时，RPM 上限会根据利用率动态缩减。
+// 开启动态降速的账号，RPM 上限随 5h/7d 利用率缩小（见 CheckRPMSchedulability 里的 EffectiveBaseRPM）；
+// 三区与粘性豁免策略对降速后的上限同样生效。
 func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account *Account, isSticky bool) bool {
 	if !account.IsAnthropicOAuthOrSetupToken() {
 		return true
 	}
-	if account.RPMCeiling() <= 0 {
+	if account.GetBaseRPM() <= 0 {
 		return true
 	}
 
@@ -1532,20 +1522,6 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 		// 失败开放：GetRPM 错误时允许调度
 	}
 
-	// 启用 persona 时使用动态 RPM（利用率高→RPM降→请求频率自然降低）
-	if account.IsPersonaEnabled() {
-		effectiveRPM := account.EffectivePersonaRPM()
-		if effectiveRPM > 0 && currentRPM >= effectiveRPM {
-			if isSticky {
-				// 粘性会话给少量缓冲
-				buffer := account.GetRPMStickyBuffer()
-				return currentRPM < effectiveRPM+buffer
-			}
-			return false
-		}
-		return true
-	}
-
 	schedulability := account.CheckRPMSchedulability(currentRPM)
 	switch schedulability {
 	case WindowCostSchedulable:
@@ -1556,75 +1532,6 @@ func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account
 		return false
 	}
 	return true
-}
-
-// isAccountWithinPersonaActiveHours 检查账号当前是否处于人格作息窗口内。
-// fail-open 语义：账号未启用 persona 或未配置作息窗口时一律放行。
-// 注意：预设模式下不使用作息窗口（恒放行），仅旧模式手动配置时才检查。
-func (s *GatewayService) isAccountWithinPersonaActiveHours(ctx context.Context, account *Account) bool {
-	if account == nil || !account.IsPersonaEnabled() {
-		return true
-	}
-	return account.GetPersonaEnvelope().IsWithinActiveHours(time.Now())
-}
-
-// isAccountWithinPersonaDailyCap 检查账号今日请求数是否仍在人格日上限内。
-// fail-open 语义：账号未启用 persona、未配置上限（DailyCap<=0，默认 0=不限）、
-// rpmCache 缺失或读取出错时一律放行。计数按人格时区跨日重置（DayKey）。
-// 不再依赖全局 enable_persona_gating 开关——配了 persona/preset 就自动生效。
-func (s *GatewayService) isAccountWithinPersonaDailyCap(ctx context.Context, account *Account) bool {
-	if account == nil || !account.IsPersonaEnabled() {
-		return true
-	}
-	env := account.GetPersonaEnvelope()
-	if env.DailyCap <= 0 {
-		return true
-	}
-	if s.rpmCache == nil {
-		return true
-	}
-	count, err := s.rpmCache.GetAccountDaily(ctx, account.ID, env.DayKey(time.Now()))
-	if err != nil {
-		return true // fail-open：计数读取失败不阻塞调度
-	}
-	return count < env.DailyCap
-}
-
-// isAccountPersonaSchedulable 组合人格调度门控：仅保留日请求上限。
-// 作息窗口不再硬拦截，而是通过 effectiveAccountConcurrency 动态调整并发数实现软限流。
-// 日上限 fail-open；配了 persona/preset 就自动生效，无需全局开关。
-func (s *GatewayService) isAccountPersonaSchedulable(ctx context.Context, account *Account) bool {
-	return s.isAccountWithinPersonaDailyCap(ctx, account)
-}
-
-// IncrementAccountPersonaDailyRequest 在成功转发后递增账号的人格日请求计数。
-// 自守卫：仅在账号启用 persona 且配置了正的日上限时才写入 Redis，
-// 避免对无上限账号产生无谓写入。best-effort，出错仅记日志。
-// 不再依赖全局 enable_persona_gating 开关。
-func (s *GatewayService) IncrementAccountPersonaDailyRequest(ctx context.Context, account *Account) {
-	if account == nil || !account.IsPersonaEnabled() {
-		return
-	}
-	env := account.GetPersonaEnvelope()
-	if env.DailyCap <= 0 || s.rpmCache == nil {
-		return
-	}
-	if _, err := s.rpmCache.IncrementAccountDaily(ctx, account.ID, env.DayKey(time.Now())); err != nil {
-		logger.LegacyPrintf("service.gateway", "Warning: persona daily increment failed for account %d: %v", account.ID, err)
-	}
-}
-
-// effectiveAccountConcurrency 返回人格门控下的账号动态并发上限：
-// 当账号启用了 persona（通过 preset 或手动配置），使用基于 5h/7d 利用率的动态并发，
-// 否则返回 account.Concurrency。不再依赖全局 enable_persona_gating 开关。
-func (s *GatewayService) effectiveAccountConcurrency(ctx context.Context, account *Account) int {
-	if account == nil {
-		return 0
-	}
-	if account.IsPersonaEnabled() {
-		return account.EffectivePersonaMaxConcurrency()
-	}
-	return account.Concurrency
 }
 
 // IncrementAccountRPM increments the RPM counter for the given account.
@@ -2216,7 +2123,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 						if clearSticky {
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
-						if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && s.isAccountPersonaSchedulable(ctx, account) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
+						if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
 							if s.debugModelRoutingEnabled() {
 								logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 							}
@@ -2285,10 +2192,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
-			// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-			if !s.isAccountPersonaSchedulable(ctx, acc) {
-				continue
-			}
 			if selected == nil {
 				selected = acc
 				continue
@@ -2339,7 +2242,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 					if clearSticky {
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
-					if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && s.isAccountPersonaSchedulable(ctx, account) {
+					if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						return account, nil
 					}
 				}
@@ -2401,10 +2304,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			continue
 		}
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
-			continue
-		}
-		// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-		if !s.isAccountPersonaSchedulable(ctx, acc) {
 			continue
 		}
 		if selected == nil {
@@ -2482,7 +2381,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 						if clearSticky {
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
-						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && s.isAccountPersonaSchedulable(ctx, account) {
+						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
@@ -2553,10 +2452,6 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
-			// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-			if !s.isAccountPersonaSchedulable(ctx, acc) {
-				continue
-			}
 			if selected == nil {
 				selected = acc
 				continue
@@ -2607,7 +2502,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 					if clearSticky {
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
-					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && s.isAccountPersonaSchedulable(ctx, account) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
+					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
 						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
 							return account, nil
 						}
@@ -2670,10 +2565,6 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			continue
 		}
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
-			continue
-		}
-		// 人格作息窗口检查（fail-open：开关关闭或未配置时恒放行）
-		if !s.isAccountPersonaSchedulable(ctx, acc) {
 			continue
 		}
 		if selected == nil {

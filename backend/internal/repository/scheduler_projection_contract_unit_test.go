@@ -36,16 +36,14 @@ type capacityVerdict struct {
 	WindowBands  []service.WindowCostSchedulability
 }
 
-// verdictOf 是被对拍的判定函数，只调用选号阶段真正读取的账号方法。
+// verdictOf 是被对拍的判定函数，只调用选号阶段真正读取的账号方法：
+// 硬并发上限 EffectiveConcurrency、负载分母 LoadBalanceCapacity、降速后的 RPM 上限 EffectiveBaseRPM，
+// 以及 RPM / 窗口费用的区带判定。
 var verdictOf = func(a *service.Account, rpmProbes []int, costProbes []float64) capacityVerdict {
-	concurrency := a.Concurrency
-	if a.IsPersonaEnabled() {
-		concurrency = a.EffectivePersonaMaxConcurrency()
-	}
 	v := capacityVerdict{
-		Concurrency:  concurrency,
-		LoadCapacity: a.EffectiveLoadFactor(),
-		BaseRPM:      a.RPMCeiling(),
+		Concurrency:  a.EffectiveConcurrency(),
+		LoadCapacity: a.LoadBalanceCapacity(),
+		BaseRPM:      a.EffectiveBaseRPM(),
 		RPMStrategy:  a.GetRPMStrategy(),
 		StickyBuffer: a.GetRPMStickyBuffer(),
 		MaxSessions:  a.GetMaxSessions(),
@@ -62,14 +60,19 @@ var verdictOf = func(a *service.Account, rpmProbes []int, costProbes []float64) 
 }
 
 // rpmProbes 以完整账号的配置生成探针，两边用同一组探针，避免投影丢键后探针也跟着变。
+// 探针既覆盖配置的 base_rpm 边界，也覆盖降速后的有效 RPM 边界（未降速时两组重合）。
 func rpmProbes(a *service.Account) []int {
 	base := a.GetBaseRPM()
 	if base <= 0 {
 		return []int{0, 1, 100, 9999}
 	}
 	buf := a.GetRPMStickyBuffer()
+	effective := a.EffectiveBaseRPM()
 	seen := map[int]struct{}{}
-	for _, p := range []int{0, base - 1, base, base + buf - 1, base + buf, 9999} {
+	for _, p := range []int{
+		0, base - 1, base, base + buf - 1, base + buf, 9999,
+		effective - 1, effective, effective + buf - 1, effective + buf,
+	} {
 		if p >= 0 {
 			seen[p] = struct{}{}
 		}
@@ -102,6 +105,14 @@ func projectAccount(t *testing.T, a service.Account) service.Account {
 	return restored
 }
 
+// effectiveWant 是完整账号应有的降速后容量，作为前置条件钉住动态降速曲线，
+// 并证明带降速的用例不是空转（有效值确实不同于账号上配置的原始值）。
+type effectiveWant struct {
+	concurrency  int
+	loadCapacity int
+	baseRPM      int
+}
+
 type contractScenario struct {
 	name    string
 	account service.Account
@@ -110,6 +121,8 @@ type contractScenario struct {
 	band  service.WindowCostSchedulability
 	// checkBand 为 false 时跳过前置条件（只对拍，不断言区带）。
 	checkBand bool
+	// want 非 nil 时断言完整账号的有效并发 / 负载分母 / 有效 RPM（前置条件）。
+	want *effectiveWant
 }
 
 func anthropicOAuth(id int64, concurrency int, extra map[string]any) service.Account {
@@ -126,6 +139,12 @@ func contractScenarios() []contractScenario {
 	load20 := 20
 	loadAccount := anthropicOAuth(9007, 7, nil)
 	loadAccount.LoadFactor = &load20
+
+	// 降速 + load_factor：硬并发上限按并发列缩放（5×0.4=2），负载分母按 load_factor 缩放（20×0.4=8）。
+	adaptiveLoadAccount := anthropicOAuth(9012, 5, map[string]any{
+		"adaptive_throttle": true, "session_window_utilization": 0.85,
+	})
+	adaptiveLoadAccount.LoadFactor = &load20
 
 	return []contractScenario{
 		{
@@ -177,6 +196,52 @@ func contractScenarios() []contractScenario {
 			}),
 			probe: 70, band: service.WindowCostNotSchedulable, checkBand: true,
 		},
+		{
+			// 5h 0.85 / 7d 0.6 → 系数 min(0.4, 0.833) = 0.4：并发 5→2、RPM 50→20。
+			// 开关或任一利用率键没进投影，缓存命中时这个账号就会按 5 / 50 放行。
+			name: "adaptive_throttle_scales_under_high_utilization",
+			account: anthropicOAuth(9009, 5, map[string]any{
+				"adaptive_throttle": true, "base_rpm": 50, "max_sessions": 5,
+				"session_window_utilization": 0.85, "passive_usage_7d_utilization": 0.6,
+			}),
+			probe: 20, band: service.WindowCostStickyOnly, checkBand: true,
+			want: &effectiveWant{concurrency: 2, loadCapacity: 2, baseRPM: 20},
+		},
+		{
+			// 只有 7d 利用率高（5h 很低）：7d 单独决定系数 f(0.85)=0.4。
+			// 上面那行里 5h 的系数更小，盖住了 7d 键丢失的影响；这一行专门钉住 7d 利用率进了投影。
+			name: "adaptive_throttle_driven_by_7d_utilization_alone",
+			account: anthropicOAuth(9013, 5, map[string]any{
+				"adaptive_throttle": true, "base_rpm": 50, "max_sessions": 5,
+				"session_window_utilization": 0.3, "passive_usage_7d_utilization": 0.85,
+			}),
+			probe: 20, band: service.WindowCostStickyOnly, checkBand: true,
+			want: &effectiveWant{concurrency: 2, loadCapacity: 2, baseRPM: 20},
+		},
+		{
+			// 利用率为空（没有被动采样数据）→ 系数 1，不能因为缺数据把账号压到最低速。
+			name: "adaptive_throttle_without_utilization_is_full_speed",
+			account: anthropicOAuth(9010, 3, map[string]any{
+				"adaptive_throttle": true, "base_rpm": 30, "max_sessions": 3,
+			}),
+			probe: 30, band: service.WindowCostStickyOnly, checkBand: true,
+			want: &effectiveWant{concurrency: 3, loadCapacity: 3, baseRPM: 30},
+		},
+		{
+			// 开关关闭 → 利用率再高也不缩放（守护行：证明上面的缩放来自开关而不是利用率本身）。
+			name: "adaptive_throttle_off_ignores_utilization",
+			account: anthropicOAuth(9011, 5, map[string]any{
+				"adaptive_throttle": false, "base_rpm": 50, "max_sessions": 5,
+				"session_window_utilization": 0.85, "passive_usage_7d_utilization": 0.6,
+			}),
+			probe: 50, band: service.WindowCostStickyOnly, checkBand: true,
+			want: &effectiveWant{concurrency: 5, loadCapacity: 5, baseRPM: 50},
+		},
+		{
+			name:    "adaptive_throttle_scales_load_factor_denominator",
+			account: adaptiveLoadAccount,
+			want:    &effectiveWant{concurrency: 2, loadCapacity: 8, baseRPM: 0},
+		},
 	}
 }
 
@@ -187,6 +252,11 @@ func TestSchedulerProjectionContract_VerdictsMatchFullAccount(t *testing.T) {
 			if tc.checkBand {
 				require.Equal(t, tc.band, full.CheckRPMSchedulability(tc.probe),
 					"前置条件：完整账号在探针点应落在该区带，否则这行用例是空转")
+			}
+			if tc.want != nil {
+				require.Equal(t, tc.want.concurrency, full.EffectiveConcurrency(), "前置条件：有效并发")
+				require.Equal(t, tc.want.loadCapacity, full.LoadBalanceCapacity(), "前置条件：负载分母")
+				require.Equal(t, tc.want.baseRPM, full.EffectiveBaseRPM(), "前置条件：有效 RPM")
 			}
 
 			restored := projectAccount(t, full)
@@ -250,10 +320,12 @@ func TestSchedulerProjectionContract_RegistryShape(t *testing.T) {
 		seen[key] = struct{}{}
 	}
 
-	// 官方已修过、本 fork 此前缺失的键：RPM 门与动态降速的利用率输入。
+	// 官方已修过、本 fork 此前缺失的键：RPM 门与动态降速的利用率输入；
+	// 以及动态降速开关本身。
 	for _, must := range []string{
 		"base_rpm", "rpm_strategy", "rpm_sticky_buffer",
 		"session_window_utilization", "passive_usage_7d_utilization", "passive_usage_7d_reset",
+		"adaptive_throttle",
 	} {
 		require.Contains(t, seen, must)
 	}

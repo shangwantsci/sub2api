@@ -67,7 +67,6 @@ type cachedGatewayForwardingSettings struct {
 	anthropicCacheTTL1hInjection     bool
 	rewriteMessageCacheControl       bool
 	clientDatelineNormalization      bool
-	personaGating                    bool
 	expiresAt                        int64 // unix nano
 }
 
@@ -595,7 +594,6 @@ func (s *SettingService) IsBackendModeEnabled(ctx context.Context) bool {
 type gatewayForwardingSettingsResult struct {
 	fp, mp, cch, claudeOAuthSystemPromptInjection, cacheTTL1h, rewriteMessageCacheControl bool
 	clientDatelineNormalization                                                           bool
-	personaGating                                                                         bool
 	claudeOAuthBillableInputTokens                                                        bool
 	claudeOAuthBillableOverride                                                           int
 	claudeCodeMimicryProfile, claudeMimicryGuardMode                                      string
@@ -627,7 +625,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 				rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 				clientDatelineNormalization:      cached.clientDatelineNormalization,
-				personaGating:                    cached.personaGating,
 				claudeOAuthBillableInputTokens:   cached.claudeOAuthBillableInputTokens,
 				claudeOAuthBillableOverride:      cached.claudeOAuthBillableOverride,
 			}
@@ -648,7 +645,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					cacheTTL1h:                       cached.anthropicCacheTTL1hInjection,
 					rewriteMessageCacheControl:       cached.rewriteMessageCacheControl,
 					clientDatelineNormalization:      cached.clientDatelineNormalization,
-					personaGating:                    cached.personaGating,
 					claudeOAuthBillableInputTokens:   cached.claudeOAuthBillableInputTokens,
 					claudeOAuthBillableOverride:      cached.claudeOAuthBillableOverride,
 				}, nil
@@ -670,7 +666,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableAnthropicCacheTTL1hInjection,
 			SettingKeyRewriteMessageCacheControl,
 			SettingKeyEnableClientDatelineNormalization,
-			SettingKeyEnablePersonaGating,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -684,7 +679,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				anthropicCacheTTL1hInjection:     false,
 				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
 				clientDatelineNormalization:      true,
-				personaGating:                    false,
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
 			return gatewayForwardingSettingsResult{
@@ -694,7 +688,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				claudeOAuthSystemPromptInjection: true,
 				rewriteMessageCacheControl:       s.defaultRewriteMessageCacheControl(),
 				clientDatelineNormalization:      true,
-				personaGating:                    false,
 			}, nil
 		}
 		fp := true
@@ -729,8 +722,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		if v, ok := values[SettingKeyEnableClientDatelineNormalization]; ok && v != "" {
 			clientDatelineNormalization = v == "true"
 		}
-		// 人格门控默认关闭：键缺失或非 "true" 一律视为 false，保证存量部署行为不变
-		personaGating := values[SettingKeyEnablePersonaGating] == "true"
 		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 			fingerprintUnification:           fp,
 			metadataPassthrough:              mp,
@@ -745,7 +736,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			anthropicCacheTTL1hInjection:     cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
-			personaGating:                    personaGating,
 			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -762,7 +752,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			cacheTTL1h:                       cacheTTL1h,
 			rewriteMessageCacheControl:       rewriteMessageCacheControl,
 			clientDatelineNormalization:      clientDatelineNormalization,
-			personaGating:                    personaGating,
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
@@ -774,7 +763,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 		claudeMimicryGuardMode:           claudeMimicryGuardWarn,
 		claudeOAuthSystemPromptInjection: true,
 		clientDatelineNormalization:      true,
-		personaGating:                    false,
 	}
 }
 
@@ -800,11 +788,6 @@ func (s *SettingService) IsRewriteMessageCacheControlEnabled(ctx context.Context
 // 的客户端 dateline 归一化。默认开启。
 func (s *SettingService) IsClientDatelineNormalizationEnabled(ctx context.Context) bool {
 	return s.getGatewayForwardingSettingsCached(ctx).clientDatelineNormalization
-}
-
-// IsPersonaGatingEnabled 检查是否启用账号人格门控（作息窗口 + 人格并发上限）。默认关闭。
-func (s *SettingService) IsPersonaGatingEnabled(ctx context.Context) bool {
-	return s.getGatewayForwardingSettingsCached(ctx).personaGating
 }
 
 // GetClaudeOAuthSystemPromptInjectionSettings returns the Claude OAuth mimic

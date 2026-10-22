@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -29,28 +30,30 @@ const (
 	extraKeySessionIDMasking      = "session_id_masking_enabled"
 	extraKeySessionIdleTimeoutMin = "session_idle_timeout_minutes"
 	extraKeyRPMStrategy           = "rpm_strategy"
-
-	// personaKeyPrefix 前缀的键在 provider 链路一律丢弃。人格属于内部处理方式，
-	// 由管理员事后单独配置，绝不能让供号商设置或察觉。
-	personaKeyPrefix = "persona_"
 )
 
-// providerTierExtraKeys 是档位写入 extra 的键集合。
+// providerTierWrittenExtraKeys 是「选档位」写进 extra 的键集合（容量 4 项里的 extra 部分 + 动态降速）。
 //
 // 「应用到存量」严格只增量合并这几个键，绝不整体覆盖 extra，否则会清掉
-// window_cost_sticky_reserve、quota_*、privacy_mode 等另行配置的持久设置。
-// persona_preset 是唯一允许通过 tier 写入的 persona_ 键。
-var providerTierExtraKeys = []string{
+// window_cost_sticky_reserve、quota_*、privacy_mode、nurturing_enabled 等另行配置的持久设置。
+var providerTierWrittenExtraKeys = []string{
 	extraKeyMaxSessions,
 	extraKeyBaseRPM,
 	extraKeyWindowCostLimit,
-	extraPersonaPreset,
+	extraKeyAdaptiveThrottle,
 }
+
+// providerSubmittableExtraKeys 是供号商可以在上号请求里直接提交的 extra 键。
+//
+// 目前一个都没有：容量只能通过「选档位」写入，其余内部配置（动态降速、养号、伪装……）
+// 由平台决定，供号商既不能设置也不该察觉。与 providerTierWrittenExtraKeys 是两回事——
+// 前者是系统写入的键，后者才是供号商能提交的键，不能混用同一个变量。
+var providerSubmittableExtraKeys = []string{}
 
 // ProviderCustomTierInput 是供号商在自定义档下可以自行设置的参数。
 //
-// 不含任何 persona、rate_multiplier、priority、pool_weight、load_factor：
-// 这些属于平台调度权与计费权，不开放。
+// 不含任何 adaptive_throttle、nurturing_enabled、rate_multiplier、priority、pool_weight、
+// load_factor：这些属于平台调度权与计费权，不开放。
 //
 // 也不含 rpm_strategy：tiered 与 sticky_exempt 决定的是调度器如何处理粘性会话，
 // 属于平台的调度策略而不是供号商的速率参数，开放它等于让供号商改调度行为。
@@ -71,12 +74,15 @@ type ResolvedProviderTier struct {
 	WindowCostLimit float64
 	IdleTimeoutMin  int    // 0 = 用系统默认
 	RPMStrategy     string // "" = 用系统默认 (tiered)
-	PersonaPreset   string // "" = 不设防封预设；balanced/aggressive/conservative/off
+	// AdaptiveThrottle 是动态降速开关。模板档取模板里的值；自定义档没有模板可继承，一律为 true：
+	// 供号商自填的只是一组裸数值，不能因为选了自定义档就绕开平台的降速保护（五个预设档的种子也都是开）。
+	// 指针保持 nil 安全：nil 表示调用方没有指定，ApplyProviderTierToExtra 不碰账号上已有的值。
+	AdaptiveThrottle *bool
 }
 
 // ResolveProviderTier 把所选档位翻译成建账号参数。
 //
-// tier 为 ProviderTierCustom 时使用 custom 的入参并施加护栏；否则查固定档定义。
+// tier 为 ProviderTierCustom 时使用 custom 的入参并施加护栏；否则查对供号商开放的模板（FindTier）。
 func ResolveProviderTier(
 	settings ProviderSettings,
 	tier string,
@@ -104,13 +110,23 @@ func ResolveProviderTier(
 		return ResolvedProviderTier{}, infraerrors.BadRequest("INVALID_TIER",
 			fmt.Sprintf("capacity tier %q is not available", tier))
 	}
+	// 模板表的读路径是宽松的（迁移搬来的历史数据、手改库都可能带着不满足写入规则的数值）。
+	// 供号商上号是对外入口，复制数值之前再校验一遍：并发 0 在槽位逻辑里是「不限」，
+	// 绝不能因为一条坏模板就给供号商建出一个不限并发的账号。细节只进日志，不对外暴露。
+	if err := validateCapacityPresetNumbers(def); err != nil {
+		slog.Warn("capacity preset has invalid values and is refused for provider onboarding",
+			"tier", def.Key, "error", err)
+		return ResolvedProviderTier{}, infraerrors.BadRequest("INVALID_TIER",
+			fmt.Sprintf("capacity tier %q is not available", tier))
+	}
+	adaptive := def.AdaptiveThrottle
 	return ResolvedProviderTier{
-		Tier:            def.Tier,
-		Concurrency:     def.Concurrency,
-		MaxSessions:     def.MaxSessions,
-		BaseRPM:         def.BaseRPM,
-		WindowCostLimit: def.WindowCostLimit,
-		PersonaPreset:   def.PersonaPreset,
+		Tier:             def.Key,
+		Concurrency:      def.Concurrency,
+		MaxSessions:      def.MaxSessions,
+		BaseRPM:          def.BaseRPM,
+		WindowCostLimit:  def.WindowCostLimit,
+		AdaptiveThrottle: &adaptive,
 	}, nil
 }
 
@@ -159,22 +175,25 @@ func resolveCustomTier(caps ProviderCustomTierCaps, in ProviderCustomTierInput) 
 			fmt.Sprintf("session idle timeout must be between 0 and %d minutes", providerMaxIdleTimeoutMin))
 	}
 
+	// 自定义档没有模板可继承，动态降速一律开启：只会强制开、不会被关，供号商无法借自定义档绕开降速。
+	adaptive := true
 	return ResolvedProviderTier{
-		Tier:            ProviderTierCustom,
-		Concurrency:     in.Concurrency,
-		MaxSessions:     in.MaxSessions,
-		BaseRPM:         in.BaseRPM,
-		WindowCostLimit: in.WindowCostLimit,
-		IdleTimeoutMin:  in.IdleTimeoutMin,
+		Tier:             ProviderTierCustom,
+		Concurrency:      in.Concurrency,
+		MaxSessions:      in.MaxSessions,
+		BaseRPM:          in.BaseRPM,
+		WindowCostLimit:  in.WindowCostLimit,
+		IdleTimeoutMin:   in.IdleTimeoutMin,
+		AdaptiveThrottle: &adaptive,
 	}, nil
 }
 
 // ApplyProviderTierToExtra 把档位参数写进 extra，返回新 map，不修改入参。
 //
-// 只触碰档位相关的键，其余键原样保留 —— 这正是「应用到存量」不会清掉 persona
-// 等持久设置的原因。
+// 只触碰档位相关的键，其余键原样保留 —— 这正是「应用到存量」不会清掉 nurturing_enabled、
+// window_cost_sticky_reserve 等持久设置的原因。
 func ApplyProviderTierToExtra(extra map[string]any, tier ResolvedProviderTier) map[string]any {
-	out := make(map[string]any, len(extra)+len(providerTierExtraKeys)+3)
+	out := make(map[string]any, len(extra)+len(providerTierWrittenExtraKeys)+2)
 	for k, v := range extra {
 		out[k] = v
 	}
@@ -189,11 +208,10 @@ func ApplyProviderTierToExtra(extra map[string]any, tier ResolvedProviderTier) m
 	if tier.RPMStrategy != "" {
 		out[extraKeyRPMStrategy] = tier.RPMStrategy
 	}
-	// 档位指定了防封预设时写入，让上号自动启用防封。
-	// 这是唯一允许通过 tier 机制写入 persona_* 键的路径——
-	// 供应商直接提交的 persona_* 仍被 SanitizeProviderExtra 丢弃。
-	if tier.PersonaPreset != "" && IsValidPreset(tier.PersonaPreset) {
-		out[extraPersonaPreset] = tier.PersonaPreset
+	// 对动态降速无条件写显式 true/false：JSONB 合并删不了键，「关闭」只能写 false，
+	// 否则换到一个不降速的档位后旧的 true 会一直留着。自定义档恒为 true。
+	if tier.AdaptiveThrottle != nil {
+		out[extraKeyAdaptiveThrottle] = *tier.AdaptiveThrottle
 	}
 	return out
 }
@@ -284,16 +302,17 @@ func ApplyProviderForcedCredentials(creds map[string]any) map[string]any {
 
 // SanitizeProviderExtra 过滤供号商提交的 extra。
 //
-// 采用白名单：只保留档位相关键，其余一律丢弃。这样即便供号商构造请求塞
-// persona_enabled 或任何未来新增的内部配置键，也进不了账号。
+// 采用白名单（providerSubmittableExtraKeys，目前为空）：只保留供号商可提交的键，其余一律丢弃。
+// 这样即便供号商构造请求塞 adaptive_throttle、nurturing_enabled 或任何未来新增的内部配置键，
+// 也进不了账号；容量只能通过选档位写入。
 // 返回被丢弃的键便于记日志。
 func SanitizeProviderExtra(in map[string]any) (kept map[string]any, dropped []string) {
 	kept = make(map[string]any, len(in))
 	if len(in) == 0 {
 		return kept, nil
 	}
-	allowed := make(map[string]struct{}, len(providerTierExtraKeys))
-	for _, k := range providerTierExtraKeys {
+	allowed := make(map[string]struct{}, len(providerSubmittableExtraKeys))
+	for _, k := range providerSubmittableExtraKeys {
 		allowed[k] = struct{}{}
 	}
 	for k, v := range in {
@@ -304,14 +323,4 @@ func SanitizeProviderExtra(in map[string]any) (kept map[string]any, dropped []st
 		dropped = append(dropped, k)
 	}
 	return kept, dropped
-}
-
-// ContainsPersonaKey 报告 map 中是否含任何 persona_ 前缀键，用于测试与日志。
-func ContainsPersonaKey(in map[string]any) bool {
-	for k := range in {
-		if strings.HasPrefix(k, personaKeyPrefix) {
-			return true
-		}
-	}
-	return false
 }

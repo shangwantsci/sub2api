@@ -884,7 +884,7 @@ func TestAPIContracts(t *testing.T) {
 					"enable_anthropic_cache_ttl_1h_injection": false,
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
-					"enable_persona_gating": false,
+					"account_nurturing_enabled": false,
 					"antigravity_user_agent_version": "",
 					"enable_fingerprint_unification": true,
 					"enable_metadata_passthrough": false,
@@ -1159,7 +1159,7 @@ func TestAPIContracts(t *testing.T) {
 					"enable_anthropic_cache_ttl_1h_injection": false,
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
-					"enable_persona_gating": false,
+					"account_nurturing_enabled": false,
 					"antigravity_user_agent_version": "",
 					"min_codex_version": "",
 					"max_codex_version": "",
@@ -1311,7 +1311,8 @@ func TestAPIContracts(t *testing.T) {
 					"results": [
 						{"account_id": 101, "success": true},
 						{"account_id": 102, "success": true}
-					]
+					],
+					"skipped": 0
 				}
 			}`,
 		},

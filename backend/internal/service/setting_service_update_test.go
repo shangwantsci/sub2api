@@ -546,3 +546,38 @@ func TestSettingService_UpdateSettings_MimicryRoundTrip(t *testing.T) {
 	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, got.ClaudeCodeMimicryProfile)
 	require.Equal(t, claudeMimicryGuardBlock, got.ClaudeMimicryGuardMode)
 }
+
+// 账号养号全局开关：默认关闭，严格 "true" 才开（与账号上的 nurturing_enabled 是双重开关）。
+func TestSettingService_ParseSettings_AccountNurturingEnabledIsStrictAndDefaultsOff(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
+
+	require.False(t, svc.parseSettings(map[string]string{}).AccountNurturingEnabled, "键缺失即关闭")
+	require.True(t, svc.parseSettings(map[string]string{SettingKeyAccountNurturingEnabled: "true"}).AccountNurturingEnabled)
+	for _, notTrue := range []string{"false", "TRUE", "True", "1", "yes", "on", " true", ""} {
+		require.False(t, svc.parseSettings(map[string]string{SettingKeyAccountNurturingEnabled: notTrue}).AccountNurturingEnabled,
+			"%q 不是严格的 \"true\"", notTrue)
+	}
+}
+
+func TestSettingService_UpdateSettings_AccountNurturingEnabledRoundTrip(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	require.NoError(t, svc.UpdateSettings(context.Background(), &SystemSettings{AccountNurturingEnabled: true}))
+	require.Equal(t, "true", repo.updates[SettingKeyAccountNurturingEnabled])
+	require.True(t, svc.parseSettings(repo.updates).AccountNurturingEnabled)
+
+	repo = &settingUpdateRepoStub{}
+	svc = NewSettingService(repo, &config.Config{})
+	require.NoError(t, svc.UpdateSettings(context.Background(), &SystemSettings{AccountNurturingEnabled: false}))
+	require.Equal(t, "false", repo.updates[SettingKeyAccountNurturingEnabled])
+	require.False(t, svc.parseSettings(repo.updates).AccountNurturingEnabled)
+}
+
+func TestSettingService_InitializeDefaultSettings_AccountNurturingDefaultsOff(t *testing.T) {
+	repo := &settingInitializeRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
+	require.Equal(t, "false", repo.updates[SettingKeyAccountNurturingEnabled])
+}

@@ -422,8 +422,8 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
 		}
-		// 人格信封配置校验（仅在出现 persona_enabled 键时才校验）
-		if err := ValidatePersonaConfig(account.Extra); err != nil {
+		// 容量开关（动态降速、养号）必须是严格 bool
+		if err := ValidateCapacityExtra(account.Extra); err != nil {
 			return nil, err
 		}
 		ComputeQuotaResetAt(account.Extra)
@@ -451,65 +451,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		account.LoadFactor = input.LoadFactor
 	}
 	return account, nil
-}
-
-// proxyExitLocation 返回账号代理出口的国家码与地区，best-effort（无代理/缓存未命中/
-// 出错均返回空）。仅用于人格时区 prefill 与一致性告警，绝不阻断调用方。
-func (s *adminServiceImpl) proxyExitLocation(ctx context.Context, proxyID *int64) (countryCode, region string) {
-	if proxyID == nil || *proxyID <= 0 || s.proxyLatencyCache == nil {
-		return "", ""
-	}
-	infos, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{*proxyID})
-	if err != nil {
-		return "", ""
-	}
-	if info := infos[*proxyID]; info != nil {
-		return info.CountryCode, info.Region
-	}
-	return "", ""
-}
-
-// applyPersonaGeoDefaults 在账号启用 persona 但未填时区/locale 时，按代理出口国家自动
-// prefill；若已填时区却与代理出口国家不自洽（如美国 IP 声称 Asia/Shanghai），记一条
-// 告警但不拦截（fail-open）。locale 只作组织元数据，不写入出站请求头。
-func (s *adminServiceImpl) applyPersonaGeoDefaults(ctx context.Context, extra map[string]any, proxyID *int64) {
-	if extra == nil {
-		return
-	}
-	if _, ok := extra[extraPersonaEnabled]; !ok {
-		return
-	}
-	country, region := s.proxyExitLocation(ctx, proxyID)
-	if country == "" {
-		return
-	}
-	tz := ""
-	if v, ok := extra[extraPersonaTimezone].(string); ok {
-		tz = strings.TrimSpace(v)
-	}
-	if tz == "" {
-		if prefill := TimezoneForCountry(country, region); prefill != "" {
-			extra[extraPersonaTimezone] = prefill
-			tz = prefill
-		}
-	}
-	locale := ""
-	if v, ok := extra[extraPersonaLocale].(string); ok {
-		locale = strings.TrimSpace(v)
-	}
-	if locale == "" {
-		if prefill := LocaleForCountry(country); prefill != "" {
-			extra[extraPersonaLocale] = prefill
-		}
-	}
-	if tz != "" && !PersonaTimezoneMatchesCountry(tz, country) {
-		pid := int64(0)
-		if proxyID != nil {
-			pid = *proxyID
-		}
-		slog.Warn("persona timezone inconsistent with proxy exit country (fail-open, not blocked)",
-			"persona_timezone", tz, "proxy_country", country, "proxy_id", pid)
-	}
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
@@ -550,8 +491,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	// 人格地理默认：按代理出口国家 prefill 时区 / 一致性告警（fail-open）。
-	s.applyPersonaGeoDefaults(ctx, account.Extra, account.ProxyID)
 	if account.IsAnthropicOAuthOrSetupToken() {
 		account.Extra = applyClaudeMachineProfile(account.Extra)
 	}
@@ -687,8 +626,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
 		}
-		// 人格信封配置校验（仅在出现 persona_enabled 键时才校验）
-		if err := ValidatePersonaConfig(account.Extra); err != nil {
+		// 容量开关（动态降速、养号）必须是严格 bool
+		if err := ValidateCapacityExtra(account.Extra); err != nil {
 			return nil, err
 		}
 		ComputeQuotaResetAt(account.Extra)
@@ -704,11 +643,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
-	}
-	// 人格地理默认：仅当本次带 extra（即 persona 配置可能被触及）时，按最终代理出口国家
-	// prefill 时区 / 一致性告警（fail-open，放在 proxy 应用之后以用最新出口国家）。
-	if input.Extra != nil {
-		s.applyPersonaGeoDefaults(ctx, account.Extra, account.ProxyID)
 	}
 	// 只在指针非 nil 时更新 Concurrency（支持设置为 0）
 	if input.Concurrency != nil {
@@ -801,8 +735,8 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			return err
 		}
 	}
-	// 闭合校验绕过口子：部分合并路径也校验其中出现的 persona_* 字段。
-	if err := ValidatePersonaExtraPatch(updates); err != nil {
+	// 闭合校验绕过口子：部分合并路径也校验其中出现的容量开关键。
+	if err := ValidateCapacityExtra(updates); err != nil {
 		return err
 	}
 	if len(updates) == 0 {
@@ -839,10 +773,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 	_, hasLongContextBillingUpdate := input.Extra[openAILongContextBillingEnabledKey]
+	hasCapacityExtra := hasCapacityExtraKeys(input.Extra)
 
-	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
+	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查/容量键资格判断共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || hasLongContextBillingUpdate {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || hasLongContextBillingUpdate || hasCapacityExtra {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -860,9 +795,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			break
 		}
 	}
-	// 闭合校验绕过口子：批量 extra 合并也校验其中出现的 persona_* 字段（对所有目标账号共用同一 patch）。
+	// 闭合校验绕过口子：批量 extra 合并也校验其中出现的容量开关键（对所有目标账号共用同一 patch）。
 	if len(input.Extra) > 0 {
-		if err := ValidatePersonaExtraPatch(input.Extra); err != nil {
+		if err := ValidateCapacityExtra(input.Extra); err != nil {
 			return nil, err
 		}
 	}
@@ -960,9 +895,35 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
-	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+	// 容量与节流键（max_sessions、base_rpm、adaptive_throttle……）只对 Claude OAuth / SetupToken
+	// 账号有意义：其它账号的这些键被剔除，并计入 Skipped。并发列对所有平台都有效，不受影响。
+	// 绝大多数情况下所有目标都符合资格，仍是一条 SQL 的原子更新；只有混选了其它账号时才拆成两条
+	// （两条不在同一个事务里：第二条失败时第一条已生效，接口返回错误；两条都是幂等的 JSONB 合并，
+	// 原样重试同一个请求即可恢复）。
+	skippedIDs := []int64(nil)
+	applicableIDs := input.AccountIDs
+	if hasCapacityExtra {
+		applicableIDs, skippedIDs = splitCapacityBulkTargets(input.AccountIDs, cachedTargets)
+	}
+	if len(skippedIDs) == 0 {
+		// Run bulk update for column/jsonb fields first.
+		if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
+			return nil, err
+		}
+	} else {
+		if len(applicableIDs) > 0 {
+			if _, err := s.accountRepo.BulkUpdate(ctx, applicableIDs, repoUpdates); err != nil {
+				return nil, err
+			}
+		}
+		skippedUpdates := repoUpdates
+		skippedUpdates.Extra, _ = StripCapacityExtra(repoUpdates.Extra)
+		if bulkUpdateHasChanges(skippedUpdates) {
+			if _, err := s.accountRepo.BulkUpdate(ctx, skippedIDs, skippedUpdates); err != nil {
+				return nil, err
+			}
+		}
+		result.Skipped = len(skippedIDs)
 	}
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
@@ -1000,6 +961,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	return result, nil
+}
+
+// bulkUpdateHasChanges 报告批量更新补丁里是否还有要写的字段。
+func bulkUpdateHasChanges(u AccountBulkUpdate) bool {
+	return u.Name != nil || u.ProxyID != nil || u.Concurrency != nil || u.Priority != nil ||
+		u.RateMultiplier != nil || u.LoadFactor != nil || u.Status != nil || u.Schedulable != nil ||
+		len(u.Credentials) > 0 || len(u.Extra) > 0
 }
 
 func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {

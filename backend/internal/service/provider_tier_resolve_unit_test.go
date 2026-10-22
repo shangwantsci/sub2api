@@ -9,7 +9,8 @@ import (
 )
 
 func tierSettings() ProviderSettings {
-	return ProviderSettings{CapacityTiers: DefaultProviderCapacityTiers()}
+	presets := DefaultCapacityPresets()
+	return ProviderSettings{Presets: presets.Presets, EnabledTierKeys: presets.Keys()}
 }
 
 // 参数正好等于某个固定档时，标签就是那个档。
@@ -26,7 +27,7 @@ func TestResolveProviderAccountTierMatchesFixedTier(t *testing.T) {
 
 	tier, label := ResolveProviderAccountTier(tierSettings(), acc)
 	require.Equal(t, "3", tier)
-	require.Equal(t, "3 档", label)
+	require.Equal(t, "均衡", label)
 }
 
 // 最高档的 5h 上限种子值就是 0（表示不限），必须能正常匹配上，
@@ -43,7 +44,7 @@ func TestResolveProviderAccountTierMatchesTierWithZeroWindowLimit(t *testing.T) 
 
 	tier, label := ResolveProviderAccountTier(tierSettings(), acc)
 	require.Equal(t, "5", tier)
-	require.Equal(t, "5 档", label)
+	require.Equal(t, "旗舰", label)
 }
 
 // 这是整个改动的理由：管理员在管理端把账号参数改掉之后，标签不能再撒谎。
@@ -94,13 +95,11 @@ func TestResolveProviderAccountTierRequiresAllFourParams(t *testing.T) {
 	}
 }
 
-// 档位被管理员停用后，已经在用它的账号参数并没有变，显示原档位名仍然准确。
-// 停用只该影响「能不能换到该档」，不该让存量账号的标签突然变成自定义。
+// 档位对供号商取消开放后，已经在用它的账号参数并没有变，显示原档位名仍然准确。
+// 取消开放只该影响「能不能换到该档」，不该让存量账号的标签突然变成自定义。
 func TestResolveProviderAccountTierStillLabelsDisabledTier(t *testing.T) {
 	settings := tierSettings()
-	for i := range settings.CapacityTiers {
-		settings.CapacityTiers[i].Enabled = false
-	}
+	settings.EnabledTierKeys = nil
 
 	acc := &Account{
 		Concurrency: 3,
@@ -113,7 +112,39 @@ func TestResolveProviderAccountTierStillLabelsDisabledTier(t *testing.T) {
 
 	tier, label := ResolveProviderAccountTier(settings, acc)
 	require.Equal(t, "3", tier)
-	require.Equal(t, "3 档", label)
+	require.Equal(t, "均衡", label)
+}
+
+// 标签只比 4 个数值，动态降速开关不参与：管理员切换开关不该让档位标签变成「自定义」。
+// 前端 matchPreset 必须与此同口径。
+func TestResolveProviderAccountTierIgnoresAdaptiveThrottle(t *testing.T) {
+	for _, adaptive := range []any{true, false, nil} {
+		extra := map[string]any{"max_sessions": 3, "base_rpm": 30, "window_cost_limit": 60}
+		if adaptive != nil {
+			extra["adaptive_throttle"] = adaptive
+		}
+		acc := &Account{Concurrency: 3, Extra: extra}
+
+		tier, label := ResolveProviderAccountTier(tierSettings(), acc)
+		require.Equal(t, "3", tier, "adaptive_throttle=%v", adaptive)
+		require.Equal(t, "均衡", label, "adaptive_throttle=%v", adaptive)
+	}
+}
+
+// 迁移自旧档位表的数据可能有两个模板 4 个数值完全相同（旧表从未要求唯一）。
+// 此时取表里第一个，结果稳定。
+func TestResolveProviderAccountTierDuplicateTupleTakesFirst(t *testing.T) {
+	settings := ProviderSettings{
+		Presets: []CapacityPreset{
+			{Key: "a", Label: "甲", Concurrency: 2, MaxSessions: 2, BaseRPM: 20, WindowCostLimit: 40},
+			{Key: "b", Label: "乙", Concurrency: 2, MaxSessions: 2, BaseRPM: 20, WindowCostLimit: 40},
+		},
+	}
+	acc := &Account{Concurrency: 2, Extra: map[string]any{"max_sessions": 2, "base_rpm": 20, "window_cost_limit": 40}}
+
+	tier, label := ResolveProviderAccountTier(settings, acc)
+	require.Equal(t, "a", tier)
+	require.Equal(t, "甲", label)
 }
 
 func TestResolveProviderAccountTierHandlesNilAccount(t *testing.T) {

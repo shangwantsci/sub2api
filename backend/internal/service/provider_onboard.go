@@ -79,8 +79,8 @@ func AssertProviderProxyModeAllowed(policy, mode string) error {
 //  1. 彻底排除 Claude for Chrome OAuth。这里是 service 层硬约束而非 UI 隐藏：
 //     构造 CookieAuthInput 时永不设置 OAuthClient（留空即 claude_code），
 //     且入口断言拒绝任何显式传 claude_chrome 的请求。
-//  2. extra 走白名单过滤，persona_* 一律丢弃。人格属于内部处理方式，
-//     由管理员事后单独配置。
+//  2. extra 走白名单过滤（供号商可提交的键为空）：动态降速、养号等内部配置一律丢弃，
+//     容量只能通过「选档位」写入，其余由管理员事后单独配置。
 
 // ErrProviderChromeOAuthForbidden 供号商链路禁用 Chrome OAuth。
 var ErrProviderChromeOAuthForbidden = infraerrors.BadRequest(
@@ -397,7 +397,7 @@ func ResolveProviderAccountPriority(settings ProviderSettings, groupMin int, ok 
 
 // BuildProviderAccountInput 把上号输入翻译成 CreateAccountInput。
 //
-// 顺序很重要：先过滤 extra（丢掉 persona 等），再套档位，最后写强制伪装项，
+// 顺序很重要：先过滤 extra（丢掉内部配置键），再套档位，最后写强制伪装项，
 // 这样供号商无论怎么构造请求都覆盖不了强制项。
 // groupMinPriority 是目标托管分组内现有账号的最小 priority，ok=false 表示分组为空。
 // 由调用方查好传入，保持本函数无 IO、可单测。
@@ -481,8 +481,11 @@ type ProviderTierApplyResult struct {
 
 // ApplyTierToExistingProviderAccounts 把某档位的最新参数回填到该档现有账号。
 //
-// 只增量合并档位相关的 extra 键，绝不整体覆盖 extra，否则会清掉 persona_*、
-// window_cost_sticky_reserve、quota_* 、privacy_mode 等另行配置的持久设置。
+// 走 BulkUpdate 的增量写：一条 SQL 覆盖所有命中账号（没有读改写竞态），extra 是 JSONB 顶层合并，
+// 只写 max_sessions / base_rpm / window_cost_limit / adaptive_throttle 四个键，其余持久设置
+// （window_cost_sticky_reserve、quota_*、privacy_mode、nurturing_enabled……）原样保留；
+// 并发列与 load_factor 一起写成档位并发（与上号时的赋值一致）。
+// 动态降速写显式 true/false，因为合并删不了键。
 func (s *adminServiceImpl) ApplyTierToExistingProviderAccounts(
 	ctx context.Context,
 	tier ResolvedProviderTier,
@@ -493,19 +496,33 @@ func (s *adminServiceImpl) ApplyTierToExistingProviderAccounts(
 		return result, err
 	}
 	result.Matched = len(accounts)
-
-	for i := range accounts {
-		acc := accounts[i]
-		merged := ApplyProviderTierToExtra(acc.Extra, tier)
-		concurrency := tier.Concurrency
-		loadFactor := tier.Concurrency
-		if err := s.accountRepo.UpdateProviderTierParams(ctx, acc.ID, concurrency, loadFactor, merged); err != nil {
-			slog.Warn("failed to apply tier to existing provider account",
-				"account_id", acc.ID, "tier", tier.Tier, "error", err)
-			continue
-		}
-		result.Updated++
+	if len(accounts) == 0 {
+		return result, nil
 	}
+
+	ids := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		ids = append(ids, accounts[i].ID)
+	}
+	concurrency := tier.Concurrency
+	loadFactor := tier.Concurrency
+	extra := map[string]any{
+		extraKeyMaxSessions:     tier.MaxSessions,
+		extraKeyBaseRPM:         tier.BaseRPM,
+		extraKeyWindowCostLimit: tier.WindowCostLimit,
+	}
+	if tier.AdaptiveThrottle != nil {
+		extra[extraKeyAdaptiveThrottle] = *tier.AdaptiveThrottle
+	}
+	updated, err := s.accountRepo.BulkUpdate(ctx, ids, AccountBulkUpdate{
+		Concurrency: &concurrency,
+		LoadFactor:  &loadFactor,
+		Extra:       extra,
+	})
+	if err != nil {
+		return result, err
+	}
+	result.Updated = int(updated)
 	return result, nil
 }
 
@@ -558,15 +575,16 @@ func ProviderAccountDisplayStatus(a *Account) string {
 // 固定档的 label 是管理员自己填的文案（不走 i18n），但「自定义」这三个字原先是
 // 硬编码中文，英文界面的供号商也会看到中文。
 //
-// 比对全量 CapacityTiers 而不是 EnabledTiers：档位被管理员停用后，已经在用它的
-// 账号参数并没有变，显示原档位名仍然是准确的（停用只影响能不能**换到**该档）。
+// 比对全量模板（Presets）而不是对供号商开放的那部分：档位被管理员取消开放后，已经在用它的
+// 账号参数并没有变，显示原档位名仍然是准确的（取消开放只影响能不能**换到**该档）。
+// 多个模板的 4 个数值相同时取表里第一个（正常情况下保存时已要求 4 元组唯一）。
 func ResolveProviderAccountTier(settings ProviderSettings, a *Account) (tier string, label string) {
 	if a == nil {
 		return "", ""
 	}
-	for _, t := range settings.CapacityTiers {
+	for _, t := range settings.Presets {
 		if providerTierMatchesAccount(t, a) {
-			return t.Tier, t.Label
+			return t.Key, t.Label
 		}
 	}
 	return ProviderTierCustom, ""
@@ -574,9 +592,10 @@ func ResolveProviderAccountTier(settings ProviderSettings, a *Account) (tier str
 
 // providerTierMatchesAccount 判断账号当前参数是否与某个固定档完全一致。
 //
-// 四项都要匹配：并发在 accounts.concurrency 列上，其余三项在 extra 里。
+// 只比 4 个数值：并发在 accounts.concurrency 列上，其余三项在 extra 里。刻意**不含动态降速**：
+// 它只是一个独立开关，管理员切换它不该让档位标签变成「自定义」。前端的 matchPreset 必须同口径。
 // 任何一项对不上就不算这个档 —— 宁可显示「自定义」，也不能给一个只对了一半的标签。
-func providerTierMatchesAccount(t ProviderCapacityTier, a *Account) bool {
+func providerTierMatchesAccount(t CapacityPreset, a *Account) bool {
 	return a.Concurrency == t.Concurrency &&
 		a.GetMaxSessions() == t.MaxSessions &&
 		a.GetBaseRPM() == t.BaseRPM &&
@@ -599,8 +618,8 @@ func ProviderTierLabel(settings ProviderSettings, tier *string) string {
 	if name == ProviderTierCustom {
 		return "自定义"
 	}
-	for _, t := range settings.CapacityTiers {
-		if t.Tier == name {
+	for _, t := range settings.Presets {
+		if t.Key == name {
 			return t.Label
 		}
 	}

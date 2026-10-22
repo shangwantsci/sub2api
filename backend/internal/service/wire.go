@@ -290,8 +290,10 @@ func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpirySe
 }
 
 // ProvideAccountNurturingService creates and starts AccountNurturingService.
-func ProvideAccountNurturingService(accountRepo AccountRepository, tokenProvider *ClaudeTokenProvider) *AccountNurturingService {
+// settingRepo 用来读全局开关 account_nurturing_enabled，必须在 Start 之前注入。
+func ProvideAccountNurturingService(accountRepo AccountRepository, tokenProvider *ClaudeTokenProvider, settingRepo SettingRepository) *AccountNurturingService {
 	svc := NewAccountNurturingService(accountRepo, tokenProvider, time.Hour)
+	svc.SetSettingRepository(settingRepo)
 	svc.Start()
 	return svc
 }

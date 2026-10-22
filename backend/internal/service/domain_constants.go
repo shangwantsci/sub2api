@@ -464,6 +464,12 @@ const (
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
 
+	// SettingKeyCapacityPresets 容量档位模板表，JSON 对象：
+	// {"presets":[{key,label,concurrency,max_sessions,base_rpm,window_cost_limit,adaptive_throttle}],
+	//  "default_key":"3"}。选档位 = 把模板数值复制写进账号；改模板只影响之后套用的账号。
+	// 设置缺失时使用 DefaultCapacityPresets 的种子值。
+	SettingKeyCapacityPresets = "capacity_presets"
+
 	// ===== 供号商站点（Provider Portal）=====
 	// SettingKeyProviderPortalEnabled 供号商站点总开关；关闭时注册与所有 /provider 接口一并关停
 	SettingKeyProviderPortalEnabled = "provider_portal_enabled"
@@ -473,10 +479,11 @@ const (
 	SettingKeyProviderSelectableGroups = "provider_selectable_groups"
 	// SettingKeyProviderDefaultGroupID 供号商上号未指定托管类型时使用的默认分组
 	SettingKeyProviderDefaultGroupID = "provider_default_group_id"
-	// SettingKeyProviderCapacityTiers 1-5 档速率定义 JSON 数组，每项含
-	// tier / label / concurrency / max_sessions / base_rpm / window_cost_limit / enabled
-	SettingKeyProviderCapacityTiers = "provider_capacity_tiers"
-	// SettingKeyProviderDefaultTier 默认档位（种子值 "3"）
+	// SettingKeyProviderEnabledTierKeys 对供号商开放的容量档位模板 key，JSON 字符串数组。
+	// 缺省（设置不存在）= 模板表里的全部 key。档位数值本身不在这里，见 SettingKeyCapacityPresets。
+	// 旧的 provider_capacity_tiers 设置行已由迁移 227 翻译后搁置，代码不再读写。
+	SettingKeyProviderEnabledTierKeys = "provider_enabled_tier_keys"
+	// SettingKeyProviderDefaultTier 供号商上号的默认档位（种子值 "3"），必须落在开放的档位内
 	SettingKeyProviderDefaultTier = "provider_default_tier"
 	// SettingKeyProviderCustomTierEnabled 是否允许供号商使用自定义档
 	SettingKeyProviderCustomTierEnabled = "provider_custom_tier_enabled"
@@ -547,9 +554,10 @@ const (
 	SettingKeyEnableClientDatelineNormalization = "enable_client_dateline_normalization"
 	// SettingKeyRewriteMessageCacheControl 是否改写 messages[*].content[*].cache_control（默认 false）
 	SettingKeyRewriteMessageCacheControl = "rewrite_message_cache_control"
-	// SettingKeyEnablePersonaGating 是否启用账号人格门控（作息窗口 + 人格并发上限，默认 false）。
-	// 开启后仅影响 Extra 中 persona_enabled=true 的账号（双重开关）；关闭时调度行为与既有完全一致。
-	SettingKeyEnablePersonaGating = "enable_persona_gating"
+	// SettingKeyAccountNurturingEnabled 账号养号全局开关（默认 false，严格 "true" 才开）。
+	// 开启后只处理账号 extra 里 nurturing_enabled=true 的 Anthropic OAuth/SetupToken 账号
+	// （全局 + 账号双重开关）；关闭时养号服务整轮空转。
+	SettingKeyAccountNurturingEnabled = "account_nurturing_enabled"
 	// SettingKeyAntigravityUserAgentVersion Antigravity 上游 User-Agent 版本号（空值使用环境变量/默认值）
 	SettingKeyAntigravityUserAgentVersion = "antigravity_user_agent_version"
 	// SettingKeyOpenAICodexUserAgent OpenAI Codex 完整 User-Agent（空值使用内置默认）

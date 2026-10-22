@@ -13,8 +13,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func seedPresets() []service.CapacityPreset {
+	return service.DefaultCapacityPresets().Presets
+}
+
+func seedPresetKeys() []string {
+	return service.DefaultCapacityPresets().Keys()
+}
+
 // 供号商侧的账号视图是整套功能的脱敏边界。这个测试盯的是「平台对账号做了什么处理」
-// 这类信息绝不能出现在响应里：凭据、代理、人格、TLS 指纹、调度参数、分组策略。
+// 这类信息绝不能出现在响应里：凭据、代理、动态降速与养号、TLS 指纹、调度参数、分组策略。
 //
 // 用序列化后的 JSON 全文做断言而不是逐字段比对，是为了让将来给 service.Account
 // 加字段、或有人图省事改回复用 dto.Account 时，这里能立刻炸掉。
@@ -43,8 +51,8 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 			"intercept_warmup_requests": true,
 		},
 		Extra: map[string]any{
-			"persona_enabled":            true,
-			"persona_timezone":           "America/New_York",
+			"adaptive_throttle":          true,
+			"nurturing_enabled":          true,
 			"enable_tls_fingerprint":     true,
 			"session_id_masking_enabled": true,
 			// 这四项凑齐正好等于 3 档，用来验证标签能正确反推到固定档。
@@ -72,7 +80,8 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 		HostingTypes: []service.ProviderHostingType{
 			{GroupID: 11, Label: "稳健型", Description: "寿命最长", Enabled: true},
 		},
-		CapacityTiers: service.DefaultProviderCapacityTiers(),
+		Presets:         seedPresets(),
+		EnabledTierKeys: seedPresetKeys(),
 	}
 
 	view := AccountViewFromService(account, settings, &service.ProviderPeriodTotals{
@@ -89,8 +98,8 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 		"SECRET-ACCESS-TOKEN", "SECRET-REFRESH-TOKEN", "SECRET-SESSION-KEY",
 		"access_token", "refresh_token", "session_key", "credentials",
 		"oauth_client", "claude_chrome",
-		// 内部处理配置
-		"persona", "America/New_York",
+		// 内部处理配置：动态降速与养号都是平台决定的，供号商不该察觉
+		"adaptive", "throttle", "nurtur",
 		"enable_tls_fingerprint", "session_id_masking",
 		"intercept_warmup_requests", "privacy_mode",
 		"extra",
@@ -118,7 +127,7 @@ func TestAccountViewNeverLeaksInternalProcessing(t *testing.T) {
 	require.Equal(t, "supplier-account", view.Name)
 	require.Equal(t, "active", view.Status)
 	require.Equal(t, "稳健型", view.HostingTypeLabel)
-	require.Equal(t, "3 档", view.TierLabel)
+	require.Equal(t, "均衡", view.TierLabel)
 	require.Equal(t, int64(10), view.PeriodRequests)
 
 	// 邮箱要能下发：供号商靠它对照手上哪些号已经上了。这条 extra 里没有、
@@ -171,7 +180,8 @@ func TestOnboardOptionsOmitGroupPolicies(t *testing.T) {
 			{GroupID: 13, Label: "隐藏", Enabled: false, Sort: 0},
 		},
 		DefaultGroupID:    11,
-		CapacityTiers:     service.DefaultProviderCapacityTiers(),
+		Presets:           seedPresets(),
+		EnabledTierKeys:   seedPresetKeys(),
 		DefaultTier:       "3",
 		CustomTierEnabled: true,
 		CustomTierCaps:    service.DefaultProviderCustomTierCaps(),
@@ -194,17 +204,37 @@ func TestOnboardOptionsOmitGroupPolicies(t *testing.T) {
 		"content_review_policy", "claude_oauth_system_prompt_policy",
 		"rate_multiplier", "group_id", "inherit", "identity_only",
 		"disabled", "sort",
+		// 模板里的动态降速开关与养号属于内部处理，绝不下发给供号商。
+		"adaptive", "throttle", "nurtur",
 	} {
 		require.NotContains(t, payload, needle,
 			"onboard options must not expose %q; payload=%s", needle, payload)
 	}
 }
 
+// 上号页的档位列表只含 key、文案与四个数值，来自对供号商开放的模板，顺序跟模板表走。
+func TestOnboardOptionsTiersComeFromEnabledPresets(t *testing.T) {
+	settings := service.ProviderSettings{
+		Presets:         seedPresets(),
+		EnabledTierKeys: []string{"4", "2"}, // 顺序以模板表为准，不是这个列表
+		DefaultTier:     "2",
+	}
+
+	options := OnboardOptionsFromSettings(settings)
+
+	require.Equal(t, "2", options.DefaultTier)
+	require.Equal(t, []CapacityTierView{
+		{Tier: "2", Label: "保守", Concurrency: 2, MaxSessions: 2, BaseRPM: 20, WindowCostLimit: 40},
+		{Tier: "4", Label: "激进", Concurrency: 5, MaxSessions: 5, BaseRPM: 50, WindowCostLimit: 100},
+	}, options.Tiers)
+}
+
 // 代理来源策略要下发（上号页据此决定渲染哪些选项），但可用出口的数量绝不下发——
 // 那等于把平台代理池的规模告诉供号商。
 func TestOnboardOptionsExposePolicyButNotPoolSize(t *testing.T) {
 	options := OnboardOptionsFromSettings(service.ProviderSettings{
-		CapacityTiers:   service.DefaultProviderCapacityTiers(),
+		Presets:         seedPresets(),
+		EnabledTierKeys: seedPresetKeys(),
 		DefaultTier:     "3",
 		ProxyModePolicy: service.ProviderProxyPolicyAutoOnly,
 	})
@@ -227,7 +257,8 @@ func TestOnboardOptionsExposePolicyButNotPoolSize(t *testing.T) {
 // 让上号页渲染成一个没有任何选项的空白区块。
 func TestOnboardOptionsNormalizeUnknownProxyPolicy(t *testing.T) {
 	options := OnboardOptionsFromSettings(service.ProviderSettings{
-		CapacityTiers:   service.DefaultProviderCapacityTiers(),
+		Presets:         seedPresets(),
+		EnabledTierKeys: seedPresetKeys(),
 		DefaultTier:     "3",
 		ProxyModePolicy: "platform_only",
 	})

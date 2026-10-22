@@ -36,6 +36,10 @@ var schedulerProjectedExtraKeys = []string{
 	"rpm_strategy",
 	"rpm_sticky_buffer",
 
+	// 动态降速开关：并发上限、负载分母与 RPM 上限都要乘降速系数，下面的 5h/7d 利用率是它的输入。
+	// 开关与利用率必须一起在投影里，否则缓存命中时降速静默失效（见 account_throttle.go）。
+	"adaptive_throttle",
+
 	// Anthropic 被动采样的 5h/7d 利用率与 Fable 新鲜度证据
 	"session_window_utilization",
 	"passive_usage_7d_utilization",

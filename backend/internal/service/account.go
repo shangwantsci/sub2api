@@ -1855,6 +1855,27 @@ func (a *Account) IsTLSFingerprintEnabled() bool {
 	return false
 }
 
+// TLSFingerprintSetting 返回 extra.enable_tls_fingerprint 的三态原值，供管理端展示：
+//   - nil：extra 里没有这个键（缺省）。运行时由 ResolveTLSProfileForClaudeMimic 决定——
+//     Claude Code 伪装路径默认使用内置 TLS 指纹，其它路径不伪装；
+//   - true / false：显式开启 / 关闭；
+//   - 键存在但不是 bool：与 accountHasExplicitTLSFingerprintNonTrue 一致，按显式关闭（false）。
+//
+// 仅适用于 Anthropic OAuth/SetupToken 账号，其它账号恒为 nil。
+// 注意它与 IsTLSFingerprintEnabled 不同：后者把「缺省」和「显式关闭」都折成 false，区分不了。
+func (a *Account) TLSFingerprintSetting() *bool {
+	if !a.IsAnthropicOAuthOrSetupToken() || a.Extra == nil {
+		return nil
+	}
+	raw, ok := a.Extra["enable_tls_fingerprint"]
+	if !ok {
+		return nil
+	}
+	enabled, isBool := raw.(bool)
+	value := isBool && enabled
+	return &value
+}
+
 // GetTLSFingerprintProfileID 获取账号绑定的 TLS 指纹模板 ID
 // 返回 0 表示未绑定（使用内置默认 profile）
 func (a *Account) GetTLSFingerprintProfileID() int64 {
@@ -2594,8 +2615,11 @@ func (a *Account) GetRPMStickyBuffer() int {
 
 // CheckRPMSchedulability 根据当前 RPM 计数检查调度状态
 // 复用 WindowCostSchedulability 三态：Schedulable / StickyOnly / NotSchedulable
+//
+// 上限取降速后的 EffectiveBaseRPM（未开启动态降速时等于 base_rpm）。粘性缓冲
+// GetRPMStickyBuffer 刻意不随降速缩放：已建立的会话要靠它继续被服务，缩小缓冲会把它们饿死。
 func (a *Account) CheckRPMSchedulability(currentRPM int) WindowCostSchedulability {
-	baseRPM := a.GetBaseRPM()
+	baseRPM := a.EffectiveBaseRPM()
 	if baseRPM <= 0 {
 		return WindowCostSchedulable
 	}

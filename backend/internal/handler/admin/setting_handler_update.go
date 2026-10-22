@@ -229,7 +229,7 @@ type UpdateSettingsRequest struct {
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
-	EnablePersonaGating                    *bool   `json:"enable_persona_gating"`
+	AccountNurturingEnabled                *bool   `json:"account_nurturing_enabled"`
 	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
 
@@ -1412,11 +1412,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableClientDatelineNormalization
 		}(),
-		EnablePersonaGating: func() bool {
-			if req.EnablePersonaGating != nil {
-				return *req.EnablePersonaGating
+		AccountNurturingEnabled: func() bool {
+			if req.AccountNurturingEnabled != nil {
+				return *req.AccountNurturingEnabled
 			}
-			return previousSettings.EnablePersonaGating
+			return previousSettings.AccountNurturingEnabled
 		}(),
 		AntigravityUserAgentVersion: func() string {
 			if req.AntigravityUserAgentVersion != nil {
@@ -1862,7 +1862,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
-		EnablePersonaGating:                                    updatedSettings.EnablePersonaGating,
+		AccountNurturingEnabled:                                updatedSettings.AccountNurturingEnabled,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,

@@ -82,9 +82,6 @@ type AdminService interface {
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
-	// BatchApplyPersonaConfig 批量给账号写入 persona 配置。
-	// 已启用 persona 的账号会被跳过（不覆盖），除非 force=true。
-	BatchApplyPersonaConfig(ctx context.Context, input BatchPersonaConfig, force bool) (applied int, skipped int, err error)
 	DeleteAccount(ctx context.Context, id int64) error
 	RefreshAccountCredentials(ctx context.Context, id int64) (*Account, error)
 	ClearAccountError(ctx context.Context, id int64) (*Account, error)
@@ -101,7 +98,7 @@ type AdminService interface {
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 	// ApplyTierToExistingProviderAccounts 把某档位最新参数回填到该档现有供号商账号。
-	// 只增量合并档位相关的 extra 键，persona_* 等其它持久设置原样保留。
+	// 走 BulkUpdate 的增量写，只改并发与档位相关的 extra 键，nurturing_enabled 等其它持久设置原样保留。
 	ApplyTierToExistingProviderAccounts(ctx context.Context, tier ResolvedProviderTier) (ProviderTierApplyResult, error)
 	// CountProviderAccountsByTier 返回某档位当前账号数，供设置页二次确认预览。
 	CountProviderAccountsByTier(ctx context.Context, tier string) (int, error)
@@ -475,6 +472,10 @@ type BulkUpdateAccountsResult struct {
 	SuccessIDs []int64                   `json:"success_ids"`
 	FailedIDs  []int64                   `json:"failed_ids"`
 	Results    []BulkUpdateAccountResult `json:"results"`
+	// Skipped 是被跳过容量键的账号数：补丁里带了容量与节流相关的 extra 键，但目标账号不是
+	// Claude OAuth / SetupToken，这些键对它没有意义，所以没写。这些账号的其它字段照常更新，
+	// 仍计入 Success；该字段只是信息，调用方可以忽略。
+	Skipped int `json:"skipped"`
 }
 
 type CreateProxyInput struct {

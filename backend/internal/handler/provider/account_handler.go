@@ -252,7 +252,7 @@ func buildProfileUpdateInput(req UpdateAccountRequest) (*service.UpdateAccountIn
 // updateAccountTier 换速率档位。
 //
 // extra 必须基于账号**现有** extra 增量合并（ApplyProviderTierToExtra），
-// 绝不能构造一个只含档位键的 map —— 落库是整列覆盖，那样会清掉 persona_*、
+// 绝不能构造一个只含档位键的 map —— 落库是整列覆盖，那样会清掉 nurturing_enabled、
 // window_cost_sticky_reserve、身份字段等所有另行配置的持久设置。
 func (h *Handler) updateAccountTier(
 	ctx context.Context,

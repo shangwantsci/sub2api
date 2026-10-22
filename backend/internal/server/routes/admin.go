@@ -532,6 +532,11 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Beta 策略配置
 		adminSettings.GET("/beta-policy", h.Admin.Setting.GetBetaPolicySettings)
 		adminSettings.PUT("/beta-policy", h.Admin.Setting.UpdateBetaPolicySettings)
+		// 容量档位模板（并发 / 会话数 / RPM / 5h 额度 / 动态降速的可复用组合）
+		if h.Admin.Provider != nil {
+			adminSettings.GET("/capacity-presets", h.Admin.Provider.GetCapacityPresets)
+			adminSettings.PUT("/capacity-presets", h.Admin.Provider.UpdateCapacityPresets)
+		}
 		// Claude Code 标定 profile（真身抓包 → 热加载出站字节）
 		adminSettings.GET("/claude-calibrated-profile", h.Admin.Setting.GetClaudeCalibratedProfile)
 		adminSettings.POST("/claude-calibrated-profile", h.Admin.Setting.PublishClaudeCalibratedProfile)

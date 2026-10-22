@@ -212,7 +212,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
-		SettingKeyEnablePersonaGating:                                "false",
+		SettingKeyAccountNurturingEnabled:                            "false",
 		SettingKeyAntigravityUserAgentVersion:                        "",
 		SettingKeyOpenAICodexUserAgent:                               "",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
@@ -781,8 +781,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.EnableClientDatelineNormalization = true
 	}
-	// 人格门控默认关闭：键缺失即 false
-	result.EnablePersonaGating = settings[SettingKeyEnablePersonaGating] == "true"
+	// 账号养号全局开关默认关闭：键缺失即 false，严格 "true" 才开
+	result.AccountNurturingEnabled = settings[SettingKeyAccountNurturingEnabled] == "true"
 	result.AntigravityUserAgentVersion = antigravity.NormalizeUserAgentVersion(settings[SettingKeyAntigravityUserAgentVersion])
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])
 	// codex_cli_only 加固

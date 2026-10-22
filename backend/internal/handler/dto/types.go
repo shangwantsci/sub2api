@@ -237,8 +237,18 @@ type Account struct {
 	RPMStickyBuffer  *int    `json:"rpm_sticky_buffer,omitempty"`
 	UserMsgQueueMode *string `json:"user_msg_queue_mode,omitempty"`
 
+	// 动态降速后的有效容量（仅 Anthropic OAuth/SetupToken 账号返回，其它平台省略）。
+	// 前端的容量列直接显示这些值，不再自己重算后端公式。
+	//   - effective_concurrency：降速后的硬并发上限，并发为 0（不限）时仍为 0；
+	//   - effective_base_rpm：降速后的 RPM 上限，未配置 base_rpm 时为 0；
+	//   - throttle_factor：当前降速系数（0.1-1.0），未开启动态降速时为 1。
+	EffectiveConcurrency *int     `json:"effective_concurrency,omitempty"`
+	EffectiveBaseRPM     *int     `json:"effective_base_rpm,omitempty"`
+	ThrottleFactor       *float64 `json:"throttle_factor,omitempty"`
+
 	// TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效）
-	// 从 extra 字段提取，方便前端显示和编辑
+	// 三态：extra 里没有这个键时不输出（null=缺省，运行时由伪装路径决定默认值），
+	// 显式 true/false 原样输出。从 extra 字段提取，方便前端显示和编辑。
 	EnableTLSFingerprint    *bool  `json:"enable_tls_fingerprint,omitempty"`
 	TLSFingerprintProfileID *int64 `json:"tls_fingerprint_profile_id,omitempty"`
 

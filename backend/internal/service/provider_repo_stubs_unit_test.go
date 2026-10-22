@@ -21,9 +21,6 @@ func (m *accountRepoStub) ListByProviderTier(context.Context, string) ([]Account
 	return nil, nil
 }
 func (m *accountRepoStub) CountByProviderTier(context.Context, string) (int, error) { return 0, nil }
-func (m *accountRepoStub) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
-}
 
 func (m *accountRepoStub) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
@@ -37,9 +34,6 @@ func (m *publicBatchImageAccountRepo) ListByProviderTier(context.Context, string
 }
 func (m *publicBatchImageAccountRepo) CountByProviderTier(context.Context, string) (int, error) {
 	return 0, nil
-}
-func (m *publicBatchImageAccountRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
 }
 
 func (m *publicBatchImageAccountRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
@@ -55,9 +49,6 @@ func (m *mockAccountRepoForPlatform) ListByProviderTier(context.Context, string)
 func (m *mockAccountRepoForPlatform) CountByProviderTier(context.Context, string) (int, error) {
 	return 0, nil
 }
-func (m *mockAccountRepoForPlatform) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
-}
 
 func (m *mockAccountRepoForPlatform) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
@@ -71,9 +62,6 @@ func (m *mockAccountRepoForGemini) ListByProviderTier(context.Context, string) (
 }
 func (m *mockAccountRepoForGemini) CountByProviderTier(context.Context, string) (int, error) {
 	return 0, nil
-}
-func (m *mockAccountRepoForGemini) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
 }
 
 func (m *mockAccountRepoForGemini) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
@@ -89,9 +77,6 @@ func (m *batchAccountQueryRepo) ListByProviderTier(context.Context, string) ([]A
 func (m *batchAccountQueryRepo) CountByProviderTier(context.Context, string) (int, error) {
 	return 0, nil
 }
-func (m *batchAccountQueryRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
-}
 
 func (m *batchAccountQueryRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil
@@ -105,9 +90,6 @@ func (m *fullRebuildAccountRepo) ListByProviderTier(context.Context, string) ([]
 }
 func (m *fullRebuildAccountRepo) CountByProviderTier(context.Context, string) (int, error) {
 	return 0, nil
-}
-func (m *fullRebuildAccountRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
 }
 
 func (m *fullRebuildAccountRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {

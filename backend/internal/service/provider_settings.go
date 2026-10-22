@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,15 +17,15 @@ import (
 //
 // 全部存在 settings 表里，管理端「供货商」设置页可视化编辑，代码只提供首次部署的种子值。
 // 档位数值与托管类型对外文案都不硬编码，上线后调整无需改代码。
+//
+// 速率档位的数值不在这里：它们属于统一的容量档位模板（见 capacity_presets.go），供货商设置
+// 只保存「哪些模板对供货商开放」（enabled_tier_keys）与默认档位（default_tier）。
 
 const (
 	// ProviderTierCustom 是自定义档的档位标识。该档账号不参与「应用到存量」批量回填。
 	ProviderTierCustom = "custom"
 
 	providerSettingsDBTimeout = 5 * time.Second
-
-	// 固定档数量。档位标识为 "1".."5"。
-	providerFixedTierCount = 5
 )
 
 // 设置项数值区间护栏。前后端都要校验，这里是后端的权威边界。
@@ -51,18 +52,6 @@ type ProviderHostingType struct {
 	Sort        int    `json:"sort"`
 }
 
-// ProviderCapacityTier 是一个固定速率档位的定义。
-type ProviderCapacityTier struct {
-	Tier            string  `json:"tier"`
-	Label           string  `json:"label"`
-	Concurrency     int     `json:"concurrency"`
-	MaxSessions     int     `json:"max_sessions"`
-	BaseRPM         int     `json:"base_rpm"`
-	WindowCostLimit float64 `json:"window_cost_limit"` // 0 = 不限
-	Enabled         bool    `json:"enabled"`
-	PersonaPreset   string  `json:"persona_preset,omitempty"` // 防封预设：balanced/aggressive/conservative/off，空=不设
-}
-
 // ProviderCustomTierCaps 是自定义档各项参数的上限护栏。
 type ProviderCustomTierCaps struct {
 	Concurrency     int     `json:"concurrency"`
@@ -73,10 +62,12 @@ type ProviderCustomTierCaps struct {
 
 // ProviderSettings 汇总供号商站点的全部设置。
 type ProviderSettings struct {
-	PortalEnabled      bool                   `json:"portal_enabled"`
-	HostingTypes       []ProviderHostingType  `json:"hosting_types"`
-	DefaultGroupID     int64                  `json:"default_group_id"`
-	CapacityTiers      []ProviderCapacityTier `json:"capacity_tiers"`
+	PortalEnabled  bool                  `json:"portal_enabled"`
+	HostingTypes   []ProviderHostingType `json:"hosting_types"`
+	DefaultGroupID int64                 `json:"default_group_id"`
+	// EnabledTierKeys 是对供号商开放的容量档位模板 key；缺省 = 模板表里的全部 key。
+	EnabledTierKeys []string `json:"enabled_tier_keys"`
+	// DefaultTier 必须落在 EnabledTierKeys 内，且存在于模板表。
 	DefaultTier        string                 `json:"default_tier"`
 	CustomTierEnabled  bool                   `json:"custom_tier_enabled"`
 	CustomTierCaps     ProviderCustomTierCaps `json:"custom_tier_caps"`
@@ -89,21 +80,12 @@ type ProviderSettings struct {
 	AutoProxyMaxAccounts int `json:"auto_proxy_max_accounts"`
 	// ProxyModePolicy 供号商上号允许的代理来源：both | auto_only | manual_only。
 	ProxyModePolicy string `json:"proxy_mode_policy"`
-}
 
-// DefaultProviderCapacityTiers 返回 1-5 档的种子值。
-//
-// 设计依据：1 档最接近单个真人使用 Claude Code CLI 的节奏（真人含工具调用大约
-// 5-15 RPM，单 CLI 会话并发为 1），逐档放开到 5 档的最大吞吐。这些只是首次部署
-// 的初值，上线后在设置页按实际账号承载能力调整。
-func DefaultProviderCapacityTiers() []ProviderCapacityTier {
-	return []ProviderCapacityTier{
-		{Tier: "1", Label: "1 档", Concurrency: 1, MaxSessions: 1, BaseRPM: 10, WindowCostLimit: 20, Enabled: true},
-		{Tier: "2", Label: "2 档", Concurrency: 2, MaxSessions: 2, BaseRPM: 20, WindowCostLimit: 40, Enabled: true},
-		{Tier: "3", Label: "3 档", Concurrency: 3, MaxSessions: 3, BaseRPM: 30, WindowCostLimit: 60, Enabled: true},
-		{Tier: "4", Label: "4 档", Concurrency: 5, MaxSessions: 5, BaseRPM: 50, WindowCostLimit: 100, Enabled: true},
-		{Tier: "5", Label: "5 档", Concurrency: 8, MaxSessions: 8, BaseRPM: 80, WindowCostLimit: 0, Enabled: true},
-	}
+	// Presets 是容量档位模板表的只读快照，由 GetProviderSettings 填充，供 FindTier / EnabledTiers /
+	// ResolveProviderAccountTier 这类纯函数查数值。它不参与 JSON：模板只归
+	// GET/PUT /admin/settings/capacity-presets 管理，保存供货商设置时也不会写它
+	// （SaveProviderSettings 校验前会重新读取最新模板）。
+	Presets []CapacityPreset `json:"-"`
 }
 
 // DefaultProviderCustomTierCaps 返回自定义档护栏的种子值。
@@ -168,12 +150,14 @@ const DefaultProviderAutoProxyMaxAccounts = 2
 const providerMaxAutoProxyMaxAccounts = 50
 
 func defaultProviderSettings() ProviderSettings {
+	presets := DefaultCapacityPresets()
 	return ProviderSettings{
 		PortalEnabled:             false,
 		HostingTypes:              []ProviderHostingType{},
 		DefaultGroupID:            0,
-		CapacityTiers:             DefaultProviderCapacityTiers(),
-		DefaultTier:               "3",
+		EnabledTierKeys:           presets.Keys(),
+		DefaultTier:               presets.DefaultKey,
+		Presets:                   presets.Presets,
 		CustomTierEnabled:         true,
 		CustomTierCaps:            DefaultProviderCustomTierCaps(),
 		SettlementTimezone:        DefaultProviderSettlementTimezone,
@@ -200,7 +184,8 @@ func (s *SettingService) GetProviderSettings(ctx context.Context) (ProviderSetti
 		SettingKeyProviderPortalEnabled,
 		SettingKeyProviderSelectableGroups,
 		SettingKeyProviderDefaultGroupID,
-		SettingKeyProviderCapacityTiers,
+		SettingKeyCapacityPresets,
+		SettingKeyProviderEnabledTierKeys,
 		SettingKeyProviderDefaultTier,
 		SettingKeyProviderCustomTierEnabled,
 		SettingKeyProviderCustomTierCaps,
@@ -228,14 +213,38 @@ func (s *SettingService) GetProviderSettings(ctx context.Context) (ProviderSetti
 			out.DefaultGroupID = v
 		}
 	}
-	if raw, ok := values[SettingKeyProviderCapacityTiers]; ok && strings.TrimSpace(raw) != "" {
-		var parsed []ProviderCapacityTier
-		if json.Unmarshal([]byte(raw), &parsed) == nil && len(parsed) > 0 {
-			out.CapacityTiers = parsed
+	// 模板表：缺失或不可用时沿用 defaultProviderSettings 里的种子。
+	presets := CapacityPresets{Presets: out.Presets, DefaultKey: out.DefaultTier}
+	if raw, ok := values[SettingKeyCapacityPresets]; ok {
+		if parsed, usable := parseCapacityPresets(raw); usable {
+			presets = parsed
+		} else if strings.TrimSpace(raw) != "" {
+			slog.Warn("capacity_presets setting is unusable, falling back to the seed presets",
+				"setting", SettingKeyCapacityPresets)
 		}
 	}
+	out.Presets = presets.Presets
+
+	// 开放档位：设置缺失（空串、不是合法 JSON 数组、JSON null）= 全部模板对供号商开放；
+	// 显式存下的数组（含 []）按存的算，其中指向已不存在模板的 key 会被忽略，不让一条悬空引用把上号页弄坏。
+	// 如果过滤后一个都不剩（例如管理员把对供号商开放的那几个模板都删了），结果就是「没有任何固定档开放」：
+	// 宁可让设置页上看得见「没开放任何档位」，也不静默把新建的模板全部暴露给供号商。
+	out.EnabledTierKeys = presets.Keys()
+	if raw, ok := values[SettingKeyProviderEnabledTierKeys]; ok && strings.TrimSpace(raw) != "" {
+		var stored []string
+		// json.Unmarshal 对 null 不报错且得到 nil 切片，要和显式的 [] 区分开。
+		if json.Unmarshal([]byte(raw), &stored) == nil && stored != nil {
+			out.EnabledTierKeys = existingTierKeys(stored, presets)
+		}
+	}
+
+	out.DefaultTier = presets.DefaultKey
 	if raw, ok := values[SettingKeyProviderDefaultTier]; ok && strings.TrimSpace(raw) != "" {
 		out.DefaultTier = strings.TrimSpace(raw)
+	}
+	// 默认档位必须是对供号商开放且存在的档位；否则落到第一个开放档位，而不是把悬空值交给上号页。
+	if !containsString(out.EnabledTierKeys, out.DefaultTier) && len(out.EnabledTierKeys) > 0 {
+		out.DefaultTier = out.EnabledTierKeys[0]
 	}
 	if raw, ok := values[SettingKeyProviderCustomTierEnabled]; ok && strings.TrimSpace(raw) != "" {
 		out.CustomTierEnabled = strings.EqualFold(strings.TrimSpace(raw), "true")
@@ -322,10 +331,17 @@ func (s *SettingService) GetProviderSettlementTimezone(ctx context.Context) stri
 // SaveProviderSettings 校验并整体保存供号商设置。
 //
 // 校验在后端做而不只靠前端：设置错了会直接影响上号与调度。
+// 模板表只归 capacity-presets 接口管理：这里不信任调用方带来的 Presets，校验前重新读取最新模板，
+// 并且只写「开放哪些档位」与默认档位，不写模板本身。
 func (s *SettingService) SaveProviderSettings(ctx context.Context, in ProviderSettings) error {
 	if s == nil || s.settingRepo == nil {
 		return fmt.Errorf("setting service unavailable")
 	}
+	presets, err := s.GetCapacityPresets(ctx)
+	if err != nil {
+		return err
+	}
+	in.Presets = presets.Presets
 	normalized, err := ValidateProviderSettings(in)
 	if err != nil {
 		return err
@@ -335,9 +351,9 @@ func (s *SettingService) SaveProviderSettings(ctx context.Context, in ProviderSe
 	if err != nil {
 		return fmt.Errorf("marshal hosting types: %w", err)
 	}
-	tiersJSON, err := json.Marshal(normalized.CapacityTiers)
+	enabledKeysJSON, err := json.Marshal(normalized.EnabledTierKeys)
 	if err != nil {
-		return fmt.Errorf("marshal capacity tiers: %w", err)
+		return fmt.Errorf("marshal enabled tier keys: %w", err)
 	}
 	capsJSON, err := json.Marshal(normalized.CustomTierCaps)
 	if err != nil {
@@ -354,7 +370,7 @@ func (s *SettingService) SaveProviderSettings(ctx context.Context, in ProviderSe
 		SettingKeyProviderPortalEnabled:             strconv.FormatBool(normalized.PortalEnabled),
 		SettingKeyProviderSelectableGroups:          string(hostingJSON),
 		SettingKeyProviderDefaultGroupID:            strconv.FormatInt(normalized.DefaultGroupID, 10),
-		SettingKeyProviderCapacityTiers:             string(tiersJSON),
+		SettingKeyProviderEnabledTierKeys:           string(enabledKeysJSON),
 		SettingKeyProviderDefaultTier:               normalized.DefaultTier,
 		SettingKeyProviderCustomTierEnabled:         strconv.FormatBool(normalized.CustomTierEnabled),
 		SettingKeyProviderCustomTierCaps:            string(capsJSON),
@@ -444,48 +460,39 @@ func ValidateProviderSettings(in ProviderSettings) (ProviderSettings, error) {
 	sort.SliceStable(cleanHosting, func(i, j int) bool { return cleanHosting[i].Sort < cleanHosting[j].Sort })
 	out.HostingTypes = cleanHosting
 
-	// ---- 速率档位 ----
-	seenTiers := make(map[string]bool)
-	enabledTiers := make(map[string]bool)
-	cleanTiers := make([]ProviderCapacityTier, 0, len(in.CapacityTiers))
-	for _, t := range in.CapacityTiers {
-		t.Tier = strings.TrimSpace(t.Tier)
-		if t.Tier == "" {
-			return out, infraerrors.BadRequest("INVALID_TIER", "tier id must not be empty")
-		}
-		if t.Tier == ProviderTierCustom {
-			return out, infraerrors.BadRequest("INVALID_TIER",
-				"\"custom\" is reserved and cannot be used as a fixed tier id")
-		}
-		if seenTiers[t.Tier] {
-			return out, infraerrors.BadRequest("DUPLICATE_TIER",
-				fmt.Sprintf("tier %q is listed more than once", t.Tier))
-		}
-		seenTiers[t.Tier] = true
-
-		t.Label = strings.TrimSpace(t.Label)
-		if t.Label == "" {
-			t.Label = t.Tier
-		}
-		if err := validateTierNumbers(t.Tier, t.Concurrency, t.MaxSessions, t.BaseRPM, t.WindowCostLimit); err != nil {
-			return out, err
-		}
-		t.PersonaPreset = strings.TrimSpace(t.PersonaPreset)
-		if t.PersonaPreset != "" && !IsValidPreset(t.PersonaPreset) {
-			return out, infraerrors.BadRequest("INVALID_PERSONA_PRESET",
-				fmt.Sprintf("tier %q persona preset must be off, aggressive, balanced, or conservative", t.Tier))
-		}
-		if t.Enabled {
-			enabledTiers[t.Tier] = true
-		}
-		cleanTiers = append(cleanTiers, t)
+	// ---- 对供号商开放的速率档位 ----
+	// 开放的 key 必须都存在于模板表（in.Presets）；重复的 key 静默去重，保留首次出现的顺序。
+	templateKeys := make(map[string]bool, len(in.Presets))
+	for _, preset := range in.Presets {
+		templateKeys[preset.Key] = true
 	}
-	if len(enabledTiers) == 0 {
+	enabledTiers := make(map[string]bool, len(in.EnabledTierKeys))
+	cleanKeys := make([]string, 0, len(in.EnabledTierKeys))
+	for _, raw := range in.EnabledTierKeys {
+		key := strings.TrimSpace(raw)
+		if key == "" {
+			return out, infraerrors.BadRequest("INVALID_TIER", "tier key must not be empty")
+		}
+		if key == ProviderTierCustom {
+			return out, infraerrors.BadRequest("INVALID_TIER",
+				"\"custom\" is reserved and cannot be listed in enabled_tier_keys")
+		}
+		if !templateKeys[key] {
+			return out, infraerrors.BadRequest("UNKNOWN_TIER",
+				fmt.Sprintf("tier %q does not exist in the capacity presets", key))
+		}
+		if enabledTiers[key] {
+			continue
+		}
+		enabledTiers[key] = true
+		cleanKeys = append(cleanKeys, key)
+	}
+	if len(cleanKeys) == 0 {
 		return out, infraerrors.BadRequest("NO_ENABLED_TIER", "at least one capacity tier must be enabled")
 	}
-	out.CapacityTiers = cleanTiers
+	out.EnabledTierKeys = cleanKeys
 
-	// ---- 默认项必须处于启用状态 ----
+	// ---- 默认项必须处于开放状态（开放的 key 已确认都存在于模板表）----
 	out.DefaultTier = strings.TrimSpace(out.DefaultTier)
 	if out.DefaultTier == "" {
 		return out, infraerrors.BadRequest("MISSING_DEFAULT_TIER", "default tier must be set")
@@ -623,24 +630,49 @@ func (p ProviderSettings) FindHostingType(groupID int64) (ProviderHostingType, b
 	return ProviderHostingType{}, false
 }
 
-// EnabledTiers 返回已启用的固定档位。
-func (p ProviderSettings) EnabledTiers() []ProviderCapacityTier {
-	out := make([]ProviderCapacityTier, 0, len(p.CapacityTiers))
-	for _, t := range p.CapacityTiers {
-		if t.Enabled {
-			out = append(out, t)
+// EnabledTiers 返回对供号商开放的档位模板，按模板表内的顺序排列（与 EnabledTierKeys 的顺序无关）。
+func (p ProviderSettings) EnabledTiers() []CapacityPreset {
+	out := make([]CapacityPreset, 0, len(p.EnabledTierKeys))
+	for _, preset := range p.Presets {
+		if containsString(p.EnabledTierKeys, preset.Key) {
+			out = append(out, preset)
 		}
 	}
 	return out
 }
 
-// FindTier 按档位标识查找已启用的固定档。
-func (p ProviderSettings) FindTier(tier string) (ProviderCapacityTier, bool) {
+// FindTier 按档位标识查找对供号商开放的固定档。
+func (p ProviderSettings) FindTier(tier string) (CapacityPreset, bool) {
 	tier = strings.TrimSpace(tier)
-	for _, t := range p.CapacityTiers {
-		if t.Tier == tier && t.Enabled {
-			return t, true
+	if !containsString(p.EnabledTierKeys, tier) {
+		return CapacityPreset{}, false
+	}
+	for _, preset := range p.Presets {
+		if preset.Key == tier {
+			return preset, true
 		}
 	}
-	return ProviderCapacityTier{}, false
+	return CapacityPreset{}, false
+}
+
+// existingTierKeys 过滤出确实存在于模板表的 key，去重并保持原有顺序。
+func existingTierKeys(keys []string, presets CapacityPresets) []string {
+	out := make([]string, 0, len(keys))
+	for _, raw := range keys {
+		key := strings.TrimSpace(raw)
+		if _, ok := presets.Find(key); !ok || containsString(out, key) {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
+}
+
+func containsString(list []string, target string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }

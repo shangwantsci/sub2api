@@ -20,9 +20,6 @@ func (m *stubAccountRepo) ListByProviderTier(context.Context, string) ([]service
 func (m *stubAccountRepo) CountByProviderTier(context.Context, string) (int, error) {
 	return 0, nil
 }
-func (m *stubAccountRepo) UpdateProviderTierParams(context.Context, int64, int, int, map[string]any) error {
-	return nil
-}
 
 func (m *stubAccountRepo) UpdateProviderAccountTier(context.Context, int64, string, int, int, map[string]any) error {
 	return nil

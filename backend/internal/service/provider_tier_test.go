@@ -11,6 +11,7 @@ import (
 )
 
 func testProviderSettings() ProviderSettings {
+	presets := DefaultCapacityPresets()
 	return ProviderSettings{
 		PortalEnabled: true,
 		HostingTypes: []ProviderHostingType{
@@ -19,8 +20,9 @@ func testProviderSettings() ProviderSettings {
 			{GroupID: 13, Label: "停用的", Enabled: false, Sort: 3},
 		},
 		DefaultGroupID:     11,
-		CapacityTiers:      DefaultProviderCapacityTiers(),
-		DefaultTier:        "3",
+		EnabledTierKeys:    presets.Keys(),
+		Presets:            presets.Presets,
+		DefaultTier:        presets.DefaultKey,
 		CustomTierEnabled:  true,
 		CustomTierCaps:     DefaultProviderCustomTierCaps(),
 		SettlementTimezone: DefaultProviderSettlementTimezone,
@@ -54,6 +56,8 @@ func TestResolveProviderTierFixed(t *testing.T) {
 	require.Equal(t, 1, resolved.Concurrency)
 	require.Equal(t, 1, resolved.MaxSessions)
 	require.Equal(t, 10, resolved.BaseRPM)
+	require.NotNil(t, resolved.AdaptiveThrottle)
+	require.True(t, *resolved.AdaptiveThrottle, "固定档的动态降速取自模板（种子全部开启）")
 
 	// 空档位回落默认档。
 	resolved, err = ResolveProviderTier(settings, "", nil)
@@ -63,7 +67,7 @@ func TestResolveProviderTierFixed(t *testing.T) {
 
 func TestResolveProviderTierRejectsUnknownAndDisabled(t *testing.T) {
 	settings := testProviderSettings()
-	settings.CapacityTiers[4].Enabled = false // 停用 5 档
+	settings.EnabledTierKeys = []string{"1", "2", "3", "4"} // 5 档不对供货商开放（模板里仍存在）
 
 	_, err := ResolveProviderTier(settings, "5", nil)
 	require.Error(t, err)
@@ -71,6 +75,45 @@ func TestResolveProviderTierRejectsUnknownAndDisabled(t *testing.T) {
 
 	_, err = ResolveProviderTier(settings, "99", nil)
 	require.Error(t, err)
+}
+
+// 模板表的读路径是宽松的，坏数据（迁移搬来的历史数据、手改库）可能带着不满足写入规则的数值。
+// 供号商上号是对外入口：复制数值之前必须再校验一遍，绝不能因为一条坏模板就建出一个
+// 并发为 0（= 不限）的账号。对外只说「该档位不可用」，不暴露细节。
+func TestResolveProviderTierRefusesTemplatesWithInvalidNumbers(t *testing.T) {
+	bad := map[string]func(*CapacityPreset){
+		"并发为 0（不限）": func(p *CapacityPreset) { p.Concurrency = 0 },
+		"并发为负":      func(p *CapacityPreset) { p.Concurrency = -3 },
+		"并发超上限":     func(p *CapacityPreset) { p.Concurrency = capacityPresetMaxConcurrency + 1 },
+		"RPM 为负":    func(p *CapacityPreset) { p.BaseRPM = -1 },
+		"会话数为负":     func(p *CapacityPreset) { p.MaxSessions = -1 },
+		"5h 额度为负":   func(p *CapacityPreset) { p.WindowCostLimit = -5 },
+		"5h 额度超上限":  func(p *CapacityPreset) { p.WindowCostLimit = capacityPresetMaxWindowCostLimit + 1 },
+		"RPM 超上限":   func(p *CapacityPreset) { p.BaseRPM = capacityPresetMaxBaseRPM + 1 },
+		"会话数超上限":    func(p *CapacityPreset) { p.MaxSessions = capacityPresetMaxSessions + 1 },
+	}
+	for name, mutate := range bad {
+		t.Run(name, func(t *testing.T) {
+			settings := testProviderSettings()
+			mutate(&settings.Presets[0]) // key "1"
+
+			_, err := ResolveProviderTier(settings, "1", nil)
+			require.Error(t, err)
+			require.True(t, infraerrors.IsBadRequest(err))
+			require.Equal(t, "INVALID_TIER", infraerrors.Reason(err))
+			require.NotContains(t, err.Error(), "unlimited", "对外不暴露内部护栏细节")
+
+			// 上号入口同样被拦下，不会落到建账号那一步。
+			_, buildErr := BuildProviderAccountInput(settings, ProviderOnboardInput{
+				ProviderUserID: 1, Name: "x", AccountType: AccountTypeOAuth, HostingType: 11, Tier: "1",
+			}, 7, 0, false)
+			require.Error(t, buildErr)
+
+			// 其它模板不受影响。
+			_, okErr := ResolveProviderTier(settings, "2", nil)
+			require.NoError(t, okErr)
+		})
+	}
 }
 
 // 自定义档必须受护栏约束，否则供号商可以给自己开出远超账号承载能力的并发。
@@ -131,6 +174,9 @@ func TestResolveProviderTierCustomRejectsZeroAsUnlimited(t *testing.T) {
 	require.Equal(t, 40.0, resolved.WindowCostLimit)
 	// rpm_strategy 属于平台调度策略，不接受供号商输入，解析结果里恒为空。
 	require.Equal(t, "", resolved.RPMStrategy)
+	// 自定义档是供号商自填的一组裸数值，没有模板可继承：动态降速一律开启，不能借自定义档绕开降速保护。
+	require.NotNil(t, resolved.AdaptiveThrottle)
+	require.True(t, *resolved.AdaptiveThrottle)
 }
 
 // 固定档由管理员配置，允许用 0 表达「不限」（种子值里 5 档的窗口上限就是 0）。
@@ -142,32 +188,36 @@ func TestFixedTierMayUseZeroAsUnlimited(t *testing.T) {
 	require.Equal(t, 0.0, resolved.WindowCostLimit)
 }
 
-// persona 属于平台内部处理方式，供号商既不能设置也不该察觉。
-// extra 走白名单过滤，任何未列入的键都会被丢弃。
-func TestSanitizeProviderExtraDropsPersonaAndUnknownKeys(t *testing.T) {
-	kept, dropped := SanitizeProviderExtra(map[string]any{
+// 动态降速、养号等内部配置属于平台内部处理方式，供号商既不能设置也不该察觉。
+// 供号商可提交的 extra 键白名单目前为空：容量只能通过「选档位」写入，其余一律丢弃。
+func TestSanitizeProviderExtraDropsEverything(t *testing.T) {
+	submitted := map[string]any{
 		"max_sessions":               5,
 		"base_rpm":                   30,
 		"window_cost_limit":          60,
-		"persona_enabled":            true,
-		"persona_timezone":           "America/New_York",
+		"adaptive_throttle":          true,
+		"nurturing_enabled":          true,
 		"enable_tls_fingerprint":     false,
 		"session_id_masking_enabled": false,
 		"privacy_mode":               "off",
 		"quota_daily_limit":          100,
-	})
+	}
+	kept, dropped := SanitizeProviderExtra(submitted)
 
-	require.Equal(t, map[string]any{
-		"max_sessions":      5,
-		"base_rpm":          30,
-		"window_cost_limit": 60,
-	}, kept)
-	require.False(t, ContainsPersonaKey(kept))
-	require.Subset(t, dropped, []string{
-		"persona_enabled", "persona_timezone",
+	require.Empty(t, kept)
+	require.ElementsMatch(t, []string{
+		"max_sessions", "base_rpm", "window_cost_limit",
+		"adaptive_throttle", "nurturing_enabled",
 		"enable_tls_fingerprint", "session_id_masking_enabled",
 		"privacy_mode", "quota_daily_limit",
-	})
+	}, dropped)
+
+	// 白名单与「档位写入键」是两个独立的集合，不能混用同一个变量：
+	// 档位写入的 4 个键没有一个是供号商可提交的。
+	require.Empty(t, providerSubmittableExtraKeys)
+	require.ElementsMatch(t,
+		[]string{"max_sessions", "base_rpm", "window_cost_limit", "adaptive_throttle"},
+		providerTierWrittenExtraKeys)
 }
 
 // 三个伪装项强制开启，且供号商提交的相反取值必须被覆盖。
@@ -185,11 +235,11 @@ func TestProviderForcedMimicryFlags(t *testing.T) {
 }
 
 // 「应用到存量」只增量合并档位相关的键，绝不整体覆盖 extra，
-// 否则会清掉 persona_*、window_cost_sticky_reserve 等另行配置的持久设置。
+// 否则会清掉 nurturing_enabled、window_cost_sticky_reserve 等另行配置的持久设置。
 func TestApplyProviderTierToExtraPreservesOtherKeys(t *testing.T) {
 	existing := map[string]any{
-		"persona_enabled":            true,
-		"persona_timezone":           "Asia/Tokyo",
+		"nurturing_enabled":          true,
+		"adaptive_throttle":          false,
 		"window_cost_sticky_reserve": 10,
 		"quota_daily_limit":          500,
 		"privacy_mode":               "on",
@@ -197,21 +247,64 @@ func TestApplyProviderTierToExtraPreservesOtherKeys(t *testing.T) {
 		"base_rpm":                   10,
 	}
 	merged := ApplyProviderTierToExtra(existing, ResolvedProviderTier{
-		Tier: "4", Concurrency: 5, MaxSessions: 5, BaseRPM: 50, WindowCostLimit: 100,
+		Tier: "4", Concurrency: 5, MaxSessions: 5, BaseRPM: 50, WindowCostLimit: 100, AdaptiveThrottle: boolPtr(true),
 	})
 
 	require.Equal(t, 5, merged["max_sessions"])
 	require.Equal(t, 50, merged["base_rpm"])
 	require.Equal(t, 100.0, merged["window_cost_limit"])
+	require.Equal(t, true, merged["adaptive_throttle"])
 
-	require.Equal(t, true, merged["persona_enabled"], "persona must survive tier backfill")
-	require.Equal(t, "Asia/Tokyo", merged["persona_timezone"])
+	require.Equal(t, true, merged["nurturing_enabled"], "nurturing_enabled must survive tier backfill")
 	require.Equal(t, 10, merged["window_cost_sticky_reserve"])
 	require.Equal(t, 500, merged["quota_daily_limit"])
 	require.Equal(t, "on", merged["privacy_mode"])
 
 	// 不修改入参。
 	require.Equal(t, 1, existing["max_sessions"])
+	require.Equal(t, false, existing["adaptive_throttle"])
+}
+
+// 动态降速无条件写显式布尔：合并删不了键，换到一个不降速的档位时必须写 false 把旧的 true 盖掉，
+// 而不是「不写」让它一直留着。
+func TestApplyProviderTierToExtraWritesExplicitAdaptiveFlag(t *testing.T) {
+	existing := map[string]any{"adaptive_throttle": true}
+
+	off := ApplyProviderTierToExtra(existing, ResolvedProviderTier{
+		Tier: "2", Concurrency: 2, MaxSessions: 2, BaseRPM: 20, AdaptiveThrottle: boolPtr(false),
+	})
+	require.Contains(t, off, "adaptive_throttle")
+	require.Equal(t, false, off["adaptive_throttle"])
+
+	on := ApplyProviderTierToExtra(nil, ResolvedProviderTier{Tier: "2", Concurrency: 2, AdaptiveThrottle: boolPtr(true)})
+	require.Equal(t, true, on["adaptive_throttle"])
+
+	// 动态降速是严格 bool，getExtraBool 才认得出。
+	account := &Account{Extra: on}
+	require.True(t, account.IsAdaptiveThrottleEnabled())
+}
+
+// 自定义档没有模板可继承，动态降速一律开启：供号商选自定义档只会强制开、不会把降速关掉，
+// 也就不能借自定义档绕开平台的降速保护（五个预设档的种子也都是开）。
+func TestApplyProviderTierToExtraForcesAdaptiveFlagOnForCustomTier(t *testing.T) {
+	custom, err := ResolveProviderTier(testProviderSettings(), ProviderTierCustom, &ProviderCustomTierInput{
+		Concurrency: 2, MaxSessions: 2, BaseRPM: 20, WindowCostLimit: 40,
+	})
+	require.NoError(t, err)
+
+	fresh := ApplyProviderTierToExtra(map[string]any{}, custom)
+	require.Equal(t, true, fresh["adaptive_throttle"], "新账号走自定义档也要带上降速")
+	require.True(t, (&Account{Extra: fresh}).IsAdaptiveThrottleEnabled())
+
+	// 已经关着降速的账号换到自定义档：被强制开启，而不是保持关闭。
+	off := map[string]any{"adaptive_throttle": false, "max_sessions": 9}
+	merged := ApplyProviderTierToExtra(off, custom)
+	require.Equal(t, true, merged["adaptive_throttle"])
+	require.Equal(t, 2, merged["max_sessions"], "自定义档的数值照常写入")
+
+	// 调用方没有指定降速（nil）时不碰账号上已有的值。
+	untouched := ApplyProviderTierToExtra(off, ResolvedProviderTier{Tier: "x", Concurrency: 1})
+	require.Equal(t, false, untouched["adaptive_throttle"])
 }
 
 func TestValidateProviderProxy(t *testing.T) {
@@ -306,7 +399,8 @@ func TestBuildProviderAccountInput(t *testing.T) {
 			"org_uuid":      "org-uuid-1",
 			"email_address": "seller@example.com",
 		},
-		Extra:       map[string]any{"persona_enabled": true},
+		// 供号商构造的恶意 extra：既想关掉动态降速又想开养号，都必须被丢弃。
+		Extra:       map[string]any{"adaptive_throttle": false, "nurturing_enabled": true},
 		HostingType: 12,
 		Tier:        "2",
 		// 分组 12 里已有账号，最小 priority 是 4 —— 新号必须跟着落 4。
@@ -323,7 +417,11 @@ func TestBuildProviderAccountInput(t *testing.T) {
 	require.Equal(t, "2", *input.ProviderTier)
 	require.Equal(t, 2, input.Concurrency)
 
-	require.False(t, ContainsPersonaKey(input.Extra), "persona keys must never reach the account")
+	require.NotContains(t, input.Extra, "nurturing_enabled", "养号只能由管理员开启，绝不能由供号商提交")
+	require.Equal(t, true, input.Extra["adaptive_throttle"], "动态降速取自所选模板，供号商提交的相反取值必须被覆盖")
+	require.Equal(t, 2, input.Extra["max_sessions"])
+	require.Equal(t, 20, input.Extra["base_rpm"])
+	require.Equal(t, 40.0, input.Extra["window_cost_limit"])
 	require.Equal(t, true, input.Extra["enable_tls_fingerprint"])
 	require.Equal(t, true, input.Credentials["intercept_warmup_requests"])
 
@@ -395,9 +493,7 @@ func TestValidateProviderSettings(t *testing.T) {
 
 	t.Run("requires an enabled tier", func(t *testing.T) {
 		s := testProviderSettings()
-		for i := range s.CapacityTiers {
-			s.CapacityTiers[i].Enabled = false
-		}
+		s.EnabledTierKeys = nil
 		_, err := ValidateProviderSettings(s)
 		require.Error(t, err)
 	})
@@ -405,30 +501,41 @@ func TestValidateProviderSettings(t *testing.T) {
 	t.Run("default tier must be enabled", func(t *testing.T) {
 		s := testProviderSettings()
 		s.DefaultTier = "5"
-		s.CapacityTiers[4].Enabled = false
+		s.EnabledTierKeys = []string{"1", "2", "3", "4"} // 5 存在于模板表，但没对供货商开放
 		_, err := ValidateProviderSettings(s)
 		require.Error(t, err)
 	})
 
-	// 并发 0 在 ConcurrencyService.AcquireAccountSlot 里等于「不限并发」，
-	// 而不是「没有容量」。允许管理员填 0 会让本该最小的档位悄悄变成最大。
-	t.Run("rejects zero concurrency because zero means unlimited", func(t *testing.T) {
+	t.Run("default tier must exist in the presets", func(t *testing.T) {
 		s := testProviderSettings()
-		s.CapacityTiers[0].Concurrency = 0
+		s.DefaultTier = "99"
 		_, err := ValidateProviderSettings(s)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "unlimited",
-			"错误信息必须说明 0 的真实含义，否则管理员会以为是范围写错了")
 	})
 
-	// 其余三项的 0 是既有约定：表示不启用该限制。不要顺手一起改掉。
-	t.Run("still allows zero for the limits where zero means disabled", func(t *testing.T) {
+	t.Run("enabled tier keys must exist in the presets", func(t *testing.T) {
 		s := testProviderSettings()
-		s.CapacityTiers[0].MaxSessions = 0
-		s.CapacityTiers[0].BaseRPM = 0
-		s.CapacityTiers[0].WindowCostLimit = 0
+		s.EnabledTierKeys = []string{"1", "99"}
+		s.DefaultTier = "1"
 		_, err := ValidateProviderSettings(s)
+		require.Error(t, err)
+		require.True(t, infraerrors.IsBadRequest(err))
+	})
+
+	t.Run("custom is not a preset and cannot be listed as an enabled tier", func(t *testing.T) {
+		s := testProviderSettings()
+		s.EnabledTierKeys = append(s.EnabledTierKeys, ProviderTierCustom)
+		_, err := ValidateProviderSettings(s)
+		require.Error(t, err)
+	})
+
+	t.Run("duplicate enabled tier keys are collapsed in first-seen order", func(t *testing.T) {
+		s := testProviderSettings()
+		s.EnabledTierKeys = []string{" 3 ", "1", "3", "1"}
+		s.DefaultTier = "3"
+		out, err := ValidateProviderSettings(s)
 		require.NoError(t, err)
+		require.Equal(t, []string{"3", "1"}, out.EnabledTierKeys)
 	})
 
 	t.Run("open portal requires an enabled default hosting type", func(t *testing.T) {
@@ -448,13 +555,6 @@ func TestValidateProviderSettings(t *testing.T) {
 	t.Run("rejects an unknown timezone", func(t *testing.T) {
 		s := testProviderSettings()
 		s.SettlementTimezone = "Not/AZone"
-		_, err := ValidateProviderSettings(s)
-		require.Error(t, err)
-	})
-
-	t.Run("rejects out of range tier numbers", func(t *testing.T) {
-		s := testProviderSettings()
-		s.CapacityTiers[0].Concurrency = providerMaxConcurrency + 1
 		_, err := ValidateProviderSettings(s)
 		require.Error(t, err)
 	})
@@ -521,7 +621,7 @@ func TestProviderLabelHelpers(t *testing.T) {
 	require.Equal(t, "", ProviderHostingLabel(settings, []int64{404}))
 
 	tier := "2"
-	require.Equal(t, "2 档", ProviderTierLabel(settings, &tier))
+	require.Equal(t, "保守", ProviderTierLabel(settings, &tier))
 	custom := ProviderTierCustom
 	require.Equal(t, "自定义", ProviderTierLabel(settings, &custom))
 	require.Equal(t, "", ProviderTierLabel(settings, nil))

@@ -520,13 +520,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.RPMCeiling() > 0 {
+			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
 				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
-			// 人格日请求计数（自守卫：仅在账号启用 persona 且配置了正的日上限时写入）
-			h.gatewayService.IncrementAccountPersonaDailyRequest(c.Request.Context(), account)
 
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
@@ -754,8 +752,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			switch umqMode {
 			case config.UMQModeSerialize:
-				// 串行模式：获取锁 + RPM 延迟 + 释放（当前行为不变）
-				baseRPM := account.GetBaseRPM()
+				// 串行模式：获取锁 + RPM 延迟 + 释放。延迟按降速后的有效 RPM 算
+				// （account 是水合后的完整账号，带 5h/7d 利用率）。
+				baseRPM := account.EffectiveBaseRPM()
 				release, qErr := h.userMsgQueueHelper.AcquireWithWait(
 					c, account.ID, baseRPM, reqStream, &streamStarted,
 					h.cfg.Gateway.UserMessageQueue.WaitTimeout(),
@@ -773,7 +772,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			case config.UMQModeThrottle:
 				// 软性限速：仅施加 RPM 自适应延迟，不阻塞并发
-				baseRPM := account.GetBaseRPM()
+				baseRPM := account.EffectiveBaseRPM()
 				if tErr := h.userMsgQueueHelper.ThrottleWithPing(
 					c, account.ID, baseRPM, reqStream, &streamStarted,
 					h.cfg.Gateway.UserMessageQueue.WaitTimeout(),
@@ -1008,13 +1007,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.RPMCeiling() > 0 {
+			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
 				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
-			// 人格日请求计数（自守卫：仅在账号启用 persona 且配置了正的日上限时写入）
-			h.gatewayService.IncrementAccountPersonaDailyRequest(c.Request.Context(), account)
 
 			// 绑定粘性会话（成功转发后绑定/刷新）
 			// - 无现有绑定（首次请求）：创建绑定

@@ -1,8 +1,8 @@
 // Package provider 实现供号商站点（/api/v1/provider）的 HTTP 接口。
 //
 // 这个包与 handler/admin 刻意保持完全独立，不复用 dto.Account：
-// dto.AccountFromServiceShallow 会把 Extra（含 persona_*、tls、rpm、window 等
-// 全部内部处理配置）和 ProxyID 原样序列化出去，那是给管理员看的。
+// dto.AccountFromServiceShallow 会把 Extra（含 adaptive_throttle、nurturing_enabled、
+// tls、rpm、window 等全部内部处理配置）和 ProxyID 原样序列化出去，那是给管理员看的。
 // 供号商侧必须走本文件里的独立结构体，字段是显式白名单而非「排除法」，
 // 这样将来给 service.Account 加新字段时不会意外泄露。
 package provider
@@ -73,9 +73,8 @@ type AccountView struct {
 	// 并发上限为 0 时调度器不写 Redis 槽位，current 永远是 0，因此那种号不下发。
 	// 不下发 rpm_strategy / rpm_sticky_buffer / session_idle_timeout。
 	//
-	// 若管理员事后开了 persona gating，真实并发分母可能是
-	// EffectivePersonaMaxConcurrency；供号商自己上号写不进 persona_*，
-	// 这里仍用档位 concurrency。
+	// 账号若被管理员开了动态降速，真实并发上限会随利用率缩小；这里仍下发账号的
+	// 并发列（档位 concurrency），不下发降速后的有效值——降速属于平台内部处理。
 	CurrentConcurrency *int `json:"current_concurrency,omitempty"`
 	CurrentRPM         *int `json:"current_rpm,omitempty"`
 	ActiveSessions     *int `json:"active_sessions,omitempty"`
@@ -288,7 +287,7 @@ func OnboardOptionsFromSettings(settings service.ProviderSettings) OnboardOption
 	out := OnboardOptionsView{
 		HostingTypes:     make([]HostingTypeView, 0, len(settings.HostingTypes)),
 		DefaultHostingID: settings.DefaultGroupID,
-		Tiers:            make([]CapacityTierView, 0, len(settings.CapacityTiers)),
+		Tiers:            make([]CapacityTierView, 0, len(settings.EnabledTierKeys)),
 		DefaultTier:      settings.DefaultTier,
 		CustomTier: CustomTierCapsView{
 			Enabled:         settings.CustomTierEnabled,
@@ -306,9 +305,10 @@ func OnboardOptionsFromSettings(settings service.ProviderSettings) OnboardOption
 			Description: ht.Description,
 		})
 	}
+	// 只下发 key、文案与四个数值；动态降速等内部处理（adaptive_throttle）绝不下发。
 	for _, t := range settings.EnabledTiers() {
 		out.Tiers = append(out.Tiers, CapacityTierView{
-			Tier:            t.Tier,
+			Tier:            t.Key,
 			Label:           t.Label,
 			Concurrency:     t.Concurrency,
 			MaxSessions:     t.MaxSessions,

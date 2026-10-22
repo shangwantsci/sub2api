@@ -30,6 +30,7 @@ var (
 type AccountNurturingService struct {
 	accountRepo   AccountRepository
 	tokenProvider *ClaudeTokenProvider // 用于获取 OAuth token 查询 usage
+	settingRepo   SettingRepository    // 读全局开关 account_nurturing_enabled；nil 视为关闭
 	interval      time.Duration        // 扫描间隔，建议 1 小时
 	stopCh        chan struct{}
 	stopOnce      sync.Once
@@ -53,6 +54,27 @@ func NewAccountNurturingService(
 		stopCh:        make(chan struct{}),
 		nurturedToday: make(map[string]struct{}),
 	}
+}
+
+// SetSettingRepository 注入设置仓储，用来读全局开关。必须在 Start 之前调用；
+// 不注入时全局开关视为关闭，不会养号。
+func (s *AccountNurturingService) SetSettingRepository(repo SettingRepository) {
+	if s != nil {
+		s.settingRepo = repo
+	}
+}
+
+// globalSwitchEnabled 读全局开关 account_nurturing_enabled（默认关，严格 "true" 才开）。
+// 读取出错（含设置项不存在）一律按关闭处理：养号是主动 opt-in 的能力，宁可少做不能误做。
+func (s *AccountNurturingService) globalSwitchEnabled(ctx context.Context) bool {
+	if s.settingRepo == nil {
+		return false
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyAccountNurturingEnabled)
+	if err != nil {
+		return false
+	}
+	return raw == "true"
 }
 
 // Start 启动后台扫描 goroutine（ticker + stopCh + wg 模式）。
@@ -91,12 +113,16 @@ func (s *AccountNurturingService) Stop() {
 	logger.LegacyPrintf("service.nurturing", "[Nurturing] Stopped")
 }
 
-// runOnce 一次扫描循环：列出可调度 Anthropic OAuth/setup_token 账号，
-// 按「跟随真实使用」策略养号——只对近期有 API 调用活动的账号执行养号动作，
-// 使养号活动与真实使用穿插在一起，行为模式更自然。
+// runOnce 一次扫描循环：全局开关开启时，列出可调度的 Anthropic OAuth/setup_token 账号，
+// 只处理账号上 nurturing_enabled=true 的号，且按「跟随真实使用」策略——只对近期有 API
+// 调用活动的账号执行养号动作，使养号活动与真实使用穿插在一起，行为模式更自然。
 func (s *AccountNurturingService) runOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+
+	if !s.globalSwitchEnabled(ctx) {
+		return
+	}
 
 	accounts, err := s.accountRepo.ListSchedulableByPlatform(ctx, PlatformAnthropic)
 	if err != nil {
@@ -117,20 +143,7 @@ func (s *AccountNurturingService) runOnce() {
 		}
 
 		account := &accounts[i]
-		if account.Type != AccountTypeOAuth && account.Type != AccountTypeSetupToken {
-			continue
-		}
-
-		// 预设为 off 时不养号
-		if account.GetPersonaPreset() == PersonaPresetOff {
-			continue
-		}
-
-		// 跟随真实使用：只对近期有 API 调用活动的账号养号。
-		// 这样养号活动与真实请求穿插，Anthropic 看到的是一个人在密集使用
-		// 间隙浏览网页、查额度，比固定时段养号更自然。
-		// 未启用 persona/preset 的账号也参与（向后兼容旧行为）。
-		if !s.hasRecentActivity(account) {
+		if !s.isNurtureCandidate(account) {
 			continue
 		}
 
@@ -149,24 +162,31 @@ func (s *AccountNurturingService) runOnce() {
 	}
 }
 
-// hasRecentActivity 判断账号近期是否有 API 调用活动。
-// 有 persona/preset 配置的账号：检查 LastUsedAt 是否在最近 2 小时内。
-// 未配置 persona 的账号：保持旧行为（旧的 IsWithinActiveHours 逻辑，默认放行）。
-func (s *AccountNurturingService) hasRecentActivity(account *Account) bool {
+// isNurtureCandidate 判断账号是否进入本轮养号：
+//   - 只处理 Anthropic OAuth / setup-token 账号；
+//   - 账号级 opt-in：只养明确开启了 nurturing_enabled（严格 bool）的号，与全局开关是双重开关；
+//   - 跟随真实使用：只对近期有 API 调用活动的账号养号。这样养号活动与真实请求穿插，
+//     Anthropic 看到的是一个人在密集使用间隙浏览网页、查额度，比固定时段养号更自然。
+func (s *AccountNurturingService) isNurtureCandidate(account *Account) bool {
 	if account == nil {
 		return false
 	}
-
-	// 有 preset 或 persona 配置：基于真实使用活动判断
-	if account.IsPersonaEnabled() {
-		if account.LastUsedAt == nil {
-			return false // 从未使用过，不需要养号
-		}
-		return time.Since(*account.LastUsedAt) < 2*time.Hour
+	if account.Type != AccountTypeOAuth && account.Type != AccountTypeSetupToken {
+		return false
 	}
+	if !account.IsNurturingEnabled() {
+		return false
+	}
+	return s.hasRecentActivity(account)
+}
 
-	// 未配置 persona/preset：保持旧行为（IsWithinActiveHours 默认放行）
-	return account.GetPersonaEnvelope().IsWithinActiveHours(time.Now())
+// hasRecentActivity 判断账号近期是否有 API 调用活动：LastUsedAt 在最近 2 小时内。
+// 从未使用过的账号不需要养号。
+func (s *AccountNurturingService) hasRecentActivity(account *Account) bool {
+	if account == nil || account.LastUsedAt == nil {
+		return false
+	}
+	return time.Since(*account.LastUsedAt) < 2*time.Hour
 }
 
 // nurture 对单个账号执行养号动作（浏览 + Chat 对话 + 用量查询）。
@@ -213,8 +233,7 @@ func (s *AccountNurturingService) nurture(ctx context.Context, account *Account)
 
 	// 查用量：真人在大量使用后会查"我还剩多少额度"。
 	// 利用率 > 30% 时一定查（模拟用多了自然关心额度），否则 30% 概率查。
-	env := account.GetPersonaEnvelope()
-	shouldQueryUsage := env.Utilization5h > 0.30 || rand.Intn(100) < 30
+	shouldQueryUsage := account.sessionWindowUtilization() > 0.30 || rand.Intn(100) < 30
 	if shouldQueryUsage {
 		if err := s.queryUsage(ctx, account); err != nil {
 			logger.LegacyPrintf("service.nurturing", "[Nurturing] Account %d usage query failed: %v", account.ID, err)

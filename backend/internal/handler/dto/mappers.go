@@ -288,11 +288,15 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		if mode := a.GetUserMsgQueueMode(); mode != "" {
 			out.UserMsgQueueMode = &mode
 		}
-		// TLS指纹伪装开关
-		if a.IsTLSFingerprintEnabled() {
-			enabled := true
-			out.EnableTLSFingerprint = &enabled
-		}
+		// 动态降速后的有效容量
+		effectiveConcurrency := a.EffectiveConcurrency()
+		out.EffectiveConcurrency = &effectiveConcurrency
+		effectiveBaseRPM := a.EffectiveBaseRPM()
+		out.EffectiveBaseRPM = &effectiveBaseRPM
+		throttleFactor := a.ThrottleFactor()
+		out.ThrottleFactor = &throttleFactor
+		// TLS指纹伪装开关：三态，缺省不输出，显式 true/false 原样输出
+		out.EnableTLSFingerprint = a.TLSFingerprintSetting()
 		// TLS指纹模板ID
 		if profileID := a.GetTLSFingerprintProfileID(); profileID > 0 {
 			out.TLSFingerprintProfileID = &profileID

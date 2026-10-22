@@ -388,13 +388,16 @@ func (e *anthropicSessionImportExecutor) runWithProgress(ctx context.Context, re
 		markAnthropicSessionIdentitySeen(seenIdentity, identityKeys, entry.Index)
 
 		if existing := accountIndex.Find(identityKeys); existing != nil && updateExisting {
+			// 「更新已存在账号」只刷新凭据、伪装与归属类设置，绝不覆盖存量账号的并发与容量键
+			// （max_sessions、base_rpm、window_cost_limit、adaptive_throttle、nurturing_enabled……）：
+			// 导入弹窗里的容量卡只是给「新建」用的初值，用它覆盖手调过的存量账号，等于每次重新导入
+			// 同一个 SessionKey 就把这个号的节流设置悄悄重置掉。负载因子与并发绑定，同样不动。
+			importExtra, _ := service.StripCapacityExtra(extra)
 			updateInput := &service.UpdateAccountInput{
 				Credentials:           mergeCodexImportMap(existing.Credentials, credentials),
-				Extra:                 mergeCodexImportMap(existing.Extra, extra),
-				Concurrency:           req.AccountConcurrency,
+				Extra:                 mergeCodexImportMap(existing.Extra, importExtra),
 				Priority:              req.Priority,
 				RateMultiplier:        req.RateMultiplier,
-				LoadFactor:            req.LoadFactor,
 				ExpiresAt:             req.ExpiresAt,
 				AutoPauseOnExpired:    req.AutoPauseOnExpired,
 				SkipMixedChannelCheck: skipMixedChannelCheck,
