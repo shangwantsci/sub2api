@@ -6198,6 +6198,50 @@
           </div>
         </div>
 
+        <!-- 公开号池监控：匿名可访问的 /pool-health，关闭时接口返回 404 -->
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.poolHealth.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.poolHealth.description') }}
+            </p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.poolHealth.enabled') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.poolHealth.enabledHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.pool_health_enabled" data-testid="pool-health-enabled" />
+            </div>
+
+            <div>
+              <label class="input-label" for="pool-health-group-name">
+                {{ t('admin.settings.features.poolHealth.groupName') }}
+              </label>
+              <input
+                id="pool-health-group-name"
+                v-model="form.pool_health_group_name"
+                type="text"
+                class="input"
+                placeholder="ccmax"
+                data-testid="pool-health-group-name"
+                :disabled="!form.pool_health_enabled"
+                @keydown.enter.prevent
+              />
+              <p class="mt-1 text-xs text-gray-400">
+                {{ t('admin.settings.features.poolHealth.groupNameHint') }}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- Affiliate (邀请返利) feature card -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -8596,6 +8640,9 @@ const form = reactive<SettingsForm>({
   available_channels_enabled: false,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
+  // 公开号池监控页：默认开启，统计 ccmax 分组（与后端缺省一致）
+  pool_health_enabled: true,
+  pool_health_group_name: "ccmax",
   // Allow user view error requests
   allow_user_view_error_requests: false,
 });
@@ -9985,6 +10032,9 @@ async function saveSettings() {
       available_channels_enabled: form.available_channels_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
+      // 公开号池监控页：分组名留空时由后端回落缺省值
+      pool_health_enabled: form.pool_health_enabled,
+      pool_health_group_name: form.pool_health_group_name?.trim() || "",
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 

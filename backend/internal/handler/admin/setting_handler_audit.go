@@ -437,6 +437,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.AccountNurturingEnabled != after.AccountNurturingEnabled {
 		changed = append(changed, "account_nurturing_enabled")
 	}
+	if before.PoolHealthEnabled != after.PoolHealthEnabled {
+		changed = append(changed, "pool_health_enabled")
+	}
+	if before.PoolHealthGroupName != after.PoolHealthGroupName {
+		changed = append(changed, "pool_health_group_name")
+	}
 	if before.AntigravityUserAgentVersion != after.AntigravityUserAgentVersion {
 		changed = append(changed, "antigravity_user_agent_version")
 	}

@@ -206,6 +206,8 @@ type SystemSettings struct {
 	EnableClientDatelineNormalization      bool   // 是否对 Anthropic OAuth/SetupToken 请求体做客户端 dateline 归一化（默认 true）
 	RewriteMessageCacheControl             bool   // 是否改写 messages[*].content[*].cache_control（默认 false）
 	AccountNurturingEnabled                bool   // 账号养号全局开关（默认 false）；账号还需各自开启 nurturing_enabled
+	PoolHealthEnabled                      bool   // 公开 pool-health 端点开关（默认 true）；关闭时端点返回 404
+	PoolHealthGroupName                    string // 公开 pool-health 统计的分组名；trim 后为空取缺省分组名
 	AntigravityUserAgentVersion            string // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
 	OpenAICodexUserAgent                   string // OpenAI Codex 上游完整 User-Agent；空值使用内置默认
 	MinCodexVersion                        string // codex_cli_only 最低 Codex 引擎版本；空=不检查

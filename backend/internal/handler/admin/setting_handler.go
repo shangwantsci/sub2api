@@ -261,6 +261,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		RewriteMessageCacheControl:                             settings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      settings.EnableClientDatelineNormalization,
 		AccountNurturingEnabled:                                settings.AccountNurturingEnabled,
+		PoolHealthEnabled:                                      settings.PoolHealthEnabled,
+		PoolHealthGroupName:                                    settings.PoolHealthGroupName,
 		AntigravityUserAgentVersion:                            settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   settings.OpenAICodexUserAgent,
 		MinCodexVersion:                                        settings.MinCodexVersion,

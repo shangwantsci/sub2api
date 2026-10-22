@@ -558,6 +558,8 @@ export default {
       supportsAllModels: '(supports all models)',
       requestModel: 'Request model',
       actualModel: 'Actual model',
+      fromModel: 'Request model',
+      toModel: 'Actual model',
       addMapping: 'Add Mapping',
       mappingExists: 'Mapping for {model} already exists',
       wildcardOnlyAtEnd: 'Wildcard * can only be at the end',
@@ -747,6 +749,8 @@ export default {
       concurrency: 'Concurrency',
       loadFactor: 'Load Factor',
       loadFactorHint: 'Higher load factor increases scheduling frequency',
+      poolWeight: 'Mixed Pool Weight',
+      poolWeightHint: 'Takes effect only when the group has mixed pool weight scheduling enabled: accounts in the API Key pool are drawn at random in proportion to this weight (also scaled by how idle the account currently is). A higher value is picked more often; 0 means the account is not scheduled.',
       priority: 'Priority',
       priorityHint: 'Lower value accounts are used first',
       billingRateMultiplier: 'Billing Rate Multiplier',
@@ -765,6 +769,10 @@ export default {
       creating: 'Creating...',
       updating: 'Updating...',
       accountCreated: 'Account created successfully',
+      // The Codex PAT import success toast references the messages path
+      messages: {
+        accountCreated: 'Account created successfully'
+      },
       accountUpdated: 'Account updated successfully',
       failedToCreate: 'Failed to create account',
       failedToUpdate: 'Failed to update account',

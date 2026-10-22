@@ -654,6 +654,8 @@ export default {
       supportsAllModels: '（支持所有模型）',
       requestModel: '请求模型',
       actualModel: '实际模型',
+      fromModel: '请求模型',
+      toModel: '实际模型',
       addMapping: '添加映射',
       mappingExists: '模型 {model} 的映射已存在',
       wildcardOnlyAtEnd: '通配符 * 只能放在末尾',
@@ -839,6 +841,8 @@ export default {
       concurrency: '并发数',
       loadFactor: '负载因子',
       loadFactorHint: '提高负载因子可以提高对账号的调度频率',
+      poolWeight: '混合池权重',
+      poolWeightHint: '所在分组开启“混合池权重调度”后才生效：在 API Key 池内按此权重随机抽取，数值越大越容易被选中（实际概率还会结合账号当前空闲度）；0 表示不参与调度。',
       priority: '优先级',
       priorityHint: '优先级越小的账号优先使用',
       billingRateMultiplier: '账号计费倍率',
@@ -857,6 +861,10 @@ export default {
       creating: '创建中...',
       updating: '更新中...',
       accountCreated: '账号创建成功',
+      // Codex PAT 导入成功提示引用的是 messages 路径
+      messages: {
+        accountCreated: '账号创建成功'
+      },
       accountUpdated: '账号更新成功',
       failedToCreate: '创建账号失败',
       failedToUpdate: '更新账号失败',

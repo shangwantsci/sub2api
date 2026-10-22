@@ -655,6 +655,11 @@ export interface SystemSettings {
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
 
+  // 公开号池监控页（匿名可访问的 /pool-health）：开关 + 统计的分组名
+  pool_health_enabled: boolean;
+  /** 后端会 trim；留空时回落缺省分组名 ccmax */
+  pool_health_group_name: string;
+
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
@@ -922,6 +927,10 @@ export interface UpdateSettingsRequest {
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;
+
+  // 公开号池监控页：不带则保持原值
+  pool_health_enabled?: boolean;
+  pool_health_group_name?: string;
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;

@@ -15,8 +15,8 @@ import zh from '../locales/zh'
  */
 
 /**
- * 新增 / 重写的组件整份检查；Create / Edit / Bulk / SettingsView 是历史大文件，里面还有与本次无关的
- * 老缺失词条（例如 admin.accounts.fromModel），所以只检查容量模型相关的前缀，不去替它们背锅。
+ * 新增 / 重写的组件整份检查；Create / Edit / Bulk / SettingsView 是历史大文件，这里只检查容量模型相关的前缀
+ * （这四个文件当年的老缺失词条，例如 admin.accounts.fromModel，已补齐，整份检查见 adminLargeFilesI18nKeys.spec.ts）。
  */
 interface FileCheck {
   path: string

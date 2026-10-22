@@ -41,6 +41,14 @@ export default {
           cyberSessionBlockHint: 'When enabled, sessions hit by upstream cyber_policy are blocked locally for the TTL and no longer forwarded. Only the offending session is blocked; other sessions on the same key are unaffected.',
           cyberSessionBlockTTL: 'Block TTL (seconds)',
         },
+        poolHealth: {
+          title: 'Public Pool Health',
+          description: 'Provides an anonymously accessible public page (/pool-health) that anyone can open without signing in. It only shows redacted, aggregated pool health data (total accounts, concurrency slots, breakdown of unavailable reasons), counted over the setup-token accounts in the group below. Enabled by default.',
+          enabled: 'Enable the public pool health page',
+          enabledHint: 'When off, the data endpoint returns 404 and the page shows a "not available" notice.',
+          groupName: 'Group name to count',
+          groupNameHint: 'Counts the setup-token accounts in the group with exactly this name (as shown in Group Management). Leave empty to use the default, ccmax.',
+        },
         affiliate: {
           title: 'Affiliate (Invite Rebate)',
           description: 'Existing users invite new ones; the inviter earns a percentage rebate on the invitee’s recharges. Disabled by default.',
@@ -316,6 +324,12 @@ export default {
         claudeCodeMimicryProfile2206: 'Claude Code 2.1.206 / macOS arm64',
         claudeCodeMimicryProfileHint:
           'Controls the User-Agent, X-Stainless headers, beta set, and billing entrypoint used by the OAuth mimic path.',
+        claudeMimicryGuardMode: 'Mimicry Guard Mode',
+        claudeMimicryGuardModeHint:
+          'Audits whether the requests the gateway sends upstream while mimicking Claude Code (Claude OAuth / Setup Token accounts only) match the selected profile. Warn only (default): a failed audit is only logged and the request is forwarded as usual. Block: a failed audit rejects the request. Off: no audit is performed.',
+        guardModeWarn: 'Warn only (default)',
+        guardModeBlock: 'Block',
+        guardModeOff: 'Off',
         metadataPassthrough: 'Metadata Passthrough',
         metadataPassthroughHint: 'Pass through client\'s original metadata.user_id without rewriting. May improve upstream cache hit rates.',
         cchSigning: 'CCH Signing',
@@ -967,7 +981,7 @@ export default {
         enabled: 'Enable 429 Default Cooldown',
         enabledHint: 'Pause account scheduling when a 429 has no reset time, then auto-recover after cooldown',
         cooldownSeconds: 'Cooldown Duration (seconds)',
-        cooldownSecondsHint: 'Default cooldown duration (1-7200 seconds); explicit upstream reset times still take precedence',
+        cooldownSecondsHint: 'Default cooldown duration (1-7200 seconds); explicit upstream reset times still take precedence. Anthropic accounts always use a fixed 60 seconds regardless of this value.',
         saved: '429 default cooldown settings saved',
         saveFailed: 'Failed to save 429 default cooldown settings'
       },

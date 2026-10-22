@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -580,4 +581,63 @@ func TestSettingService_InitializeDefaultSettings_AccountNurturingDefaultsOff(t 
 
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.Equal(t, "false", repo.updates[SettingKeyAccountNurturingEnabled])
+}
+
+// 公开 pool-health 开关：键缺失/空串取缺省（开启，保持端点原有行为）；键存在时只有严格的 "true" 才开，
+// 手工写库的脏值（TRUE / 1 / yes ...）按关闭处理，不会把免登录端点悄悄放开。
+func TestSettingService_ParseSettings_PoolHealthEnabledDefaultsOnAndIsStrictWhenPresent(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
+
+	require.True(t, svc.parseSettings(map[string]string{}).PoolHealthEnabled, "键缺失即开启")
+	require.True(t, svc.parseSettings(map[string]string{SettingKeyPoolHealthEnabled: ""}).PoolHealthEnabled, "空串视同未设置")
+	require.True(t, svc.parseSettings(map[string]string{SettingKeyPoolHealthEnabled: "true"}).PoolHealthEnabled)
+	for _, notTrue := range []string{"false", "TRUE", "True", "1", "yes", "on", " true"} {
+		require.False(t, svc.parseSettings(map[string]string{SettingKeyPoolHealthEnabled: notTrue}).PoolHealthEnabled,
+			"%q 不是严格的 \"true\"", notTrue)
+	}
+}
+
+func TestSettingService_ParseSettings_PoolHealthGroupNameDefaultsAndTrims(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
+
+	require.Equal(t, "ccmax", svc.parseSettings(map[string]string{}).PoolHealthGroupName, "键缺失取缺省 ccmax")
+	for _, blank := range []string{"", " ", "\t\n  "} {
+		require.Equal(t, "ccmax", svc.parseSettings(map[string]string{SettingKeyPoolHealthGroupName: blank}).PoolHealthGroupName,
+			"%q 应回落到缺省分组", blank)
+	}
+	require.Equal(t, "team", svc.parseSettings(map[string]string{SettingKeyPoolHealthGroupName: "team"}).PoolHealthGroupName)
+	require.Equal(t, "team", svc.parseSettings(map[string]string{SettingKeyPoolHealthGroupName: "  team \t"}).PoolHealthGroupName,
+		"读取时 trim")
+}
+
+func TestSettingService_UpdateSettings_PoolHealthRoundTrip(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		repo := &settingUpdateRepoStub{}
+		svc := NewSettingService(repo, &config.Config{})
+
+		require.NoError(t, svc.UpdateSettings(context.Background(), &SystemSettings{PoolHealthEnabled: enabled, PoolHealthGroupName: "team"}))
+		require.Equal(t, strconv.FormatBool(enabled), repo.updates[SettingKeyPoolHealthEnabled])
+		got := svc.parseSettings(repo.updates)
+		require.Equal(t, enabled, got.PoolHealthEnabled)
+		require.Equal(t, "team", got.PoolHealthGroupName)
+	}
+
+	// 分组名写入时 trim；空串/纯空白落库为缺省值，而不是落一个空串。
+	for in, want := range map[string]string{"  team \t": "team", "": "ccmax", "   ": "ccmax", "\t\n": "ccmax"} {
+		repo := &settingUpdateRepoStub{}
+		svc := NewSettingService(repo, &config.Config{})
+
+		require.NoError(t, svc.UpdateSettings(context.Background(), &SystemSettings{PoolHealthGroupName: in}))
+		require.Equal(t, want, repo.updates[SettingKeyPoolHealthGroupName], "写入 %q", in)
+		require.Equal(t, want, svc.parseSettings(repo.updates).PoolHealthGroupName)
+	}
+}
+
+func TestSettingService_InitializeDefaultSettings_PoolHealthDefaultsOn(t *testing.T) {
+	repo := &settingInitializeRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
+	require.Equal(t, "true", repo.updates[SettingKeyPoolHealthEnabled])
+	require.Equal(t, "ccmax", repo.updates[SettingKeyPoolHealthGroupName])
 }

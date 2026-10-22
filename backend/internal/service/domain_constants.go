@@ -355,6 +355,19 @@ const (
 	SettingKeyOpsRuntimeLogConfig = "ops_runtime_log_config"
 
 	// =========================
+	// Public Pool Health（免登录池健康页，GET /api/v1/public/pool-health）
+	// =========================
+
+	// SettingKeyPoolHealthEnabled 公开 pool-health 端点总开关（默认 true，保持端点原有行为）。
+	// 键缺失或空串取缺省（开启），其余只有严格的 "true" 才算开启。关闭时端点返回 404；
+	// 读取设置出错同样按关闭处理（fail-closed）：端点免登录，开关状态不确定时不对外。
+	SettingKeyPoolHealthEnabled = "pool_health_enabled"
+
+	// SettingKeyPoolHealthGroupName 公开 pool-health 统计的分组名。
+	// 读写时 trim，空串按缺省处理；缺省值只在 defaultPublicPoolHealthGroupName 定义一份。
+	SettingKeyPoolHealthGroupName = "pool_health_group_name"
+
+	// =========================
 	// Channel Monitor (渠道监控)
 	// =========================
 

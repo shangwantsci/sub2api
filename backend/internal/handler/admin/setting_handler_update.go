@@ -230,6 +230,8 @@ type UpdateSettingsRequest struct {
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
 	AccountNurturingEnabled                *bool   `json:"account_nurturing_enabled"`
+	PoolHealthEnabled                      *bool   `json:"pool_health_enabled"`
+	PoolHealthGroupName                    *string `json:"pool_health_group_name"`
 	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
 
@@ -1418,6 +1420,19 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AccountNurturingEnabled
 		}(),
+		PoolHealthEnabled: func() bool {
+			if req.PoolHealthEnabled != nil {
+				return *req.PoolHealthEnabled
+			}
+			return previousSettings.PoolHealthEnabled
+		}(),
+		// 分组名在这里就 trim/取缺省：审计 diff 比较的是这份结构体，不归一会把「空串 → 缺省分组名」误报成变更。
+		PoolHealthGroupName: func() string {
+			if req.PoolHealthGroupName != nil {
+				return service.NormalizePoolHealthGroupName(*req.PoolHealthGroupName)
+			}
+			return previousSettings.PoolHealthGroupName
+		}(),
 		AntigravityUserAgentVersion: func() string {
 			if req.AntigravityUserAgentVersion != nil {
 				return *req.AntigravityUserAgentVersion
@@ -1863,6 +1878,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
 		AccountNurturingEnabled:                                updatedSettings.AccountNurturingEnabled,
+		PoolHealthEnabled:                                      updatedSettings.PoolHealthEnabled,
+		PoolHealthGroupName:                                    updatedSettings.PoolHealthGroupName,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,

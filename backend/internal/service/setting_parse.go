@@ -213,6 +213,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
 		SettingKeyAccountNurturingEnabled:                            "false",
+		SettingKeyPoolHealthEnabled:                                  "true",
+		SettingKeyPoolHealthGroupName:                                defaultPublicPoolHealthGroupName,
 		SettingKeyAntigravityUserAgentVersion:                        "",
 		SettingKeyOpenAICodexUserAgent:                               "",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
@@ -783,6 +785,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	// 账号养号全局开关默认关闭：键缺失即 false，严格 "true" 才开
 	result.AccountNurturingEnabled = settings[SettingKeyAccountNurturingEnabled] == "true"
+	// 公开 pool-health：开关缺省开启（保持端点原有行为），分组名缺失或为空时取缺省分组名；
+	// 与端点闸门共用 poolHealthSettingsFromValues，两处语义一致
+	result.PoolHealthEnabled, result.PoolHealthGroupName = poolHealthSettingsFromValues(settings)
 	result.AntigravityUserAgentVersion = antigravity.NormalizeUserAgentVersion(settings[SettingKeyAntigravityUserAgentVersion])
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])
 	// codex_cli_only 加固

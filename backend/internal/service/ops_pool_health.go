@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -17,6 +18,49 @@ const (
 	defaultPublicPoolHealthAccountType = AccountTypeSetupToken
 	defaultPublicPoolHealthHorizon     = 4 * time.Hour
 )
+
+// PublicPoolHealthSettings 是公开 pool-health 端点读取的两项主设置。
+type PublicPoolHealthSettings struct {
+	Enabled   bool
+	GroupName string
+}
+
+// NormalizePoolHealthGroupName 对 pool_health_group_name 做 trim，空串取缺省分组名。
+// 缺省值只在 defaultPublicPoolHealthGroupName 定义一份，设置读写与统计入口都走这里。
+func NormalizePoolHealthGroupName(raw string) string {
+	if name := strings.TrimSpace(raw); name != "" {
+		return name
+	}
+	return defaultPublicPoolHealthGroupName
+}
+
+// poolHealthSettingsFromValues 解释 pool_health_enabled / pool_health_group_name 的存储值。
+// 管理端设置视图（parseSettings）与公开端点闸门（GetPublicPoolHealthSettings）共用它，
+// 保证两处语义一致：开关缺省开启（键缺失或空串），其余只有严格的 "true" 才算开启。
+func poolHealthSettingsFromValues(values map[string]string) (enabled bool, groupName string) {
+	enabled = true
+	if v, ok := values[SettingKeyPoolHealthEnabled]; ok && v != "" {
+		enabled = v == "true"
+	}
+	return enabled, NormalizePoolHealthGroupName(values[SettingKeyPoolHealthGroupName])
+}
+
+// GetPublicPoolHealthSettings 读取公开 pool-health 的开关与分组名。
+//
+// 键缺失按缺省处理（开启、缺省分组名）。读取出错（含 settingRepo 未注入）时返回零值
+// （Enabled=false）和 err，即 fail-closed：该端点免登录，设置读不到时宁可 404，
+// 也不要在开关状态不确定时放行。
+func (s *OpsService) GetPublicPoolHealthSettings(ctx context.Context) (PublicPoolHealthSettings, error) {
+	if s == nil || s.settingRepo == nil {
+		return PublicPoolHealthSettings{}, errors.New("pool health settings unavailable: setting repository not configured")
+	}
+	values, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyPoolHealthEnabled, SettingKeyPoolHealthGroupName})
+	if err != nil {
+		return PublicPoolHealthSettings{}, fmt.Errorf("read pool health settings: %w", err)
+	}
+	enabled, groupName := poolHealthSettingsFromValues(values)
+	return PublicPoolHealthSettings{Enabled: enabled, GroupName: groupName}, nil
+}
 
 type PublicPoolHealthRequest struct {
 	Platform    string
@@ -222,10 +266,7 @@ func normalizePublicPoolHealthOptions(opts publicPoolHealthOptions) publicPoolHe
 	if opts.Platform == "" {
 		opts.Platform = defaultPublicPoolHealthPlatform
 	}
-	opts.GroupName = strings.TrimSpace(opts.GroupName)
-	if opts.GroupName == "" {
-		opts.GroupName = defaultPublicPoolHealthGroupName
-	}
+	opts.GroupName = NormalizePoolHealthGroupName(opts.GroupName)
 	opts.AccountType = strings.TrimSpace(opts.AccountType)
 	if opts.AccountType == "" {
 		opts.AccountType = defaultPublicPoolHealthAccountType

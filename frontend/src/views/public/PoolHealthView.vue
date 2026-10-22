@@ -1,6 +1,19 @@
 <template>
   <main class="min-h-screen bg-slate-50 px-4 py-4 text-slate-900 dark:bg-dark-950 dark:text-white sm:px-6">
-    <section class="mx-auto max-w-7xl">
+    <!-- 后台关闭「公开号池监控」时接口返回 404：给访客一个明确的「未开放」，而不是报错或空白 -->
+    <section
+      v-if="notOpen"
+      class="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center text-center"
+      data-testid="pool-health-not-open"
+    >
+      <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 text-slate-500 dark:bg-dark-800 dark:text-dark-400">
+        <Icon name="lock" size="lg" />
+      </div>
+      <h1 class="text-base font-semibold text-slate-950 dark:text-white">该页面未开放</h1>
+      <p class="mt-1 text-sm text-slate-500 dark:text-dark-400">该页面暂未对外开放，如需访问请联系站点管理员。</p>
+    </section>
+
+    <section v-else class="mx-auto max-w-7xl">
       <div class="mb-3 flex flex-col gap-3 border-b border-slate-200 pb-3 dark:border-dark-800 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex min-w-0 items-center gap-3">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500 text-white shadow-sm">
@@ -8,7 +21,7 @@
           </div>
           <div class="min-w-0">
             <h1 class="truncate text-base font-semibold text-slate-950 dark:text-white">号池可用性监控</h1>
-            <p class="text-xs text-slate-500 dark:text-dark-400">{{ groupName }} · Setup Token</p>
+            <p class="text-xs text-slate-500 dark:text-dark-400" data-testid="pool-health-subtitle">{{ subtitle }}</p>
           </div>
           <div class="ml-1 flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5 text-xs dark:border-dark-700 dark:bg-dark-900">
             <button class="rounded-md bg-teal-500 px-3 py-1.5 font-medium text-white shadow-sm">Claude</button>
@@ -117,13 +130,21 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import Icon from '@/components/icons/Icon.vue'
 import { getPoolHealth, type PublicPoolHealthRecoverySegment, type PublicPoolHealthSnapshot } from '@/api/poolHealth'
 
-const groupName = 'ccmax'
 const snapshot = ref<PublicPoolHealthSnapshot | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
+const notOpen = ref(false)
 let refreshTimer: number | null = null
+
+// 统计的分组由后台设置决定，页面只读后端返回的 group_name；缺失（过旧的后端）时不显示分组名
+const groupName = computed(() => snapshot.value?.group_name?.trim() || '')
+const subtitle = computed(() => (groupName.value ? `${groupName.value} · Setup Token` : 'Setup Token'))
+
+const isNotOpenError = (error: unknown) =>
+  typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
 
 const refresh = async () => {
   loading.value = true
@@ -132,7 +153,13 @@ const refresh = async () => {
     snapshot.value = await getPoolHealth({
       horizon: '4h',
     })
+    notOpen.value = false
   } catch (error) {
+    if (isNotOpenError(error)) {
+      notOpen.value = true
+      snapshot.value = null
+      return
+    }
     const message = error && typeof error === 'object' && 'message' in error
       ? String((error as { message?: unknown }).message || '')
       : ''

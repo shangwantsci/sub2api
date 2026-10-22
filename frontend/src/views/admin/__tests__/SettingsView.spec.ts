@@ -910,6 +910,149 @@ describe("admin SettingsView payment visible method controls", () => {
     });
   });
 
+  describe("public pool health card (features tab)", () => {
+    function controls(wrapper: ReturnType<typeof mountView>) {
+      // Toggle 在 spec 里被替换成复选框，data-testid 会透传到那个 input 上
+      return {
+        toggle: wrapper.get('[data-testid="pool-health-enabled"]'),
+        input: wrapper.get('[data-testid="pool-health-group-name"]'),
+      };
+    }
+
+    async function submitAndGetPayload(wrapper: ReturnType<typeof mountView>) {
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+      expect(updateSettings).toHaveBeenCalledTimes(1);
+      return updateSettings.mock.calls[0][0] as Record<string, unknown>;
+    }
+
+    it("后端没返回这两个字段时：默认开启、分组名 ccmax，提交时都带上", async () => {
+      getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+      const wrapper = mountView();
+      await flushPromises();
+      const { toggle, input } = controls(wrapper);
+      expect((toggle.element as HTMLInputElement).checked).toBe(true);
+      expect((input.element as HTMLInputElement).value).toBe("ccmax");
+
+      const payload = await submitAndGetPayload(wrapper);
+      expect(payload).toMatchObject({
+        pool_health_enabled: true,
+        pool_health_group_name: "ccmax",
+      });
+    });
+
+    it("回显后端保存的值，提交时原样带回", async () => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        pool_health_enabled: true,
+        pool_health_group_name: "team-a",
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+      expect((controls(wrapper).input.element as HTMLInputElement).value).toBe("team-a");
+
+      const payload = await submitAndGetPayload(wrapper);
+      expect(payload).toMatchObject({
+        pool_health_enabled: true,
+        pool_health_group_name: "team-a",
+      });
+    });
+
+    it("管理员改了分组名：提交的是改后的值，且首尾空白被去掉", async () => {
+      getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+      const wrapper = mountView();
+      await flushPromises();
+      await controls(wrapper).input.setValue("  vip-pool  ");
+
+      const payload = await submitAndGetPayload(wrapper);
+      expect(payload.pool_health_group_name).toBe("vip-pool");
+    });
+
+    it("分组名清空后提交空串（由后端回落缺省分组名）", async () => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        pool_health_group_name: "team-a",
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+      await controls(wrapper).input.setValue("");
+
+      const payload = await submitAndGetPayload(wrapper);
+      expect(payload.pool_health_group_name).toBe("");
+    });
+
+    it("占位符显示缺省分组名 ccmax", async () => {
+      getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+      const wrapper = mountView();
+      await flushPromises();
+
+      expect(controls(wrapper).input.attributes("placeholder")).toBe("ccmax");
+    });
+
+    it("开关关闭时分组名输入框置灰；打开后恢复可编辑", async () => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        pool_health_enabled: false,
+        pool_health_group_name: "team-a",
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+      const { toggle, input } = controls(wrapper);
+      expect((toggle.element as HTMLInputElement).checked).toBe(false);
+      expect((input.element as HTMLInputElement).disabled).toBe(true);
+      expect((input.element as HTMLInputElement).value).toBe("team-a");
+
+      await toggle.setValue(true);
+      expect((input.element as HTMLInputElement).disabled).toBe(false);
+
+      await toggle.setValue(false);
+      expect((input.element as HTMLInputElement).disabled).toBe(true);
+    });
+
+    it("开关关闭后提交：enabled 为 false，已填的分组名不丢（再打开不用重填）", async () => {
+      getSettings.mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        pool_health_group_name: "team-a",
+      });
+
+      const wrapper = mountView();
+      await flushPromises();
+      await controls(wrapper).toggle.setValue(false);
+
+      const payload = await submitAndGetPayload(wrapper);
+      expect(payload).toMatchObject({
+        pool_health_enabled: false,
+        pool_health_group_name: "team-a",
+      });
+    });
+
+    it("分组名输入框拦截回车：设置页整体是一个 form，回车不能把它提交掉", async () => {
+      getSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+
+      const wrapper = mountView();
+      await flushPromises();
+      const input = controls(wrapper).input.element;
+
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      });
+      input.dispatchEvent(event);
+      await flushPromises();
+
+      // 浏览器里隐式提交发生在 keydown 的默认行为之后，keydown 被拦住就不会提交
+      expect(event.defaultPrevented).toBe(true);
+      expect(updateSettings).not.toHaveBeenCalled();
+    });
+  });
+
   it("submits Claude OAuth system prompt injection gateway settings", async () => {
     const blocks = `[{"type":"text","text":"custom block","cache_control":true}]`;
     getSettings.mockResolvedValueOnce({

@@ -392,6 +392,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyAccountNurturingEnabled] = strconv.FormatBool(settings.AccountNurturingEnabled)
+	updates[SettingKeyPoolHealthEnabled] = strconv.FormatBool(settings.PoolHealthEnabled)
+	updates[SettingKeyPoolHealthGroupName] = NormalizePoolHealthGroupName(settings.PoolHealthGroupName)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	// codex_cli_only 加固

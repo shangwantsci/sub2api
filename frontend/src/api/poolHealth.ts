@@ -51,7 +51,8 @@ export interface PublicPoolHealthRecoveryBucket {
 export interface PublicPoolHealthSnapshot {
   updated_at: string
   platform: string
-  group_name: string
+  /** 实际统计的分组名（取自后台设置）；过旧的后端可能不返回，页面需自行回落 */
+  group_name?: string
   account_type: string
   horizon_seconds: number
   accounts: PublicPoolHealthAccounts
@@ -65,6 +66,10 @@ export interface PublicPoolHealthQuery {
   horizon?: string
 }
 
+/**
+ * 后台关闭「公开号池监控」后，该接口返回 HTTP 404（刻意不用 403，避免暴露入口存在），
+ * 此时 Promise 以 `{ status: 404, ... }` 被拒绝，调用方据此显示「未开放」。
+ */
 export async function getPoolHealth(query: PublicPoolHealthQuery = {}): Promise<PublicPoolHealthSnapshot> {
   const { data } = await apiClient.get<PublicPoolHealthSnapshot>('/public/pool-health', {
     params: {

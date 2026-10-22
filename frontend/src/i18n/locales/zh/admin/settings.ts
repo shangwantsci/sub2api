@@ -41,6 +41,14 @@ export default {
           cyberSessionBlockHint: '开启后,被上游网络安全策略(cyber_policy)拦截的会话将在 TTL 内被本地屏蔽,不再发往上游。仅屏蔽该会话,不影响同 Key 其他会话。',
           cyberSessionBlockTTL: '屏蔽时长(秒)',
         },
+        poolHealth: {
+          title: '公开号池监控',
+          description: '提供一个匿名可访问的公开页面（/pool-health），任何人无需登录即可打开。页面只展示脱敏后的号池聚合健康数据（账号总数、并发槽、不可用原因分布），统计范围是下方分组里的 setup-token 账号。默认开启。',
+          enabled: '开放公开号池监控页',
+          enabledHint: '关闭后该页面的数据接口返回 404，页面显示“该页面未开放”。',
+          groupName: '统计分组名',
+          groupNameHint: '按分组名统计该分组里的 setup-token 账号，需与分组管理中的名称完全一致。留空则使用默认值 ccmax。',
+        },
         affiliate: {
           title: '邀请返利',
           description: '老用户邀请新用户注册，新用户充值后老用户按比例获得返利额度。默认关闭。',
@@ -310,6 +318,12 @@ export default {
         claudeCodeMimicryProfile2206: 'Claude Code 2.1.206 / macOS arm64',
         claudeCodeMimicryProfileHint:
           '控制 OAuth mimic 路径使用的 User-Agent、X-Stainless 头、beta 集合与 billing entrypoint。',
+        claudeMimicryGuardMode: '伪装守卫模式',
+        claudeMimicryGuardModeHint:
+          '审计网关伪装成 Claude Code 发往上游的请求（仅 Claude OAuth / Setup Token 账号）是否与所选 Profile 一致。仅告警：审计不通过只记日志，请求照常转发（默认）；拦截：审计不通过直接拒绝请求；关闭：不做审计。',
+        guardModeWarn: '仅告警（默认）',
+        guardModeBlock: '拦截',
+        guardModeOff: '关闭',
         metadataPassthrough: 'Metadata 透传',
         metadataPassthroughHint: '透传客户端原始 metadata.user_id，不进行重写。可能提高上游缓存命中率。',
         cchSigning: 'CCH 签名',
@@ -962,7 +976,7 @@ export default {
         enabled: '启用 429 默认回避',
         enabledHint: '收到无重置时间的 429 时暂停该账号调度，冷却后自动恢复',
         cooldownSeconds: '回避时长（秒）',
-        cooldownSecondsHint: '默认回避持续时间（1-7200 秒）；上游返回明确 reset 时仍优先使用上游时间',
+        cooldownSecondsHint: '默认回避持续时间（1-7200 秒）；上游返回明确 reset 时仍优先使用上游时间。Anthropic 账号固定 60 秒，不受此值影响。',
         saved: '429 默认回避设置保存成功',
         saveFailed: '保存 429 默认回避设置失败'
       },

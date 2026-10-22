@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -17,9 +18,24 @@ const (
 
 // GetPublicPoolHealth returns redacted aggregate health data for a public pool monitor.
 // GET /api/v1/public/pool-health
+//
+// 受主设置控制：pool_health_enabled 关闭时返回 404；统计的分组名取自 pool_health_group_name。
 func (h *OpsHandler) GetPublicPoolHealth(c *gin.Context) {
 	if h == nil || h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+
+	// 开关判断放在参数校验之前：关闭时无论请求带什么参数都只返回 404，不暴露该入口存在。
+	// 读设置出错按关闭处理（fail-closed）。用 404 而不是 403，文案也不提「功能被关闭」。
+	poolSettings, err := h.opsService.GetPublicPoolHealthSettings(c.Request.Context())
+	if err != nil {
+		slog.Warn("public_pool_health_settings_read_failed", "error", err)
+		response.NotFound(c, "Not found")
+		return
+	}
+	if !poolSettings.Enabled {
+		response.NotFound(c, "Not found")
 		return
 	}
 
@@ -31,7 +47,7 @@ func (h *OpsHandler) GetPublicPoolHealth(c *gin.Context) {
 
 	req := service.PublicPoolHealthRequest{
 		Platform:    service.PlatformAnthropic,
-		GroupName:   "ccmax",
+		GroupName:   poolSettings.GroupName,
 		AccountType: service.AccountTypeSetupToken,
 		Horizon:     horizon,
 	}

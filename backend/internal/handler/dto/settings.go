@@ -193,6 +193,8 @@ type SystemSettings struct {
 	RewriteMessageCacheControl             bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      bool   `json:"enable_client_dateline_normalization"`
 	AccountNurturingEnabled                bool   `json:"account_nurturing_enabled"`
+	PoolHealthEnabled                      bool   `json:"pool_health_enabled"`
+	PoolHealthGroupName                    string `json:"pool_health_group_name"`
 	AntigravityUserAgentVersion            string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                   string `json:"openai_codex_user_agent"`
 
