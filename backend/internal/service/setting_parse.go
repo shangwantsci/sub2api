@@ -208,7 +208,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:                        "false",
 		SettingKeyClaudeCodeMimicryProfile:                           claude.DefaultClaudeCodeMimicryProfileID,
-		SettingKeyClaudeMimicryGuardMode:                             claudeMimicryGuardBlock,
+		SettingKeyClaudeMimicryGuardMode:                             claudeMimicryGuardWarn,
 		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
