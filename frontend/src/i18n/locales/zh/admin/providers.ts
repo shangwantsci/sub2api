@@ -160,6 +160,7 @@ export default {
     windowCostZeroHint: '0 表示不限',
     // 「应用到存量」：先预览真实改动数，再由管理员确认。
     applyToExisting: '应用到存量',
+    applyClosedTierHint: '该档位还没有对供货商开放（刚勾选的请先保存），没有存量账号可应用。',
     applyConfirmTitle: '应用到存量账号：档位 {tier}',
     applyConfirmMessage: '将改动 {willChange} 个账号（该档位共 {matched} 个账号）。',
     applyOverwriteWarning:

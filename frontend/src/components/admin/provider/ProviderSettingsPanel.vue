@@ -332,7 +332,8 @@
                     type="button"
                     class="whitespace-nowrap text-sm text-indigo-600 hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50 dark:text-indigo-400"
                     data-testid="provider-tier-apply"
-                    :disabled="applyBusy"
+                    :disabled="applyBusy || !savedOpenTierKeys.has(preset.key)"
+                    :title="savedOpenTierKeys.has(preset.key) ? undefined : t('admin.providerSettings.applyClosedTierHint')"
                     @click="askApplyToExisting(preset.key)"
                   >
                     {{
@@ -642,6 +643,19 @@ const savedSnapshot = ref('')
 const dirty = computed(() => {
   if (!settings.value) return false
   return JSON.stringify(settings.value) !== savedSnapshot.value
+})
+
+/**
+ * 已保存的、对供货商开放的档位。「应用到存量」只对这些档位有意义：后端按已保存的设置判断开放范围，
+ * 对没开放的档位返回 400 INVALID_TIER；所以刚勾选但还没保存的档位也算没开放，保存后才可点。
+ */
+const savedOpenTierKeys = computed(() => {
+  try {
+    const saved = JSON.parse(savedSnapshot.value) as { enabled_tier_keys?: string[] }
+    return new Set(saved.enabled_tier_keys ?? [])
+  } catch {
+    return new Set<string>()
+  }
 })
 
 const enabledHostingTypes = computed(

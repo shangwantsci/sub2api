@@ -211,6 +211,28 @@ describe('ProviderSettingsPanel 速率档位（只读数值 + 对供货商开放
     expect(saveButton(wrapper).attributes('disabled')).toBeUndefined()
   })
 
+  it('未对供货商开放的档位：「应用到存量」禁用并说明原因；刚勾选但还没保存的也不行，保存后才可用', async () => {
+    const wrapper = await mountPanel()
+    const applyBtn = (rowIndex: number) => tierRows(wrapper)[rowIndex].get('[data-testid="provider-tier-apply"]')
+
+    // 夹具里档位 2 / 3 已开放，档位 1 / 5 没开放
+    expect(applyBtn(0).attributes('disabled')).toBeDefined()
+    expect(applyBtn(3).attributes('disabled')).toBeDefined()
+    expect(applyBtn(0).attributes('title')).toBe('admin.providerSettings.applyClosedTierHint')
+    expect(applyBtn(1).attributes('disabled')).toBeUndefined()
+    expect(applyBtn(2).attributes('disabled')).toBeUndefined()
+    expect(applyBtn(2).attributes('title')).toBeUndefined()
+
+    // 刚勾选还没保存：后端按已保存的设置判断开放范围，此时点了仍会得到 400 INVALID_TIER，所以保持禁用
+    await toggleOpen(wrapper, 0, true)
+    expect(applyBtn(0).attributes('disabled')).toBeDefined()
+
+    await saveButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(applyBtn(0).attributes('disabled')).toBeUndefined()
+    expect(applyBtn(0).attributes('title')).toBeUndefined()
+  })
+
   it('开放列表始终按模板表的顺序排列，勾选再取消不会无端变成「有未保存的修改」', async () => {
     const wrapper = await mountPanel()
 
@@ -299,6 +321,12 @@ describe('ProviderSettingsPanel 速率档位（只读数值 + 对供货商开放
 const applyButtons = (wrapper: Wrapper) =>
   tierRows(wrapper).map((row) => row.get('[data-testid="provider-tier-apply"]'))
 const applyButton = (wrapper: Wrapper, rowIndex: number) => applyButtons(wrapper)[rowIndex]
+/**
+ * 已对供货商开放的档位（本文件夹具里是档位 2 与 3，即第 1、2 行）的「应用到存量」按钮。
+ * 未开放档位的按钮恒禁用（见上面的「未对供货商开放的档位」用例），所以「请求结束后按钮恢复」
+ * 只能看已开放档位的按钮。
+ */
+const openApplyButtons = (wrapper: Wrapper) => [applyButton(wrapper, 1), applyButton(wrapper, 2)]
 const isDisabled = (button: { attributes: (name: string) => string | undefined }) =>
   button.attributes('disabled') !== undefined
 const dialogExists = (wrapper: Wrapper) => wrapper.find('[data-testid="apply-dialog"]').exists()
@@ -589,7 +617,7 @@ describe('ProviderSettingsPanel 应用到存量（先预览、再确认）', () 
     expect(isDisabled(confirmButton(wrapper))).toBe(false)
     expect(confirmButton(wrapper).text()).toBe('确认应用到 5 个账号')
     expect(isDisabled(cancelButton(wrapper))).toBe(false)
-    expect(applyButtons(wrapper).some(isDisabled)).toBe(false)
+    expect(openApplyButtons(wrapper).some(isDisabled)).toBe(false)
 
     // 重试：成功后错误消失
     await confirmButton(wrapper).trigger('click')
@@ -617,7 +645,7 @@ describe('ProviderSettingsPanel 应用到存量（先预览、再确认）', () 
     expect(dialogExists(wrapper)).toBe(false)
     expect(wrapper.text()).toContain('preview boom')
     expect(mocks.applyTierToExisting).not.toHaveBeenCalled()
-    expect(applyButtons(wrapper).some(isDisabled)).toBe(false)
+    expect(openApplyButtons(wrapper).some(isDisabled)).toBe(false)
     expect(applyButton(wrapper, 2).text()).toBe('应用到存量')
 
     // 再点一次即可重试
@@ -653,7 +681,7 @@ describe('ProviderSettingsPanel 应用到存量（先预览、再确认）', () 
     pending.resolve(previewResponse())
     await flushPromises()
     expect(dialogExists(wrapper)).toBe(true)
-    expect(applyButtons(wrapper).some(isDisabled)).toBe(false)
+    expect(openApplyButtons(wrapper).some(isDisabled)).toBe(false)
   })
 
   it('应用请求在途时：确认与取消按钮都禁用并显示加载中，重复点击和关闭都不生效；返回后正常收尾', async () => {
@@ -679,7 +707,7 @@ describe('ProviderSettingsPanel 应用到存量（先预览、再确认）', () 
     await flushPromises()
     expect(dialogExists(wrapper)).toBe(false)
     expect(wrapper.get('[data-testid="apply-notice"]').text()).toContain('已更新 5 个账号')
-    expect(applyButtons(wrapper).some(isDisabled)).toBe(false)
+    expect(openApplyButtons(wrapper).some(isDisabled)).toBe(false)
   })
 
   it('应用请求失败后同样不会卡住：按钮恢复，可以取消', async () => {

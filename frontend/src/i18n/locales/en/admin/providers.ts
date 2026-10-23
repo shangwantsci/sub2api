@@ -163,6 +163,7 @@ export default {
     windowCostZeroHint: '0 means unlimited',
     // "Apply to existing": preview the real number of changes first, then let the admin confirm.
     applyToExisting: 'Apply to existing',
+    applyClosedTierHint: 'This tier is not open to suppliers yet (save first if you just ticked it), so there are no existing accounts to apply to.',
     applyConfirmTitle: 'Apply to existing accounts: tier {tier}',
     applyConfirmMessage: 'Accounts that will change: {willChange} (out of {matched} in this tier).',
     applyOverwriteWarning:
