@@ -619,12 +619,6 @@ func TestProviderLabelHelpers(t *testing.T) {
 	require.Equal(t, "稳健型", ProviderHostingLabel(settings, []int64{11}))
 	require.Equal(t, "直连型", ProviderHostingLabel(settings, []int64{99, 12}))
 	require.Equal(t, "", ProviderHostingLabel(settings, []int64{404}))
-
-	tier := "2"
-	require.Equal(t, "保守", ProviderTierLabel(settings, &tier))
-	custom := ProviderTierCustom
-	require.Equal(t, "自定义", ProviderTierLabel(settings, &custom))
-	require.Equal(t, "", ProviderTierLabel(settings, nil))
 }
 
 // 内部调度细节（限流、过载、临时不可调度）不下发给供号商，统一压成四态。

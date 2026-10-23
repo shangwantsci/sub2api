@@ -185,7 +185,11 @@ describe('容量模型相关 i18n key', () => {
     'admin.accounts.quotaControl.sessionLimit.label',
     'admin.accounts.quotaControl.sessionLimit.hint',
     'admin.accounts.quotaControl.sessionLimit.maxSessionsPlaceholder',
-    'admin.accounts.quotaControl.rpmLimit.hint'
+    'admin.accounts.quotaControl.rpmLimit.hint',
+    // 客户端亲和调度已整体移除（后端选号与账号弹窗都没有这个功能），词条一并清掉；
+    // 上游合并时容易把这一族词条带回来，所以各挑一个代表守住
+    'admin.accounts.quotaControl.clientAffinity',
+    'admin.accounts.affinitySection'
   ]
 
   for (const path of REMOVED) {

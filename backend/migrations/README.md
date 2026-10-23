@@ -71,13 +71,10 @@ Why?
    - If rollback is needed, create a new migration file to revert
 
 3. **Test locally**
-   ```bash
-   # Apply migration
-   make migrate-up
-
-   # Test rollback
-   make migrate-down
-   ```
+   - Migrations are applied automatically when the service starts (`ApplyMigrations`). There are no `make migrate-*` targets and no Down step.
+   - Add a text-assertion test next to the file for logic that is easy to get wrong (see the existing `migrations/*_test.go`).
+   - Rehearse data migrations on a throwaway PostgreSQL before committing, never on a database you care about: once applied, the file can no longer be edited.
+   - `go test -tags=integration ./internal/repository/...` runs the migrations against a real PostgreSQL through testcontainers (needs Docker).
 
 4. **Commit and deploy**
    ```bash
@@ -124,9 +121,9 @@ touch migrations/018_your_new_change.sql
    - One logical change per migration
    - Easier to review and rollback
 
-2. **Write reversible migrations**
-   - Always provide a working Down migration
-   - Test rollback before committing
+2. **Keep migrations idempotent and forward-only**
+   - Use `IF NOT EXISTS` / `IF EXISTS`, and guard data rewrites so a second run changes nothing
+   - To undo a change, add a new migration (the runner has no Down step)
 
 3. **Use transactions**
    - Wrap DDL statements in transactions when possible
@@ -139,7 +136,7 @@ touch migrations/018_your_new_change.sql
 5. **Test in development first**
    - Apply migration locally
    - Verify data integrity
-   - Test rollback
+   - Run it a second time and confirm nothing changes
 
 ## Example Migration
 

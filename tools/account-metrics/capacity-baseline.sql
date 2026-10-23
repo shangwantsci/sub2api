@@ -1,14 +1,21 @@
--- Account persona baseline / verification queries (read-only).
+-- 账号存活基线查询（只读）。
 --
--- Run before and after enabling persona gating to compare account lifespan,
--- 24h activity shape, per-account concurrency and multiplex breadth. These are
--- the exact queries used to produce the mortality baseline; re-run them after a
--- staged rollout to confirm the persona envelope is working (accounts look more
--- like a single person and live longer).
+-- 用途：在启用或调整容量档位（capacity_presets）与动态降速（extra.adaptive_throttle）前后，
+-- 对比账号的存活情况：改动前跑一遍留作基线，分阶段放开后再跑一遍对比。
+-- 六组查询分别看：
+--   [A] 账号寿命与死亡率（anthropic，含已软删除）
+--   [B] 寿命与「每天活跃小时数」的关系（全天候在线是否缩短寿命）
+--   [C] 每个账号的并发峰值与 p95（7 天），可对照 accounts.concurrency
+--   [D] 复用广度：每个账号服务了多少个用户、活跃了多少小时（7 天）
+--   [E] 全局并发峰值（容量规划用）
+--   [F] 按小时统计的请求量分布
 --
---   docker exec -i sub2api-postgres psql -U sub2api -d sub2api -v ON_ERROR_STOP=0 -q -f - < tools/account-metrics/persona-baseline.sql
+-- 这些查询只读 accounts 与 usage_logs 的常规列，不依赖任何 extra 键，
+-- 因此不受容量模型改版影响。
 --
--- Adjust the timezone in [F] to the persona/demand timezone you are validating.
+--   docker exec -i sub2api-postgres psql -U sub2api -d sub2api -v ON_ERROR_STOP=0 -q -f - < tools/account-metrics/capacity-baseline.sql
+--
+-- （容器名与库名以实际部署为准。）[F] 里的时区写死为 Asia/Shanghai，请改成你要验证的用户活跃时区。
 \pset pager off
 
 \echo '==== [A] account mortality (anthropic, incl soft-deleted) ===='
@@ -80,7 +87,7 @@ SELECT max(c) AS peak_concurrent,
        round(percentile_cont(0.95) WITHIN GROUP (ORDER BY c)::numeric, 2) AS p95
 FROM run;
 
-\echo '==== [F] hour-of-day activity (adjust timezone to persona/demand tz) ===='
+\echo '==== [F] hour-of-day activity (adjust the timezone below to the demand timezone) ===='
 SELECT EXTRACT(hour FROM created_at AT TIME ZONE 'Asia/Shanghai')::int AS hod, count(*) AS reqs
 FROM usage_logs
 WHERE created_at >= now() - interval '7 days'

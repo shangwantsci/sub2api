@@ -119,6 +119,8 @@ tests
 !deploy/tests/
 !deploy/tests/**
 CLAUDE.md
+# 仓库根的 CLAUDE.md 是本项目给 AI 协作者的规则，要进版本管理（其它位置的仍忽略）
+!/CLAUDE.md
 .claude
 scripts
 !backend/scripts/
@@ -136,8 +138,10 @@ docs/*
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/MODEL_ONBOARDING_RUNBOOK_CN.md
-!docs/superpowers/
-!docs/superpowers/**
+!docs/COMPOSITE_GROUPS.md
+!docs/BATCH_IMAGE_MVP.md
+!docs/FEATURES.md
+!docs/CURRENT_BEHAVIOR.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

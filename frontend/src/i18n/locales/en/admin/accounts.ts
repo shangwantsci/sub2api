@@ -281,7 +281,7 @@ export default {
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',
       quotaLimitPlaceholder: '0 means unlimited',
-      quotaLimitHint: 'Set daily/weekly/total spending limits (USD). Anthropic API key accounts can also configure client affinity. Changing limits won\'t reset usage.',
+      quotaLimitHint: 'Set daily/weekly/total spending limits (USD). Changing limits won\'t reset usage.',
       quotaLimitToggle: 'Enable Quota Limit',
       quotaLimitToggleHint: 'When enabled, account will be paused when usage reaches the set limit',
       quotaDailyLimit: 'Daily Limit',
@@ -650,7 +650,7 @@ export default {
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: 'Quota Control',
-        hint: 'Configure cost window, session limits, client affinity and other scheduling controls.',
+        hint: 'Set daily/weekly/total spending limits (USD). Changing limits won\'t reset usage.',
         disguiseTitle: 'Request disguise',
         disguiseHint: 'TLS fingerprint, session ID, cache TTL and custom relay URL. Independent of capacity and throttling.',
         windowCost: {
@@ -707,10 +707,6 @@ export default {
           label: 'Custom Relay URL',
           hint: 'Forward requests to a custom relay service. Proxy URL will be passed as a query parameter.',
           urlHint: 'Relay service URL (e.g., https://relay.example.com)',
-        },
-        clientAffinity: {
-          label: 'Client Affinity Scheduling',
-          hint: 'When enabled, new sessions prefer accounts previously used by this client to reduce account switching'
         }
       },
       // Capacity and throttling card (shared by create / edit for Claude OAuth and SetupToken accounts)
@@ -729,20 +725,6 @@ export default {
         nurturingHint: 'Sends a few normal requests while the account is idle to keep it active. It only takes effect after the global nurturing switch is turned on under Settings, Gateway.',
         nurturingGlobalOff: 'The global nurturing switch is off, so this cannot be changed for now.'
       },
-      affinityNoClients: 'No affinity clients',
-      affinityClients: '{count} affinity clients:',
-      affinitySection: 'Client Affinity',
-      affinitySectionHint: 'Control how clients are distributed across accounts. Configure zone thresholds to balance load.',
-      affinityToggle: 'Enable Client Affinity',
-      affinityToggleHint: 'New sessions prefer accounts previously used by this client',
-      affinityBase: 'Base Limit (Green Zone)',
-      affinityBasePlaceholder: 'Empty = no limit',
-      affinityBaseHint: 'Max clients in green zone (full priority scheduling)',
-      affinityBaseOffHint: 'No green zone limit. All clients receive full priority scheduling.',
-      affinityBuffer: 'Buffer (Yellow Zone)',
-      affinityBufferPlaceholder: 'e.g. 3',
-      affinityBufferHint: 'Additional clients allowed in the yellow zone (degraded priority)',
-      affinityBufferInfinite: 'Unlimited',
       expired: 'Expired',
       proxy: 'Proxy',
       noProxy: 'No Proxy',

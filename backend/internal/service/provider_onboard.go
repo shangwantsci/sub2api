@@ -615,29 +615,6 @@ func providerTierMatchesAccount(t CapacityPreset, a *Account) bool {
 		math.Abs(a.GetWindowCostLimit()-t.WindowCostLimit) < 1e-9
 }
 
-// ProviderTierLabel 从设置里找档位显示名，找不到就回落档位标识本身。
-//
-// 已不用于账号视图（那里改用 ResolveProviderAccountTier 按实际参数反推），
-// 保留给仍然需要「按档位标识查文案」的场景。
-func ProviderTierLabel(settings ProviderSettings, tier *string) string {
-	if tier == nil {
-		return ""
-	}
-	name := strings.TrimSpace(*tier)
-	if name == "" {
-		return ""
-	}
-	if name == ProviderTierCustom {
-		return "自定义"
-	}
-	for _, t := range settings.Presets {
-		if t.Key == name {
-			return t.Label
-		}
-	}
-	return name
-}
-
 // ProviderHostingLabel 从设置里找托管类型显示名。
 // 供号商只应看到 label，绝不返回底层策略。
 func ProviderHostingLabel(settings ProviderSettings, groupIDs []int64) string {

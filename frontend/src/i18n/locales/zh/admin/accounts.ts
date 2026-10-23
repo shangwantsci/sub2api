@@ -193,7 +193,7 @@ export default {
       resetQuota: '重置配额',
       quotaLimit: '配额限制',
       quotaLimitPlaceholder: '0 表示不限制',
-      quotaLimitHint: '设置日/周/总使用额度（美元），任一维度达到限额后账号暂停调度。Anthropic API Key 账号还可配置客户端亲和。修改限额不会重置已用额度。',
+      quotaLimitHint: '设置日/周/总使用额度（美元），任一维度达到限额后账号暂停调度。修改限额不会重置已用额度。',
       quotaLimitToggle: '启用配额限制',
       quotaLimitToggleHint: '开启后，当账号用量达到设定额度时自动暂停调度',
       quotaDailyLimit: '日限额',
@@ -742,7 +742,7 @@ export default {
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: '配额控制',
-        hint: '配置费用窗口、会话限制、客户端亲和等调度控制。',
+        hint: '设置日/周/总使用额度（美元），任一维度达到限额后账号暂停调度。修改限额不会重置已用额度。',
         disguiseTitle: '请求伪装',
         disguiseHint: 'TLS 指纹、会话 ID、缓存 TTL 与自定义转发地址，与容量节流相互独立。',
         windowCost: {
@@ -799,10 +799,6 @@ export default {
           label: '自定义转发地址',
           hint: '启用后将请求转发到自定义中继服务，代理地址将作为 URL 参数传递给中继服务',
           urlHint: '中继服务地址（如 https://relay.example.com）',
-        },
-        clientAffinity: {
-          label: '客户端亲和调度',
-          hint: '启用后，新会话会优先调度到该客户端之前使用过的账号，避免频繁切换账号'
         }
       },
       // 「容量与节流」卡（新建 / 编辑 Claude OAuth、SetupToken 账号共用）
@@ -821,20 +817,6 @@ export default {
         nurturingHint: '账号空闲时自动发少量正常请求，让账号保持活跃。需要先在「系统设置 → 网关」打开全局养号开关才会生效。',
         nurturingGlobalOff: '全局养号开关未开启，这里暂时不能修改。'
       },
-      affinityNoClients: '无亲和客户端',
-      affinityClients: '{count} 个亲和客户端：',
-      affinitySection: '客户端亲和',
-      affinitySectionHint: '控制客户端在账号间的分布。通过配置区域阈值来平衡负载。',
-      affinityToggle: '启用客户端亲和',
-      affinityToggleHint: '新会话优先调度到该客户端之前使用过的账号',
-      affinityBase: '基础限额（绿区）',
-      affinityBasePlaceholder: '留空表示不限制',
-      affinityBaseHint: '绿区最大客户端数量（完整优先级调度）',
-      affinityBaseOffHint: '未开启绿区限制，所有客户端均享受完整优先级调度',
-      affinityBuffer: '缓冲区（黄区）',
-      affinityBufferPlaceholder: '例如 3',
-      affinityBufferHint: '黄区允许的额外客户端数量（降级优先级调度）',
-      affinityBufferInfinite: '不限制',
       expired: '已过期',
       proxy: '代理',
       noProxy: '无代理',
