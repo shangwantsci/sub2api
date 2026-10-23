@@ -179,6 +179,18 @@ export const HAT_META: Record<HatId, HatMeta> = {
   }
 }
 
+/**
+ * 注入策略 -> 词条 key（完整字面量，不拼接：identity_only 对应 camelCase 的 identityOnly）。
+ * 列表徽章的 title 与编辑卡片的策略下拉都读这一份，不要在别处再写一遍「策略 -> 词条」的映射；
+ * 键的顺序就是下拉里的顺序。
+ */
+export const POLICY_LABEL_KEYS: Record<ClaudeOAuthSystemPromptPolicy, string> = {
+  inherit: 'admin.groups.anthropicPolicies.inherit',
+  enabled: 'admin.groups.anthropicPolicies.enabled',
+  identity_only: 'admin.groups.anthropicPolicies.identityOnly',
+  disabled: 'admin.groups.anthropicPolicies.disabled'
+}
+
 // ========== 反推 / 套用 / 描述 ==========
 
 /**

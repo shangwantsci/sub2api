@@ -975,7 +975,7 @@ export default {
         noFallback: 'No Fallback (Reject)'
       },
       anthropicPolicies: {
-        title: 'Anthropic Customer Policies',
+        title: 'Claude Policy',
         contentReview: 'Risk Control Content Moderation',
         contentReviewHint: 'Only affects Risk Control content moderation: Inherit follows the Risk Control group scope, Enabled forces this group into moderation, and Disabled exempts it. Enabled groups still require Risk Control and content moderation to be turned on and use the global mode, keywords, and thresholds.',
         systemPrompt: 'Claude OAuth System Injection',
@@ -1037,7 +1037,23 @@ export default {
       hatCard: {
         tipFallbackTo: 'Falls back to: {name}',
         tipFallbackPolicy: 'Prompt policy for fallback traffic: {policy}',
-        tipStaleFallback: 'Holds an unused fallback group: {name}'
+        tipStaleFallback: 'Holds an unused fallback group: {name}',
+        hatTitle: 'Hat',
+        hatHint: 'Pick a hat to set client admission and the prompt policy in one go. The line below shows exactly what will be saved.',
+        willWrite: 'Will save',
+        willWriteLine: 'claude_code_only={cc}, fallback group={fallback}, injection policy={policy}',
+        valueNone: 'none',
+        fallbackPickHint: 'Takes effect once a fallback group is chosen.',
+        fallbackNoCandidates: 'No fallback group available: you need another Claude group that is not Claude Code only.',
+        fallbackPolicyLabel: 'Prompt policy for fallback traffic',
+        fallbackPolicyHint: 'Fallback requests use the prompt policy of this group (the group of the key), not the settings of the fallback group.',
+        staleFallbackNotice: 'This group holds an unused fallback group "{name}": it is not used while Claude Code only is off.',
+        clearStaleFallback: 'Clear',
+        danglingFallbackLabel: 'Group #{id} (disabled or deleted)',
+        danglingFallbackNotice: 'The current fallback group is disabled or deleted and saving will fail validation. Pick another group or choose no fallback.',
+        referrersNotice: 'Groups {names} use this group as their fallback; once this group is Claude Code only their fallback stops working.',
+        exposureNotice: 'Open hat: any client can use the accounts of this group.',
+        contentReviewNote: 'Independent of the hat'
       },
       openaiMessages: {
         title: 'OpenAI Messages Dispatch',

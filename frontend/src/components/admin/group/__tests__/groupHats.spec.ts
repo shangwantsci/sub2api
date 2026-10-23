@@ -7,6 +7,7 @@ import type { ClaudeOAuthSystemPromptPolicy } from '@/types'
 import {
   HAT_IDS,
   HAT_META,
+  POLICY_LABEL_KEYS,
   applyHat,
   deriveHat,
   describeHat,
@@ -566,6 +567,39 @@ describe('HAT_IDS / HAT_META', () => {
         // 单双引号都认：引号风格以后可能被格式化工具改掉，守卫只关心「是不是完整字面量」
         expect(source.includes(`'${key}'`) || source.includes(`"${key}"`), `${key} 没有以完整字面量出现在源码里`).toBe(true)
       }
+    })
+  })
+})
+
+describe('POLICY_LABEL_KEYS（徽章 title 与编辑卡片的策略下拉共用的「策略 -> 词条」映射）', () => {
+  // 4 个策略与词条 key 的对应关系，全部是字面量；identity_only 对应 camelCase 的 identityOnly
+  const EXPECTED: Array<[ClaudeOAuthSystemPromptPolicy, string]> = [
+    ['inherit', 'admin.groups.anthropicPolicies.inherit'],
+    ['enabled', 'admin.groups.anthropicPolicies.enabled'],
+    ['identity_only', 'admin.groups.anthropicPolicies.identityOnly'],
+    ['disabled', 'admin.groups.anthropicPolicies.disabled']
+  ]
+
+  it.each(EXPECTED)('%s -> %s', (policy, key) => {
+    expect(POLICY_LABEL_KEYS[policy]).toBe(key)
+  })
+
+  it('键恰好是 normalizePolicy 认的 4 个合法值，顺序就是下拉里的顺序', () => {
+    expect(Object.keys(POLICY_LABEL_KEYS)).toEqual(['inherit', 'enabled', 'identity_only', 'disabled'])
+    for (const policy of Object.keys(POLICY_LABEL_KEYS)) {
+      expect(normalizePolicy(policy)).toBe(policy)
+    }
+  })
+
+  it('4 个 key 互不相同', () => {
+    expect(new Set(Object.values(POLICY_LABEL_KEYS)).size).toBe(4)
+  })
+
+  describe('源码守卫：必须是完整字面量（key 扫描只认源码里的完整字符串）', () => {
+    const source = readFileSync(join(process.cwd(), 'src/components/admin/group/groupHats.ts'), 'utf8')
+
+    it.each(EXPECTED)('%s 对应的 %s 在源码里是完整字面量', (_policy, key) => {
+      expect(source.includes(`'${key}'`) || source.includes(`"${key}"`), `${key} 没有以完整字面量出现在源码里`).toBe(true)
     })
   })
 })

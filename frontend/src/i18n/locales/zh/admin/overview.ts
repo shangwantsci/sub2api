@@ -973,7 +973,7 @@ export default {
         noFallback: '不降级（直接拒绝）'
       },
       anthropicPolicies: {
-        title: 'Anthropic 客户策略',
+        title: 'Claude 策略',
         contentReview: '风控中心内容审计',
         contentReviewHint: '仅作用于风控中心的内容审计：继承=按风控中心的分组范围；开启=强制纳入审计；关闭=该分组不审计。开启时仍需风控中心与内容审计已启用，并沿用全局审查模式、关键词和阈值。',
         systemPrompt: 'Claude OAuth System 注入',
@@ -1035,7 +1035,23 @@ export default {
       hatCard: {
         tipFallbackTo: '降级到：{name}',
         tipFallbackPolicy: '降级流量的提示词策略：{policy}',
-        tipStaleFallback: '存有未生效的降级分组：{name}'
+        tipStaleFallback: '存有未生效的降级分组：{name}',
+        hatTitle: '帽子',
+        hatHint: '选一顶帽子，一次设置客户端准入与提示词策略。下面「将写入」一行就是实际保存的值。',
+        willWrite: '将写入',
+        willWriteLine: 'claude_code_only={cc}，降级分组={fallback}，注入策略={policy}',
+        valueNone: '无',
+        fallbackPickHint: '选择降级分组后才会生效。',
+        fallbackNoCandidates: '没有可用的降级分组：需要另一个未开启「仅限 Claude Code」的 Claude 分组。',
+        fallbackPolicyLabel: '降级流量的提示词策略',
+        fallbackPolicyHint: '降级请求的提示词注入策略取本分组（Key 所在分组）的设置，降级分组自己的设置不起作用。',
+        staleFallbackNotice: '本分组存有未生效的降级分组「{name}」：仅限 Claude Code 关闭时不会用到它。',
+        clearStaleFallback: '清除',
+        danglingFallbackLabel: '分组 #{id}（已停用或已删除）',
+        danglingFallbackNotice: '当前降级分组已停用或已删除，保存时会校验失败。请改选其他分组，或选择「不降级」。',
+        referrersNotice: '分组 {names} 把本分组当作降级分组；改为「仅限 Claude Code」后，它们的降级会失效。',
+        exposureNotice: '开放类：任何客户端都能使用本分组的账号。',
+        contentReviewNote: '与帽子无关'
       },
       openaiMessages: {
         title: 'OpenAI Messages 调度配置',

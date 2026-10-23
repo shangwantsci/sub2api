@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { HAT_META } from '@/components/admin/group/groupHats'
+import { HAT_META, POLICY_LABEL_KEYS } from '@/components/admin/group/groupHats'
 import en from '../locales/en'
 import zh from '../locales/zh'
 
@@ -20,6 +20,18 @@ const CARD_SUBTREE = 'admin.groups.hatCard'
 
 /** 匹配 t('a.b.c') / t("a.b.c")，只取静态字面量 key。 */
 const T_CALL = /\bt\(\s*(['"])([A-Za-z0-9_.]+)\1/g
+
+const BADGE_FILE = 'src/components/admin/group/GroupHatBadge.vue'
+const CARD_FILE = 'src/components/admin/group/GroupClaudePolicyCard.vue'
+
+/** 读一个源码文件，取出里面全部静态 t('…') 的 key（去重）。 */
+function staticKeysOf(relPath: string): string[] {
+  const source = readFileSync(join(process.cwd(), relPath), 'utf8')
+  return [...new Set([...source.matchAll(T_CALL)].map((match) => match[2]))]
+}
+
+/** 只留 hatCard 子树下的 key。 */
+const onlyHatCard = (keys: string[]) => keys.filter((key) => key.startsWith('admin.groups.hatCard.'))
 
 function resolve(bundle: unknown, key: string): unknown {
   return key.split('.').reduce<unknown>((node, segment) => {
@@ -111,40 +123,119 @@ describe('hatCard 子树（列表徽章的 title 与编辑卡片共用）', () =
     }
   })
 
-  // GroupHatBadge 的 title 就是用这些参数名调用 t() 的：词条里的占位符名对不上，界面只会悄悄显示成空
-  it.each([
-    ['tipFallbackTo', ['{name}']],
-    ['tipFallbackPolicy', ['{policy}']],
-    ['tipStaleFallback', ['{name}']]
-  ])('%s 的占位符是 %j，与 GroupHatBadge 传入的参数一致', (key, placeholders) => {
+  // 徽章的 title 与编辑卡片就是用这些参数名调用 t() 的：词条里的占位符名对不上，界面只会悄悄显示成空。
+  // 19 条全部写成字面量（没有占位符的写空数组）。
+  const PLACEHOLDERS: Record<string, string[]> = {
+    tipFallbackTo: ['{name}'],
+    tipFallbackPolicy: ['{policy}'],
+    tipStaleFallback: ['{name}'],
+    hatTitle: [],
+    hatHint: [],
+    willWrite: [],
+    willWriteLine: ['{cc}', '{fallback}', '{policy}'],
+    valueNone: [],
+    fallbackPickHint: [],
+    fallbackNoCandidates: [],
+    fallbackPolicyLabel: [],
+    fallbackPolicyHint: [],
+    staleFallbackNotice: ['{name}'],
+    clearStaleFallback: [],
+    danglingFallbackLabel: ['{id}'],
+    danglingFallbackNotice: [],
+    referrersNotice: ['{names}'],
+    exposureNotice: [],
+    contentReviewNote: []
+  }
+
+  it.each(BUNDLES)('%s：上面这 19 条恰好是 hatCard 子树的全部叶子（不缺、不多）', (_locale, bundle) => {
+    const expected = Object.keys(PLACEHOLDERS)
+      .map((key) => `${CARD_SUBTREE}.${key}`)
+      .sort()
+    expect(expected).toHaveLength(19)
+    expect(leafKeys(resolve(bundle, CARD_SUBTREE), CARD_SUBTREE).sort()).toEqual(expected)
+  })
+
+  it.each(Object.entries(PLACEHOLDERS))('%s 的占位符是 %j，与组件传入的参数一致', (key, placeholders) => {
     for (const [locale, bundle] of BUNDLES) {
       expect(placeholdersOf(resolve(bundle, `${CARD_SUBTREE}.${key}`)), `${locale} 的 ${key}`).toEqual(placeholders)
     }
   })
 })
 
-describe('GroupHatBadge.vue 里的静态 t() key', () => {
-  const source = readFileSync(join(process.cwd(), 'src/components/admin/group/GroupHatBadge.vue'), 'utf8')
-  const keys = [...new Set([...source.matchAll(T_CALL)].map((match) => match[2]))]
+describe('POLICY_LABEL_KEYS（徽章 title 与卡片的策略下拉共用的映射）', () => {
+  it.each(BUNDLES)('%s：4 个策略词条都解析成非空字符串', (_locale, bundle) => {
+    const keys = Object.values(POLICY_LABEL_KEYS)
+    expect(keys).toHaveLength(4)
+    for (const key of keys) {
+      const value = resolve(bundle, key)
+      expect(typeof value, `${key} 缺失，策略下拉与徽章 title 会直接显示原始 key`).toBe('string')
+      expect((value as string).length, `${key} 是空串`).toBeGreaterThan(0)
+    }
+  })
+})
 
-  it('抓到了 t() 调用（防止正则或路径失效后下面的断言空转通过）', () => {
+describe('GroupHatBadge.vue 里的静态 t() key', () => {
+  const keys = staticKeysOf(BADGE_FILE)
+
+  it('抓到了 t() 调用；hatCard 的 key 恰好是 3 条 tip*，策略文字走 POLICY_LABEL_KEYS（不再有静态的 anthropicPolicies key）', () => {
     expect(keys.length).toBeGreaterThan(0)
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        'admin.groups.hatCard.tipFallbackTo',
-        'admin.groups.hatCard.tipFallbackPolicy',
-        'admin.groups.hatCard.tipStaleFallback',
-        'admin.groups.anthropicPolicies.inherit',
-        'admin.groups.anthropicPolicies.enabled',
-        'admin.groups.anthropicPolicies.identityOnly',
-        'admin.groups.anthropicPolicies.disabled'
-      ])
-    )
+    expect(onlyHatCard(keys).sort()).toEqual([
+      'admin.groups.hatCard.tipFallbackPolicy',
+      'admin.groups.hatCard.tipFallbackTo',
+      'admin.groups.hatCard.tipStaleFallback'
+    ])
+    expect(keys.filter((key) => key.startsWith('admin.groups.anthropicPolicies.'))).toEqual([])
   })
 
   it.each(BUNDLES)('%s：每个静态 key 都存在且是字符串', (_locale, bundle) => {
     const missing = keys.filter((key) => typeof resolve(bundle, key) !== 'string')
     expect(missing, '缺少这些 key，界面会直接显示原始 key').toEqual([])
+  })
+})
+
+describe('GroupClaudePolicyCard.vue 里的静态 t() key', () => {
+  const keys = staticKeysOf(CARD_FILE)
+
+  it('抓到了 t() 调用（防止正则或路径失效后下面的断言空转通过）', () => {
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'admin.groups.anthropicPolicies.title',
+        'admin.groups.anthropicPolicies.contentReview',
+        'admin.groups.anthropicPolicies.contentReviewHint',
+        'admin.groups.claudeCode.fallbackGroup',
+        'admin.groups.claudeCode.noFallback',
+        'common.loading'
+      ])
+    )
+  })
+
+  it('4 个策略词条不会静态出现在卡片里，只经 POLICY_LABEL_KEYS 引用', () => {
+    expect(keys.filter((key) => /^admin\.groups\.anthropicPolicies\.(inherit|enabled|identityOnly|disabled)$/.test(key))).toEqual([])
+  })
+
+  it.each(BUNDLES)('%s：每个静态 key 都存在且是字符串', (_locale, bundle) => {
+    const missing = keys.filter((key) => typeof resolve(bundle, key) !== 'string')
+    expect(missing, '缺少这些 key，界面会直接显示原始 key').toEqual([])
+  })
+})
+
+describe('hatCard 子树的每条词条都有人引用（无孤儿、无缺失）', () => {
+  const leaves = leafKeys(resolve(zh, CARD_SUBTREE), CARD_SUBTREE).sort()
+  const badgeKeys = onlyHatCard(staticKeysOf(BADGE_FILE)).sort()
+  const cardKeys = onlyHatCard(staticKeysOf(CARD_FILE)).sort()
+
+  it('徽章用 3 条 tip*，卡片用其余 16 条', () => {
+    expect(leaves).toHaveLength(19)
+    expect(badgeKeys).toHaveLength(3)
+    expect(cardKeys).toHaveLength(16)
+  })
+
+  it('卡片引用的 hatCard key 恰好等于「子树叶子去掉徽章引用的 key」', () => {
+    expect(cardKeys).toEqual(leaves.filter((key) => !badgeKeys.includes(key)))
+  })
+
+  it('徽章与卡片引用的 hatCard key 的并集恰好等于子树叶子', () => {
+    expect([...new Set([...badgeKeys, ...cardKeys])].sort()).toEqual(leaves)
   })
 })
 
@@ -175,8 +266,8 @@ describe('文案字符检查（vue-i18n 把 { } @ | 当语法解析）', () => {
 
   it.each(BUNDLES)('%s：去掉 {name} 这类合法占位符后，不得再含 { } @ |', (_locale, bundle) => {
     const entries = textsOf(bundle)
-    // hats 24 条 + hatCard 至少 3 条；条数不够说明子树路径失效了，下面的断言会空转
-    expect(entries.length).toBeGreaterThanOrEqual(27)
+    // hats 24 条 + hatCard 19 条；条数不够说明子树路径失效了，下面的断言会空转
+    expect(entries.length).toBeGreaterThanOrEqual(43)
     const bad = entries.filter(([, text]) => /[{}@|]/.test(withoutPlaceholders(text))).map(([key]) => key)
     expect(bad, '这些词条含裸 { } @ |，vue-i18n 会当语法解析，可能渲染错位甚至整页白屏').toEqual([])
   })

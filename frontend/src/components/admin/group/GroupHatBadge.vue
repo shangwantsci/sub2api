@@ -12,8 +12,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ClaudeOAuthSystemPromptPolicy } from '@/types'
-import { HAT_META, describeHat } from './groupHats'
+import { HAT_META, POLICY_LABEL_KEYS, describeHat } from './groupHats'
 
 // 列表行 / 表单对象 / 缺字段的 mock 都能直接传；帽子的反推与字段判断全部交给 describeHat
 interface HatGroupLike {
@@ -35,20 +34,6 @@ const description = computed(() => describeHat(props.group))
 const hat = computed(() => description.value.hat)
 const meta = computed(() => HAT_META[hat.value])
 
-// 用已有的 anthropicPolicies 词条把策略值翻成可读文字（snake_case 的 identity_only 对应 camelCase 的 identityOnly）
-const policyLabel = (policy: ClaudeOAuthSystemPromptPolicy): string => {
-  switch (policy) {
-    case 'enabled':
-      return t('admin.groups.anthropicPolicies.enabled')
-    case 'identity_only':
-      return t('admin.groups.anthropicPolicies.identityOnly')
-    case 'disabled':
-      return t('admin.groups.anthropicPolicies.disabled')
-    case 'inherit':
-      return t('admin.groups.anthropicPolicies.inherit')
-  }
-}
-
 // 降级分组的显示名：查得到用分组名，查不到显示 #id；只在标题需要它时才会被读取
 const fallbackName = computed(() => {
   const id = description.value.fields.fallback_group_id
@@ -63,9 +48,10 @@ const titleText = computed(() => {
     lines.push(t('admin.groups.hatCard.tipFallbackTo', { name: fallbackName.value }))
   }
   if (meta.value.showsPolicySelect) {
+    // 用已有的 anthropicPolicies 词条把策略值翻成可读文字
     lines.push(
       t('admin.groups.hatCard.tipFallbackPolicy', {
-        policy: policyLabel(description.value.fields.claude_oauth_system_prompt_policy)
+        policy: t(POLICY_LABEL_KEYS[description.value.fields.claude_oauth_system_prompt_policy])
       })
     )
   }
