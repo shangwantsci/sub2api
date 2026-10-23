@@ -282,6 +282,20 @@ describe('选帽子：降级池', () => {
     expect(updateEvents(m)).toEqual([])
   })
 
+  it('点降级池卡片本身：不写任何字段，焦点交给内嵌的降级分组下拉（看得出下一步在哪，键盘用户也有反馈）', async () => {
+    const m = mountCard({}, { fallbackOptions: WITH_NINE })
+    await radio(m, 'cc_fallback').trigger('click')
+    expect(document.activeElement).toBe(fallbackSelect(m).element)
+    expect(snapshot(m)).toEqual(DEFAULT_STATE)
+    expect(updateEvents(m)).toEqual([])
+  })
+
+  it('点其它帽子不会把焦点抢到降级分组下拉', async () => {
+    const m = mountCard({}, { fallbackOptions: WITH_NINE })
+    await radio(m, 'open_full').trigger('click')
+    expect(document.activeElement).not.toBe(fallbackSelect(m).element)
+  })
+
   it.each([
     // 起点, 在内嵌下拉里选的 id, 写入后的三个字段（策略保持起点的值）
     ['开放·完整 + 残留降级分组 9', { claudeCodeOnly: false, fallbackGroupId: 9, systemPromptPolicy: 'enabled' }, '5', 5, 'enabled'],
@@ -422,6 +436,14 @@ describe('与真实 Select 组件联动（不用桩）', () => {
     })
     expect(m.state.fallbackGroupId).toBe(null)
     expect(checkedHats(m)).toEqual(['cc_line'])
+  })
+
+  it('点降级池卡片本身：焦点落在真实 Select 的触发按钮上（它的 focus 样式会亮出光圈），不打开下拉也不写字段', async () => {
+    const m = mountCard({}, {}, { realSelect: true })
+    await radio(m, 'cc_fallback').trigger('click')
+    expect(document.activeElement).toBe(trigger(m).element)
+    expect(dropdownOptions()).toEqual([])
+    expect(snapshot(m)).toEqual(DEFAULT_STATE)
   })
 
   it('没有候选且当前不是降级池：触发器被禁用，点击也打不开下拉', async () => {

@@ -26,7 +26,7 @@
           :disabled="HAT_META[id].requiresFallback && fallbackDisabled"
           :data-testid="`hat-option-${id}`"
           class="flex w-full items-start gap-3 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-          @click="pick(id)"
+          @click="onRadioClick($event, id)"
         >
           <span :class="[HAT_META[id].badgeClass, 'shrink-0 whitespace-nowrap']">{{ t(HAT_META[id].shortKey) }}</span>
           <span class="min-w-0 flex-1">
@@ -52,7 +52,7 @@
           <p
             v-else-if="fallbackOptions.length === 0 && !fallbackSelected"
             data-testid="hat-fallback-empty"
-            class="input-hint text-amber-600 dark:text-amber-400"
+            class="input-hint text-amber-700 dark:text-amber-400"
           >
             {{ t('admin.groups.hatCard.fallbackNoCandidates') }}
           </p>
@@ -62,7 +62,7 @@
           <p
             v-if="fallbackIsDangling"
             data-testid="hat-dangling-fallback"
-            class="input-hint text-red-600 dark:text-red-400"
+            class="input-hint text-red-700 dark:text-red-400"
           >
             {{ t('admin.groups.hatCard.danglingFallbackNotice') }}
           </p>
@@ -79,7 +79,7 @@
           <p
             v-if="meta.family === 'open'"
             data-testid="hat-exposure"
-            class="text-xs text-amber-600 dark:text-amber-400"
+            class="text-xs text-amber-700 dark:text-amber-400"
           >
             {{ t('admin.groups.hatCard.exposureNotice') }}
           </p>
@@ -141,7 +141,7 @@
         <div>
           <label class="input-label mb-0" :for="fieldId('content-review')">
             {{ t('admin.groups.anthropicPolicies.contentReview') }}
-            <span class="ml-1 text-xs font-normal text-gray-400 dark:text-gray-500">
+            <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
               {{ t('admin.groups.hatCard.contentReviewNote') }}
             </span>
           </label>
@@ -294,6 +294,18 @@ function pick(id: HatId, fallbackId?: number | null) {
   claudeCodeOnly.value = next.claude_code_only
   fallbackGroupId.value = next.fallback_group_id
   systemPromptPolicy.value = next.claude_oauth_system_prompt_policy
+}
+
+function onRadioClick(event: MouseEvent, id: HatId) {
+  pick(id)
+  // 降级池靠内嵌的下拉生效，点卡片本身不写任何字段：把焦点交给下拉，让人（包括键盘用户）看得出下一步在哪。
+  // 只在本卡片的容器里找：只有降级池的容器里有这个下拉，点其它帽子时找不到，什么也不会发生。
+  // 下拉可能是原生 <select>（根节点自己可聚焦），也可能是共享 Select 组件（根是容器，里面的按钮才可聚焦）
+  const root = (event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLElement>(
+    '[data-testid="hat-fallback-select"]'
+  )
+  const target = root?.matches('select, button, input') ? root : root?.querySelector<HTMLElement>('button, select, input')
+  target?.focus()
 }
 
 function onFallbackSelect(value: unknown) {
