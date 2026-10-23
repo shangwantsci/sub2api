@@ -55,8 +55,6 @@ describe('groups locale key completeness', () => {
     'admin.groups.anthropicPolicies.title',
     'admin.groups.anthropicPolicies.contentReview',
     'admin.groups.anthropicPolicies.contentReviewHint',
-    'admin.groups.anthropicPolicies.systemPrompt',
-    'admin.groups.anthropicPolicies.systemPromptHint',
     'admin.groups.anthropicPolicies.inherit',
     'admin.groups.anthropicPolicies.enabled',
     'admin.groups.anthropicPolicies.identityOnly',

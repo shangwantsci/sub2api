@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -32,6 +32,14 @@ function staticKeysOf(relPath: string): string[] {
 
 /** 只留 hatCard 子树下的 key。 */
 const onlyHatCard = (keys: string[]) => keys.filter((key) => key.startsWith('admin.groups.hatCard.'))
+
+/** src 下全部 .vue / .ts 源码（相对 frontend 的路径）。 */
+function sourceFiles(): string[] {
+  return readdirSync(join(process.cwd(), 'src'), { recursive: true })
+    .map(String)
+    .filter((path) => /\.(vue|ts)$/.test(path))
+    .map((path) => join('src', path))
+}
 
 function resolve(bundle: unknown, key: string): unknown {
   return key.split('.').reduce<unknown>((node, segment) => {
@@ -284,5 +292,41 @@ describe('文案字符检查（vue-i18n 把 { } @ | 当语法解析）', () => {
       .filter(([, text]) => /['’]/.test(text))
       .map(([key]) => key)
     expect(bad, 'en 词条里有撇号').toEqual([])
+  })
+})
+
+describe('帽子卡片接线之后，旧的开关与策略下拉的词条不再存在', () => {
+  // 旧的「Claude Code 客户端限制」开关与旧的两个策略下拉已被 GroupClaudePolicyCard 取代；
+  // 说明性文字都已在各帽子的 detail 里。claudeCode.fallbackGroup / noFallback 仍被卡片使用，不在清单里。
+  // admin.settings.claudeCode.title（设置页）是另一个 key，也不在清单里。
+  const REMOVED_KEYS = [
+    'admin.groups.claudeCode.title',
+    'admin.groups.claudeCode.tooltip',
+    'admin.groups.claudeCode.enabled',
+    'admin.groups.claudeCode.disabled',
+    'admin.groups.claudeCode.fallbackHint',
+    'admin.groups.anthropicPolicies.systemPrompt',
+    'admin.groups.anthropicPolicies.systemPromptHint'
+  ]
+
+  it.each(REMOVED_KEYS)('%s：zh 与 en 都不存在', (key) => {
+    expect(resolve(zh, key), `zh 里还留着 ${key}`).toBeUndefined()
+    expect(resolve(en, key), `en 里还留着 ${key}`).toBeUndefined()
+  })
+
+  it('src 下没有任何静态 t() 引用这些 key', () => {
+    const files = sourceFiles()
+    // 文件数不够说明目录遍历失效了，下面的断言会空转
+    expect(files.length).toBeGreaterThan(300)
+    const users = files.filter((file) => staticKeysOf(file).some((key) => REMOVED_KEYS.includes(key)))
+    expect(users, '这些文件还在引用已删除的词条，界面会直接显示原始 key').toEqual([])
+  })
+
+  it('卡片在用的两条仍然存在：降级分组标签与「不降级」', () => {
+    for (const [locale, bundle] of BUNDLES) {
+      for (const key of ['admin.groups.claudeCode.fallbackGroup', 'admin.groups.claudeCode.noFallback']) {
+        expect(typeof resolve(bundle, key), `${locale} 缺少 ${key}`).toBe('string')
+      }
+    }
   })
 })

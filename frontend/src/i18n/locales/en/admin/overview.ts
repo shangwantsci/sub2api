@@ -966,20 +966,13 @@ export default {
         invertSelection: 'Invert'
       },
       claudeCode: {
-        title: 'Claude Code Client Restriction',
-        tooltip: 'When enabled, this group only allows official Claude Code clients. Non-Claude Code requests will be rejected or fallback to the specified group.',
-        enabled: 'Claude Code Only',
-        disabled: 'Allow All Clients',
         fallbackGroup: 'Fallback Group',
-        fallbackHint: 'Non-Claude Code requests will use this group. Leave empty to reject directly.',
         noFallback: 'No Fallback (Reject)'
       },
       anthropicPolicies: {
         title: 'Claude Policy',
         contentReview: 'Risk Control Content Moderation',
         contentReviewHint: 'Only affects Risk Control content moderation: Inherit follows the Risk Control group scope, Enabled forces this group into moderation, and Disabled exempts it. Enabled groups still require Risk Control and content moderation to be turned on and use the global mode, keywords, and thresholds.',
-        systemPrompt: 'Claude OAuth System Injection',
-        systemPromptHint: 'Only affects third-party clients using the OAuth/SetupToken mimic path. Identity only injects the dynamic billing and Claude Code identity blocks without the long expansion prompt.',
         inherit: 'Inherit Global',
         enabled: 'Enabled',
         identityOnly: 'Identity Only (<200 tokens)',

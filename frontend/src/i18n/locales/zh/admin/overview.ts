@@ -963,21 +963,13 @@ export default {
         invertSelection: '反选'
       },
       claudeCode: {
-        title: 'Claude Code 客户端限制',
-        tooltip:
-          '启用后，此分组仅允许 Claude Code 官方客户端访问。非 Claude Code 请求将被拒绝或降级到指定分组。',
-        enabled: '仅限 Claude Code',
-        disabled: '允许所有客户端',
         fallbackGroup: '降级分组',
-        fallbackHint: '非 Claude Code 请求将使用此分组，留空则直接拒绝',
         noFallback: '不降级（直接拒绝）'
       },
       anthropicPolicies: {
         title: 'Claude 策略',
         contentReview: '风控中心内容审计',
         contentReviewHint: '仅作用于风控中心的内容审计：继承=按风控中心的分组范围；开启=强制纳入审计；关闭=该分组不审计。开启时仍需风控中心与内容审计已启用，并沿用全局审查模式、关键词和阈值。',
-        systemPrompt: 'Claude OAuth System 注入',
-        systemPromptHint: '仅影响第三方客户端经 OAuth/SetupToken 的伪装路径；“仅必要身份”只注入动态 billing 与 Claude Code 身份块，不注入长扩展提示词。',
         inherit: '继承全局',
         enabled: '开启',
         identityOnly: '仅必要身份（<200 tokens）',

@@ -1252,144 +1252,18 @@
           </div>
         </div>
 
-        <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
-        <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
-          <div class="mb-1.5 flex items-center gap-1">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t("admin.groups.claudeCode.title") }}
-            </label>
-            <!-- Help Tooltip -->
-            <div class="group relative inline-flex">
-              <Icon
-                name="questionCircle"
-                size="sm"
-                :stroke-width="2"
-                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
-              />
-              <div
-                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
-              >
-                <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
-                >
-                  <p class="text-xs leading-relaxed text-gray-300">
-                    {{ t("admin.groups.claudeCode.tooltip") }}
-                  </p>
-                  <div
-                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              @click="
-                createForm.claude_code_only = !createForm.claude_code_only
-              "
-              :class="[
-                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                createForm.claude_code_only
-                  ? 'bg-primary-500'
-                  : 'bg-gray-300 dark:bg-dark-600',
-              ]"
-            >
-              <span
-                :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
-                  createForm.claude_code_only
-                    ? 'translate-x-6'
-                    : 'translate-x-1',
-                ]"
-              />
-            </button>
-            <span class="text-sm text-gray-500 dark:text-gray-400">
-              {{
-                createForm.claude_code_only
-                  ? t("admin.groups.claudeCode.enabled")
-                  : t("admin.groups.claudeCode.disabled")
-              }}
-            </span>
-          </div>
-          <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
-          <div v-if="createForm.claude_code_only" class="mt-3">
-            <label class="input-label">{{
-              t("admin.groups.claudeCode.fallbackGroup")
-            }}</label>
-            <Select
-              v-model="createForm.fallback_group_id"
-              :options="fallbackGroupOptions"
-              :placeholder="t('admin.groups.claudeCode.noFallback')"
-            />
-            <p class="input-hint">
-              {{ t("admin.groups.claudeCode.fallbackHint") }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Anthropic 分组策略 -->
-        <div
+        <!-- Claude 策略（仅 anthropic 平台）：帽子、降级分组、降级流量的提示词策略、内容审计 -->
+        <GroupClaudePolicyCard
           v-if="createForm.platform === 'anthropic'"
-          class="border-t border-gray-200 pt-4 dark:border-dark-400"
-        >
-          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.anthropicPolicies.title") }}
-          </h4>
-          <div class="space-y-4">
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <label class="input-label mb-0">
-                  {{ t("admin.groups.anthropicPolicies.contentReview") }}
-                </label>
-                <p class="input-hint">
-                  {{ t("admin.groups.anthropicPolicies.contentReviewHint") }}
-                </p>
-              </div>
-              <select
-                v-model="createForm.content_review_policy"
-                class="input w-32 flex-shrink-0 text-sm"
-              >
-                <option value="inherit">
-                  {{ t("admin.groups.anthropicPolicies.inherit") }}
-                </option>
-                <option value="enabled">
-                  {{ t("admin.groups.anthropicPolicies.enabled") }}
-                </option>
-                <option value="disabled">
-                  {{ t("admin.groups.anthropicPolicies.disabled") }}
-                </option>
-              </select>
-            </div>
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <label class="input-label mb-0">
-                  {{ t("admin.groups.anthropicPolicies.systemPrompt") }}
-                </label>
-                <p class="input-hint">
-                  {{ t("admin.groups.anthropicPolicies.systemPromptHint") }}
-                </p>
-              </div>
-              <select
-                v-model="createForm.claude_oauth_system_prompt_policy"
-                class="input w-40 flex-shrink-0 text-sm"
-              >
-                <option value="inherit">
-                  {{ t("admin.groups.anthropicPolicies.inherit") }}
-                </option>
-                <option value="enabled">
-                  {{ t("admin.groups.anthropicPolicies.enabled") }}
-                </option>
-                <option value="identity_only">
-                  {{ t("admin.groups.anthropicPolicies.identityOnly") }}
-                </option>
-                <option value="disabled">
-                  {{ t("admin.groups.anthropicPolicies.disabled") }}
-                </option>
-              </select>
-            </div>
-          </div>
-        </div>
+          v-model:claude-code-only="createForm.claude_code_only"
+          v-model:fallback-group-id="createForm.fallback_group_id"
+          v-model:system-prompt-policy="createForm.claude_oauth_system_prompt_policy"
+          v-model:content-review-policy="createForm.content_review_policy"
+          :fallback-options="createFallbackCandidates"
+          :fallback-loading="claudeGroupsLoading"
+          :resolve-group-name="resolveClaudeGroupName"
+          id-prefix="create-group-policy"
+        />
 
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
@@ -2901,140 +2775,19 @@
           </div>
         </div>
 
-        <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
-        <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
-          <div class="mb-1.5 flex items-center gap-1">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t("admin.groups.claudeCode.title") }}
-            </label>
-            <!-- Help Tooltip -->
-            <div class="group relative inline-flex">
-              <Icon
-                name="questionCircle"
-                size="sm"
-                :stroke-width="2"
-                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
-              />
-              <div
-                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
-              >
-                <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
-                >
-                  <p class="text-xs leading-relaxed text-gray-300">
-                    {{ t("admin.groups.claudeCode.tooltip") }}
-                  </p>
-                  <div
-                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              @click="editForm.claude_code_only = !editForm.claude_code_only"
-              :class="[
-                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                editForm.claude_code_only
-                  ? 'bg-primary-500'
-                  : 'bg-gray-300 dark:bg-dark-600',
-              ]"
-            >
-              <span
-                :class="[
-                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
-                  editForm.claude_code_only ? 'translate-x-6' : 'translate-x-1',
-                ]"
-              />
-            </button>
-            <span class="text-sm text-gray-500 dark:text-gray-400">
-              {{
-                editForm.claude_code_only
-                  ? t("admin.groups.claudeCode.enabled")
-                  : t("admin.groups.claudeCode.disabled")
-              }}
-            </span>
-          </div>
-          <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
-          <div v-if="editForm.claude_code_only" class="mt-3">
-            <label class="input-label">{{
-              t("admin.groups.claudeCode.fallbackGroup")
-            }}</label>
-            <Select
-              v-model="editForm.fallback_group_id"
-              :options="fallbackGroupOptionsForEdit"
-              :placeholder="t('admin.groups.claudeCode.noFallback')"
-            />
-            <p class="input-hint">
-              {{ t("admin.groups.claudeCode.fallbackHint") }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Anthropic 分组策略 -->
-        <div
+        <!-- Claude 策略（仅 anthropic 平台）：帽子、降级分组、降级流量的提示词策略、内容审计 -->
+        <GroupClaudePolicyCard
           v-if="editForm.platform === 'anthropic'"
-          class="border-t border-gray-200 pt-4 dark:border-dark-400"
-        >
-          <h4 class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.anthropicPolicies.title") }}
-          </h4>
-          <div class="space-y-4">
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <label class="input-label mb-0">
-                  {{ t("admin.groups.anthropicPolicies.contentReview") }}
-                </label>
-                <p class="input-hint">
-                  {{ t("admin.groups.anthropicPolicies.contentReviewHint") }}
-                </p>
-              </div>
-              <select
-                v-model="editForm.content_review_policy"
-                class="input w-32 flex-shrink-0 text-sm"
-              >
-                <option value="inherit">
-                  {{ t("admin.groups.anthropicPolicies.inherit") }}
-                </option>
-                <option value="enabled">
-                  {{ t("admin.groups.anthropicPolicies.enabled") }}
-                </option>
-                <option value="disabled">
-                  {{ t("admin.groups.anthropicPolicies.disabled") }}
-                </option>
-              </select>
-            </div>
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <label class="input-label mb-0">
-                  {{ t("admin.groups.anthropicPolicies.systemPrompt") }}
-                </label>
-                <p class="input-hint">
-                  {{ t("admin.groups.anthropicPolicies.systemPromptHint") }}
-                </p>
-              </div>
-              <select
-                v-model="editForm.claude_oauth_system_prompt_policy"
-                class="input w-40 flex-shrink-0 text-sm"
-              >
-                <option value="inherit">
-                  {{ t("admin.groups.anthropicPolicies.inherit") }}
-                </option>
-                <option value="enabled">
-                  {{ t("admin.groups.anthropicPolicies.enabled") }}
-                </option>
-                <option value="identity_only">
-                  {{ t("admin.groups.anthropicPolicies.identityOnly") }}
-                </option>
-                <option value="disabled">
-                  {{ t("admin.groups.anthropicPolicies.disabled") }}
-                </option>
-              </select>
-            </div>
-          </div>
-        </div>
+          v-model:claude-code-only="editForm.claude_code_only"
+          v-model:fallback-group-id="editForm.fallback_group_id"
+          v-model:system-prompt-policy="editForm.claude_oauth_system_prompt_policy"
+          v-model:content-review-policy="editForm.content_review_policy"
+          :fallback-options="editFallbackCandidates"
+          :fallback-loading="claudeGroupsLoading"
+          :resolve-group-name="resolveClaudeGroupName"
+          :referrers="editFallbackReferrers"
+          id-prefix="edit-group-policy"
+        />
 
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
@@ -3865,6 +3618,7 @@ import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupHatBadge from "@/components/admin/group/GroupHatBadge.vue";
+import GroupClaudePolicyCard from "@/components/admin/group/GroupClaudePolicyCard.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
@@ -4104,41 +3858,66 @@ const subscriptionTypeOptions = computed(() => [
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
 ]);
 
-// 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
-const fallbackGroupOptions = computed(() => {
-  const options: { value: number | null; label: string }[] = [
-    { value: null, label: t("admin.groups.claudeCode.noFallback") },
-  ];
-  const eligibleGroups = groups.value.filter(
-    (g) =>
-      g.platform === "anthropic" &&
-      !g.claude_code_only &&
-      g.status === "active",
-  );
-  eligibleGroups.forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
-  return options;
+// Claude 分组的全量列表：降级候选、残留 / 悬空降级分组的名字、referrers 都用它。
+// groups 只是分页后的当前页，不能拿它做候选。
+const claudeGroupsAll = ref<AdminGroup[]>([]);
+const claudeGroupsLoading = ref(false);
+let claudeGroupsLoadSeq = 0;
+
+// 永远不抛：失败时回落到当前页里的 anthropic 分组（候选可能不全），弹窗仍可用，也不弹 toast。
+// 多次并发调用时只有最后一次的结果生效，loading 在最后一次结束时才关掉。
+const loadClaudeGroupsAll = async () => {
+  const seq = ++claudeGroupsLoadSeq;
+  claudeGroupsLoading.value = true;
+  try {
+    const all = await adminAPI.groups.getAll("anthropic");
+    if (seq === claudeGroupsLoadSeq) {
+      claudeGroupsAll.value = all;
+    }
+  } catch (error) {
+    console.error("Failed to load Claude groups for the fallback picker:", error);
+    if (seq === claudeGroupsLoadSeq) {
+      claudeGroupsAll.value = groups.value.filter(
+        (g) => g.platform === "anthropic",
+      );
+    }
+  } finally {
+    if (seq === claudeGroupsLoadSeq) {
+      claudeGroupsLoading.value = false;
+    }
+  }
+};
+
+// 降级候选只写一份逻辑：anthropic、active、未开启 claude_code_only，排除指定分组（编辑时排除自身）
+const toFallbackCandidates = (excludeId: number | null) =>
+  claudeGroupsAll.value
+    .filter(
+      (g) =>
+        g.platform === "anthropic" &&
+        g.status === "active" &&
+        !g.claude_code_only &&
+        g.id !== excludeId,
+    )
+    .map((g) => ({ id: g.id, name: g.name }));
+const createFallbackCandidates = computed(() => toFallbackCandidates(null));
+const editFallbackCandidates = computed(() =>
+  toFallbackCandidates(editingGroup.value?.id ?? null),
+);
+
+// 编辑时：把本分组当作降级目标的其它分组（本分组改成「仅限 Claude Code」后，它们的降级会失效）。
+// 只算自己开着 claude_code_only 的：后端只在 claude_code_only 为真时读降级分组，其余的是残留值，不受影响。
+const editFallbackReferrers = computed(() => {
+  const currentId = editingGroup.value?.id;
+  if (currentId === undefined) return [];
+  return claudeGroupsAll.value
+    .filter((g) => g.claude_code_only && g.fallback_group_id === currentId)
+    .map((g) => ({ id: g.id, name: g.name }));
 });
 
-// 降级分组选项（编辑时）- 排除自身
-const fallbackGroupOptionsForEdit = computed(() => {
-  const options: { value: number | null; label: string }[] = [
-    { value: null, label: t("admin.groups.claudeCode.noFallback") },
-  ];
-  const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
-    (g) =>
-      g.platform === "anthropic" &&
-      !g.claude_code_only &&
-      g.status === "active" &&
-      g.id !== currentId,
-  );
-  eligibleGroups.forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
-  return options;
-});
+// 降级分组的显示名：先查全量列表，再查当前页（已停用的分组不在全量列表里），都查不到由卡片显示 #id
+const resolveClaudeGroupName = (id: number) =>
+  claudeGroupsAll.value.find((g) => g.id === id)?.name ??
+  resolveGroupNameById(id);
 
 // 无效请求兜底分组选项（创建时）- 仅包含 anthropic 平台、非订阅且未配置兜底的分组
 const invalidRequestFallbackOptions = computed(() => {
@@ -5033,6 +4812,8 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 const openCreateModal = () => {
   showCreateModal.value = true;
   loadModelsListCandidates("create", 0, createForm.platform);
+  // 不 await：弹窗立刻打开，卡片靠 fallbackLoading 在加载期间禁用降级池
+  loadClaudeGroupsAll();
 };
 
 const closeCreateModal = () => {
@@ -5278,10 +5059,12 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
   editForm.rpm_limit = group.rpm_limit ?? 0;
   resetModelsListState(editModelsListState, group.models_list_config);
-  // 加载模型路由规则（异步加载账号名称）
-  editModelRoutingRules.value = await convertApiFormatToRoutingRules(
-    group.model_routing,
-  );
+  // 加载模型路由规则（异步加载账号名称）；Claude 分组同时加载降级候选，弹窗打开时候选已就绪
+  const [routingRules] = await Promise.all([
+    convertApiFormatToRoutingRules(group.model_routing),
+    group.platform === "anthropic" ? loadClaudeGroupsAll() : undefined,
+  ]);
+  editModelRoutingRules.value = routingRules;
   loadModelsListCandidates("edit", group.id, group.platform);
   showEditModal.value = true;
 };
@@ -5512,6 +5295,9 @@ watch(
       createForm.anthropic_api_key_pool_weight = 0;
       createForm.content_review_policy = "inherit";
       createForm.claude_oauth_system_prompt_policy = "inherit";
+      // 非 anthropic 平台不应带着 Claude 专属字段提交，切平台时重置
+      createForm.claude_code_only = false;
+      createForm.fallback_group_id = null;
     }
     resetDisabledBatchImagePricing(createForm);
     resetModelsListState(createModelsListState);
