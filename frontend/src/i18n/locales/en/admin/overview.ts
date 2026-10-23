@@ -985,7 +985,7 @@ export default {
           purpose:
             'Only requests recognized as Claude Code are let through; everything else is rejected. Fits a Claude Code dedicated plan backed by OAuth or Setup Token accounts.',
           detail:
-            'Recognition relies on the User-Agent (claude-cli/version), three required headers (X-App, anthropic-beta and anthropic-version, only checked for being non-empty), a billing block in system or a text block similar to an official Claude Code prompt template, and a valid metadata.user_id. It stops ordinary third-party clients but not someone who knows the rules and forges them on purpose; a forged request that gets through is no longer protected by mimicry and reaches the account as is. A request that is not Claude Code gets 503 on /v1/messages and 403 on the chat/completions and responses endpoints. Account advice: keep the accounts of a dedicated line out of open groups.'
+            'Recognition relies on the User-Agent (claude-cli/version), three required headers (X-App, anthropic-beta and anthropic-version, only checked for being non-empty), a billing block in system or a text block similar to an official Claude Code prompt template, and a valid metadata.user_id; count_tokens does not look at system, and a haiku probe with max_tokens=1 is judged by the User-Agent alone, which is the easiest one to get around. It stops ordinary third-party clients but not someone who knows the rules and forges them on purpose; a forged request that gets through is no longer protected by mimicry and reaches the account as is. A request that is not Claude Code gets 503 on /v1/messages and 403 on the chat/completions and responses endpoints. Account advice: keep the accounts of a dedicated line out of open groups.'
         },
         cc_fallback: {
           name: 'Claude Code first, others fall back',
@@ -1001,7 +1001,7 @@ export default {
           purpose:
             'Any client can use it; whether the system prompt of non-Claude Code traffic is rewritten is decided by the global switch.',
           detail:
-            'Decided by the global switch under Settings, Gateway, Claude OAuth System injection (on by default, which then equals full mimicry but changes with the global switch). The prompt policy and mimicry only apply to OAuth or Setup Token accounts and to requests that did not pass Claude Code recognition; in a group with only API Key accounts the four open hats make no difference. In an open group any client can use the accounts of the group.'
+            'Decided by the global switch under Settings, Gateway, Claude OAuth System Blocks (on by default, which then equals full mimicry but changes with the global switch). The prompt policy and mimicry only apply to OAuth or Setup Token accounts and to requests that did not pass Claude Code recognition; in a group with only API Key accounts the four open hats make no difference.'
         },
         open_full: {
           name: 'Open: full mimicry',
@@ -1037,14 +1037,14 @@ export default {
         willWriteLine: 'claude_code_only={cc}, fallback group={fallback}, injection policy={policy}',
         valueNone: 'none',
         fallbackPickHint: 'Takes effect once a fallback group is chosen.',
-        fallbackNoCandidates: 'No fallback group available: you need another Claude group that is not Claude Code only.',
+        fallbackNoCandidates: 'No fallback group available: you need another enabled Claude group that wears no Claude Code hat (only or fallback pool).',
         fallbackPolicyLabel: 'Prompt policy for fallback traffic',
         fallbackPolicyHint: 'Fallback requests use the prompt policy of this group (the group of the key), not the settings of the fallback group.',
-        staleFallbackNotice: 'This group holds an unused fallback group "{name}": it is not used while Claude Code only is off.',
+        staleFallbackNotice: 'This group holds an unused fallback group "{name}": it is not used while this group wears no Claude Code hat. Saving still validates it and fails if it was deleted or wears a Claude Code hat; use Clear.',
         clearStaleFallback: 'Clear',
-        danglingFallbackLabel: 'Group #{id} (disabled or deleted)',
-        danglingFallbackNotice: 'The current fallback group is disabled or deleted and is not in the list. Saving fails validation if it was deleted. Pick another group or choose no fallback.',
-        referrersNotice: 'Groups {names} use this group as their fallback; once this group is Claude Code only their fallback stops working.',
+        danglingFallbackLabel: 'Group #{id} (not in the list)',
+        danglingFallbackNotice: 'The current fallback group is not in the list: it may be disabled, deleted, or already wear a Claude Code hat (only or fallback pool). Saving fails validation if it was deleted or wears a Claude Code hat. Pick another group or choose no fallback.',
+        referrersNotice: 'Groups {names} use this group as their fallback. Once this group wears a Claude Code hat, their fallback only keeps working if this group has a fallback group of its own; otherwise it stops working.',
         exposureNotice: 'Open hat: any client can use the accounts of this group.',
         contentReviewNote: 'Independent of the hat'
       },

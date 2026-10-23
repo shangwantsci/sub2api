@@ -982,7 +982,7 @@ export default {
           purpose:
             '只放行被识别为 Claude Code 的请求，其余一律拒绝。适合只放 OAuth/Setup 账号的「Claude Code 专用」套餐。',
           detail:
-            '识别靠 User-Agent（claude-cli/版本号）、三个必需请求头（X-App、anthropic-beta、anthropic-version，只检查是否非空）、system 里的 billing 块或与 Claude Code 官方提示词模板相似的文本块，以及合法的 metadata.user_id。能挡住普通第三方客户端，但挡不住知道规则、有意伪造的人；被放行的伪造请求不再受伪装保护，会原样进入账号。非 Claude Code 请求在 /v1/messages 上返回 503，在 chat/completions 与 responses 入口一律返回 403。账号侧建议：专线分组的账号不要同时放进开放分组。'
+            '识别靠 User-Agent（claude-cli/版本号）、三个必需请求头（X-App、anthropic-beta、anthropic-version，只检查是否非空）、system 里的 billing 块或与 Claude Code 官方提示词模板相似的文本块，以及合法的 metadata.user_id；其中 count_tokens 不看 system，max_tokens=1 的 haiku 探测请求只看 User-Agent，是最容易被绕过的一条。能挡住普通第三方客户端，但挡不住知道规则、有意伪造的人；被放行的伪造请求不再受伪装保护，会原样进入账号。非 Claude Code 请求在 /v1/messages 上返回 503，在 chat/completions 与 responses 入口一律返回 403。账号侧建议：专线分组的账号不要同时放进开放分组。'
         },
         cc_fallback: {
           name: 'Claude Code 优先 + 降级池',
@@ -998,7 +998,7 @@ export default {
           purpose:
             '任何客户端都能用；非 Claude Code 流量是否重写 system 由全局开关决定。',
           detail:
-            '由「设置 → 网关服务 → Claude OAuth System 注入」的全局开关决定（缺省开启，此时等同于完整伪装，但会随全局开关变化）。提示词策略与伪装只对 OAuth/Setup 账号、且未通过 Claude Code 识别的请求生效；分组里只有 API Key 账号时，四种开放帽没有区别。开放类分组任何客户端都能使用本组账号。'
+            '由「设置 → 网关服务 → Claude OAuth System 注入」的全局开关决定（缺省开启，此时等同于完整伪装，但会随全局开关变化）。提示词策略与伪装只对 OAuth/Setup 账号、且未通过 Claude Code 识别的请求生效；分组里只有 API Key 账号时，四种开放帽没有区别。'
         },
         open_full: {
           name: '开放 · 完整伪装',
@@ -1034,14 +1034,14 @@ export default {
         willWriteLine: 'claude_code_only={cc}，降级分组={fallback}，注入策略={policy}',
         valueNone: '无',
         fallbackPickHint: '选择降级分组后才会生效。',
-        fallbackNoCandidates: '没有可用的降级分组：需要另一个未开启「仅限 Claude Code」的 Claude 分组。',
+        fallbackNoCandidates: '没有可用的降级分组：需要另一个已启用、且没戴 Claude Code 帽子（专线或降级池）的 Claude 分组。',
         fallbackPolicyLabel: '降级流量的提示词策略',
         fallbackPolicyHint: '降级请求的提示词注入策略取本分组（Key 所在分组）的设置，降级分组自己的设置不起作用。',
-        staleFallbackNotice: '本分组存有未生效的降级分组「{name}」：仅限 Claude Code 关闭时不会用到它。',
+        staleFallbackNotice: '本分组存有未生效的降级分组「{name}」：本分组没戴 Claude Code 帽子时不会用到它。保存时后端仍会校验它，若它已被删除或已戴 Claude Code 帽子，保存会失败，可点「清除」。',
         clearStaleFallback: '清除',
-        danglingFallbackLabel: '分组 #{id}（已停用或已删除）',
-        danglingFallbackNotice: '当前降级分组已停用或已删除，不在可选列表里。已删除的分组保存时会校验失败。建议改选其他分组，或选择「不降级」。',
-        referrersNotice: '分组 {names} 把本分组当作降级分组；改为「仅限 Claude Code」后，它们的降级会失效。',
+        danglingFallbackLabel: '分组 #{id}（不在可选列表里）',
+        danglingFallbackNotice: '当前降级分组不在可选列表里：它可能已停用、已删除，或已戴上 Claude Code 帽子（专线或降级池）。已删除的、或已戴 Claude Code 帽子的分组，保存时后端会校验失败。建议改选其他分组，或选择「不降级」。',
+        referrersNotice: '分组 {names} 把本分组当作降级分组。本分组戴上 Claude Code 帽子后，只有本分组自己也配了降级分组，它们的降级才继续有效，否则会失效。',
         exposureNotice: '开放类：任何客户端都能使用本分组的账号。',
         contentReviewNote: '与帽子无关'
       },
