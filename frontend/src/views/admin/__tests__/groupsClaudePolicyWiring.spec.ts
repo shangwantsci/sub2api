@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   createGroup: vi.fn(),
   updateGroup: vi.fn(),
   listAccounts: vi.fn(),
+  getAccountById: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   isCurrentStep: vi.fn(),
@@ -42,7 +43,7 @@ vi.mock('@/api/admin', () => ({
       delete: vi.fn(),
       updateSortOrder: vi.fn()
     },
-    accounts: { list: mocks.listAccounts }
+    accounts: { list: mocks.listAccounts, getById: mocks.getAccountById }
   }
 }))
 
@@ -255,6 +256,7 @@ describe('GroupsView 接线：Claude 策略卡', () => {
     mocks.getUsageSummary.mockResolvedValue([])
     mocks.getCapacitySummary.mockResolvedValue([])
     mocks.listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+    mocks.getAccountById.mockImplementation(async (id: number) => ({ id, name: `acct-${id}` }))
     mocks.createGroup.mockResolvedValue({})
     mocks.updateGroup.mockResolvedValue({})
     mocks.isCurrentStep.mockReturnValue(false)
@@ -443,7 +445,7 @@ describe('GroupsView 接线：Claude 策略卡', () => {
       expect(optionTexts(fallbackSelect(w))).toContain('Claude 主池')
     })
 
-    it('(10) getAll 失败：回落到当前页里的 Claude 分组，弹窗仍可用，不弹 toast，只打 console.error', async () => {
+    it('(10) getAll 失败：回落到当前页里的 Claude 分组，弹窗仍可用，弹一条「加载分组失败」并打 console.error', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       mocks.getAllGroups.mockRejectedValue(new Error('boom'))
       mocks.listGroups.mockResolvedValue(
@@ -456,7 +458,9 @@ describe('GroupsView 接线：Claude 策略卡', () => {
       const w = await mountView()
       await openCreate(w)
 
-      expect(mocks.showError).not.toHaveBeenCalled()
+      // 候选可能不全，所以明确告诉用户一声（只一条）；弹窗照常可用
+      expect(mocks.showError).toHaveBeenCalledTimes(1)
+      expect(mocks.showError).toHaveBeenCalledWith('admin.groups.failedToLoad')
       expect(consoleError).toHaveBeenCalled()
       expect(consoleError.mock.calls.some(([message]) => String(message).includes('fallback picker'))).toBe(true)
       expect(optionTexts(fallbackSelect(w))).toEqual(['当前页的 Claude 分组'])
@@ -775,7 +779,7 @@ describe('GroupsView 接线：Claude 策略卡', () => {
       expect(optionTexts(fallbackSelect(w))).toEqual(['正在编辑的分组', '别的 Claude 分组'])
     })
 
-    it('(10b) 编辑时 getAll 失败：弹窗仍然打开，候选回落到当前页，不弹 toast', async () => {
+    it('(10b) 编辑时 getAll 失败：弹窗仍然打开，候选回落到当前页，弹一条「加载分组失败」', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
       const current = makeGroup({ id: 40, name: '正在编辑的分组', claude_code_only: true, fallback_group_id: 41 })
       mocks.listGroups.mockResolvedValue(listPage([current, makeGroup({ id: 41, name: '当前页的降级分组' })]))
@@ -783,7 +787,8 @@ describe('GroupsView 接线：Claude 策略卡', () => {
       const w = await mountView()
       await openEdit(w, 40)
 
-      expect(mocks.showError).not.toHaveBeenCalled()
+      expect(mocks.showError).toHaveBeenCalledTimes(1)
+      expect(mocks.showError).toHaveBeenCalledWith('admin.groups.failedToLoad')
       expect(w.find('form#edit-group-form').exists()).toBe(true)
       expect(checkedHats(w)).toEqual(['cc_fallback'])
       expect(optionTexts(fallbackSelect(w))).toEqual(['admin.groups.claudeCode.noFallback', '当前页的降级分组'])
@@ -806,6 +811,55 @@ describe('GroupsView 接线：Claude 策略卡', () => {
       expect(selectValue(fallbackSelect(w))).toBe('')
       expect(selectValue(testId(w, 'content-review-select'))).toBe('enabled')
       expect(exists(w, 'hat-fallback-policy-select')).toBe(false)
+    })
+
+    it('(14) A 的路由规则要慢慢查账号，期间点了 B 的编辑：弹窗以 B 打开，A 迟到的结果不能把 A 的路由规则写进 B 的表单', async () => {
+      const A = makeGroup({ id: 31, name: 'A 有路由', model_routing: { 'claude-sonnet-*': [801] }, model_routing_enabled: true })
+      const B = makeGroup({ id: 32, name: 'B 无路由' })
+      mocks.listGroups.mockResolvedValue(listPage([A, B]))
+      mocks.getAllGroups.mockResolvedValue([A, B])
+      const slowAccount = deferred<{ id: number; name: string }>()
+      mocks.getAccountById.mockImplementationOnce(() => slowAccount.promise)
+      const w = await mountView()
+
+      await openEdit(w, 31) // A：卡在查账号名称上，弹窗还没打开
+      expect(w.find('form#edit-group-form').exists()).toBe(false)
+      await openEdit(w, 32) // B：没有路由规则，立刻打开
+      expect(w.find('form#edit-group-form').exists()).toBe(true)
+      expect((w.get('[data-tour="edit-group-form-name"]').element as HTMLInputElement).value).toBe('B 无路由')
+
+      slowAccount.resolve({ id: 801, name: 'acct-801' }) // A 的账号查询姗姗来迟
+      await flushPromises()
+      await submit(w)
+
+      const [id, payload] = updatedCall()
+      expect(id).toBe(32)
+      expect(payload.name).toBe('B 无路由')
+      // 没有过期保护时，这里会变成 A 的 { 'claude-sonnet-*': [801] }
+      expect(payload.model_routing).toBe(null)
+    })
+
+    it('(15) 候选加载很慢：编辑弹窗不等它，立刻打开且卡片显示加载中，不误报悬空；加载完成后恢复', async () => {
+      const group = makeGroup({ id: 20, name: 'CC 优先分组', claude_code_only: true, fallback_group_id: 5, claude_oauth_system_prompt_policy: 'enabled' })
+      mocks.listGroups.mockResolvedValue(listPage([group]))
+      const pending = deferred<AdminGroup[]>()
+      mocks.getAllGroups.mockReturnValue(pending.promise)
+      const w = await mountView()
+      await openEdit(w, 20)
+
+      // 弹窗没有等候选：已经打开，帽子由字段反推
+      expect(w.find('form#edit-group-form').exists()).toBe(true)
+      expect(checkedHats(w)).toEqual(['cc_fallback'])
+      expect(exists(w, 'hat-fallback-loading')).toBe(true)
+      expect(fallbackSelect(w).attributes('disabled')).toBeDefined()
+      // 候选还没到，不能把当前降级分组当成悬空
+      expect(exists(w, 'hat-dangling-fallback')).toBe(false)
+
+      pending.resolve([makeGroup({ id: 5, name: '降级 A' }), group])
+      await flushPromises()
+      expect(exists(w, 'hat-fallback-loading')).toBe(false)
+      expect(selectValue(fallbackSelect(w))).toBe('5')
+      expect(exists(w, 'hat-dangling-fallback')).toBe(false)
     })
   })
 })

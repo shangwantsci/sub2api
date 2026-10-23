@@ -3864,7 +3864,7 @@ const claudeGroupsAll = ref<AdminGroup[]>([]);
 const claudeGroupsLoading = ref(false);
 let claudeGroupsLoadSeq = 0;
 
-// 永远不抛：失败时回落到当前页里的 anthropic 分组（候选可能不全），弹窗仍可用，也不弹 toast。
+// 永远不抛：失败时回落到当前页里的 anthropic 分组（候选可能不全，所以弹一条「加载分组失败」），弹窗仍可用。
 // 多次并发调用时只有最后一次的结果生效，loading 在最后一次结束时才关掉。
 const loadClaudeGroupsAll = async () => {
   const seq = ++claudeGroupsLoadSeq;
@@ -3880,6 +3880,7 @@ const loadClaudeGroupsAll = async () => {
       claudeGroupsAll.value = groups.value.filter(
         (g) => g.platform === "anthropic",
       );
+      appStore.showError(t("admin.groups.failedToLoad"));
     }
   } finally {
     if (seq === claudeGroupsLoadSeq) {
@@ -4990,7 +4991,11 @@ const handleCreateGroup = async () => {
   }
 };
 
+// 每次点「编辑」递增：加载路由规则期间又点了别的分组，先发的那次不能再往表单里写东西
+let editLoadSeq = 0;
+
 const handleEdit = async (group: AdminGroup) => {
+  const seq = ++editLoadSeq;
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -5059,11 +5064,13 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
   editForm.rpm_limit = group.rpm_limit ?? 0;
   resetModelsListState(editModelsListState, group.models_list_config);
-  // 加载模型路由规则（异步加载账号名称）；Claude 分组同时加载降级候选，弹窗打开时候选已就绪
-  const [routingRules] = await Promise.all([
-    convertApiFormatToRoutingRules(group.model_routing),
-    group.platform === "anthropic" ? loadClaudeGroupsAll() : undefined,
-  ]);
+  // Claude 分组的降级候选不 await：弹窗不等它，卡片靠 fallbackLoading 在加载期间禁用降级池，
+  // 接口慢或挂起时也不会卡住编辑入口
+  if (group.platform === "anthropic") loadClaudeGroupsAll();
+  // 加载模型路由规则（异步加载账号名称）
+  const routingRules = await convertApiFormatToRoutingRules(group.model_routing);
+  // 等待期间又点了别的分组的「编辑」：这次调用已过期，不能把旧分组的路由规则写进新分组的表单
+  if (seq !== editLoadSeq) return;
   editModelRoutingRules.value = routingRules;
   loadModelsListCandidates("edit", group.id, group.platform);
   showEditModal.value = true;
