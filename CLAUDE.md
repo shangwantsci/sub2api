@@ -46,5 +46,6 @@
 - `backend/internal/service/`：业务逻辑。选号 `gateway_scheduling.go`，降速 `account_throttle.go`，容量档位模板 `capacity_presets.go`，选号快照登记表 `scheduler_projection_keys.go`，供货商 `provider_*.go`，养号 `account_nurturing_service.go`。
 - `backend/internal/repository/`：数据访问与 Redis 缓存（调度快照在 `scheduler_cache.go`）。
 - `backend/internal/server/`：路由与中间件。`backend/migrations/`：SQL 迁移。`backend/ent/`：Ent schema 与生成代码。
+- `frontend/src/components/admin/group/`：分组「帽子」。**帽子的唯一定义在 `groupHats.ts`**（三个分组字段 `claude_code_only` / `fallback_group_id` / `claude_oauth_system_prompt_policy` 的完整划分，标签由字段反推，库里不存帽子名）；新增分组策略字段，先更新帽子定义，再改 `GroupClaudePolicyCard.vue`。
 - `frontend/src/components/account/`：账号弹窗与容量卡（`capacityBuilder.ts`、`AccountCapacityFields.vue`）；`frontend/src/composables/`：`useAccountCapacity.ts`、`useCapacityPresets.ts`；`frontend/src/views/admin/settings/`：设置页的独立卡片；`frontend/src/i18n/locales/{zh,en}/`：词条（zh 与 en 必须同步，文案里不要出现裸的 `{`、`@`、`|`）。
 - `tools/cc-calibrate/`：对真实 Claude Code 客户端抓包标定请求形态；`tools/account-metrics/`：账号寿命与并发基线查询。

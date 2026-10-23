@@ -27,7 +27,14 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/poolHealth.spec.ts \
 	src/api/__tests__/admin.providers.spec.ts \
 	src/i18n/__tests__/providerI18nKeys.spec.ts \
-	src/views/admin/__tests__/ProvidersView.disable.spec.ts
+	src/views/admin/__tests__/ProvidersView.disable.spec.ts \
+	src/components/admin/group/__tests__/groupHats.spec.ts \
+	src/components/admin/group/__tests__/GroupClaudePolicyCard.spec.ts \
+	src/components/admin/group/__tests__/GroupHatBadge.spec.ts \
+	src/views/admin/__tests__/groupsAnthropicPolicies.spec.ts \
+	src/views/admin/__tests__/groupsClaudePolicyWiring.spec.ts \
+	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
+	src/i18n/__tests__/groupHatsI18nKeys.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

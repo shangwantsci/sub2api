@@ -36,6 +36,16 @@
    - 冷却（`backend/internal/service/ratelimit_service.go` · `HandleUpstreamError`）：429 → 解析 5h/7d 窗口重置时间写 `rate_limit_reset_at`（该时间前账号不可调度；Fable 的 7d 窗口只记模型级限流）；没有重置时间头的 429 → 固定 1 分钟运行时冷却（设置 `rate_limit_429_cooldown_settings` 可关）。529 → 写 `overload_until`，默认冷却 10 分钟（设置 `overload_cooldown_settings`）。401：`type=oauth` 的账号清 token 缓存并临时不可调度 `rate_limit.oauth_401_cooldown_minutes`（默认 10 分钟），没有 refresh_token 则直接标 error；其它类型（setup-token、API Key）的 401 直接标 error。冷却期内账号会被第 5 步的 ②③ 过滤掉。
 10. **成功收尾**（`Messages`）。RPM 计数 +1（`IncrementAccountRPM`，仅 Claude OAuth/SetupToken 且配了 `base_rpm`；读-加之间允许短暂超额）→ 写/续粘性绑定（`BindStickySession`；首次，或选中的就是原绑定账号时才写，原绑定账号只是被临时跳过时不覆盖）→ 把用量交给有界 worker 池记账（`RecordUsage`，不阻塞响应）。
 
+### 客户端准入（分组开了 `claude_code_only`）：怎么判定、有多强、拒绝时什么样
+
+第 5 步前置里的 `checkClaudeCodeRestriction` 是它的执行点。管理端界面上，这个开关、降级分组与 system 注入策略合在分组的「帽子」里（`frontend/src/components/admin/group/groupHats.ts`），帽子只是把三个字段成套写好，**不改后端行为**；各帽子的字段映射见 `docs/FEATURES.md` 第 5 节「分组帽子」。
+
+- **判定**（`backend/internal/handler/gateway_helper.go` · `SetClaudeCodeClientContext` → `backend/internal/service/claude_code_validator.go` · `ClaudeCodeValidator.Validate`；鉴权之后、选号之前给请求打「是否 Claude Code」标记，只在 `GatewayHandler.Messages` 与 `GatewayHandler.CountTokens` 两个入口执行）。User-Agent 匹配 `claude-cli/数字.数字.数字`（忽略大小写，只看开头）是前提，之后分情况：非 `messages` 路径到此即为真；`max_tokens=1` 且模型是 haiku 的探测请求到此即为真；count_tokens 只再查三个头与 `metadata.user_id`，不查 system；普通 `/v1/messages` 还要同时满足 ① `system` 是数组，且其中有计费块（以 `x-anthropic-billing-header` 开头并含 `cc_entrypoint=`）或与 6 条官方提示词模板之一的 Dice 相似度（按字符二元组算的相似度）≥ 0.5 的文本块，② `X-App`、`anthropic-beta`、`anthropic-version` 三个头都非空（只查非空，不查内容），③ `metadata.user_id` 能被 `ParseMetadataUserID` 解析，且请求若带了 `X-Claude-Code-Session-Id` 头，必须与 user_id 里的 session 一致。
+- **强度**：这是「长得像」的启发式检查，不是身份证明，服务端没有任何可验证的凭据；知道规则的人几行代码就能伪造（读代码并用桩跑校验函数得出，没有对真实服务发过伪造请求）；最便宜的绕法是探测豁免（UA + haiku + `max_tokens=1`，只看 UA）。**被放行的伪造请求会被当成真的 Claude Code**：`shouldMimicClaudeCode` 为假，不做 system 重写、元数据改写、工具改名等伪装，原样进 OAuth 账号。所以它能挡住普通第三方客户端，挡不住有意伪造；账号侧建议：专线分组的账号不要同时放进开放分组（账号本身跨分组共享）。
+- **拒绝时的表现**（读代码，未发请求验证）：客户端不是 Claude Code 且分组开了 `claude_code_only` → `GatewayService.resolveGatewayGroup` 沿降级分组链往下找（链上有环会报错），遇到第一个没开 `claude_code_only` 的分组就改用它的账号池；没有降级分组 → `ErrClaudeCodeOnly`，handler 没有单独映射它，落进「选不到账号」的通用分支（`backend/internal/handler/no_account_error.go` · `classifyNoAccountError`），`/v1/messages` 与 count_tokens 都是 503 `Service temporarily unavailable`（所请求的模型在该分组里没有任何账号支持时，是 404 `model_not_found`）。`/v1/chat/completions` 与 `/v1/responses` 入口对 `claude_code_only` 分组**一律 403**：`gateway_handler_chat_completions.go`、`gateway_handler_responses.go` 直接判分组开关，不管有没有降级分组、也不管客户端是谁。
+- **降级只换账号池**：选号用降级分组的账号，但 system 注入策略（读请求上下文里的分组，写入点是 `backend/internal/server/middleware/api_key_auth.go`，即 Key 所在分组）、计费倍率与 RPM 仍取 Key 所在分组；降级分组自己配的注入策略对这类流量不起作用，所以界面把「降级流量的提示词策略」放在本分组的卡上。
+- **版本窗**（设置 `min_claude_code_version` / `max_claude_code_version`，空 = 不查；`GatewayHandler.checkClaudeCodeVersion`）与分组无关：对**所有**被识别为 Claude Code 的 `/v1/messages` 请求生效（只在 `GatewayHandler.Messages` 里查，count_tokens 不查），版本不在窗内、或取不到版本，返回 400。
+
 ## 2. 容量模型（统一后的唯一模型）
 
 容量 = 一个账号「同时能扛几个请求、每分钟能发多少、同时开几个会话、5 小时能花多少钱」。数值只存在账号自己的字段里，没有第二份。0 的含义见表（并发 / RPM / 会话数 / 5h 额度的 0 都是不限）。
@@ -145,7 +155,8 @@
 | 前端三个弹窗共用一个容量漏斗：容量键字面量只出现在 `capacityBuilder.ts`；旧实现残留（persona、启用开关、魔法默认 RPM）不许回来；新建弹窗 `buildAnthropicOAuthExtra(` 恰好 3 处调用 | `frontend/src/components/account/__tests__/accountCapacity.guard.spec.ts` |
 | 各提交路径的 payload（新建 OAuth / Cookie / 批量导入、编辑、批量编辑）与 builder 纯函数 | `frontend/src/components/account/__tests__/CreateAccountModal.capacity.spec.ts`、`frontend/src/components/account/__tests__/EditAccountModal.capacity.spec.ts`、`frontend/src/components/account/__tests__/BulkEditAccountModal.capacity.spec.ts`、`frontend/src/components/account/__tests__/capacityBuilder.spec.ts` |
 | i18n 键覆盖：`t('…')` 引用的键在 zh / en 都存在、zh / en 子树一一对应、已删除词条不回来、全部文案可编译、顶层键不撞车 | `frontend/src/i18n/__tests__/capacityI18nKeys.spec.ts`、`frontend/src/i18n/__tests__/providerI18nKeys.spec.ts`、`frontend/src/i18n/__tests__/adminLargeFilesI18nKeys.spec.ts`、`frontend/src/i18n/__tests__/messageCompilation.spec.ts`、`frontend/src/i18n/__tests__/localesNoKeyCollision.spec.ts` |
-| 前端关键清单：`Makefile` 的 `FRONTEND_CRITICAL_VITEST`（27 个文件：登录回调、支付、系统设置、容量与三个弹窗、供货商、公开号池健康页等），`make test-frontend-critical` 只跑它 | `Makefile` |
+| 分组帽子：6 顶帽子是三个字段的完整划分（16 种字段组合各落恰好一顶）、`applyHat` 写 null 不写 0、Claude Code 帽保留已存的注入策略而开放帽覆盖它；卡片交互（点击不提交表单、降级池没选降级分组不写字段、残留与悬空降级分组只提示不改写）；创建 / 编辑请求体的接线（四个 v-model 各接各的字段、平台切走时重置、候选取全量、referrers、加载失败回落）；词条完整、无孤儿、已删除的词条不回来。接线测试挂载真实的 `GroupsView` 与真实的卡片，断言 `adminAPI` 收到的 payload | `frontend/src/components/admin/group/__tests__/groupHats.spec.ts`、`frontend/src/components/admin/group/__tests__/GroupClaudePolicyCard.spec.ts`、`frontend/src/components/admin/group/__tests__/GroupHatBadge.spec.ts`、`frontend/src/views/admin/__tests__/groupsAnthropicPolicies.spec.ts`、`frontend/src/views/admin/__tests__/groupsClaudePolicyWiring.spec.ts`、`frontend/src/i18n/__tests__/groupHatsI18nKeys.spec.ts` |
+| 前端关键清单：`Makefile` 的 `FRONTEND_CRITICAL_VITEST`（34 个文件：登录回调、支付、系统设置、容量与三个弹窗、供货商、公开号池健康页、分组帽子等），`make test-frontend-critical` 只跑它 | `Makefile` |
 
 怎么跑：
 - 后端：`cd backend && go test -tags unit ./... -count=1`（`service` 包必须带 `-tags unit`，否则编译不过，是上游既有问题）；静态检查 `go vet -tags unit ./...`。
