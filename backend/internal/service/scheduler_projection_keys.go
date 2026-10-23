@@ -48,6 +48,29 @@ var schedulerProjectedExtraKeys = []string{
 	"passive_usage_7d_oi_reset",
 	"passive_usage_sampled_at",
 
+	// API Key / Bedrock 账号自设额度（总 / 日 / 周）：Account.IsSchedulable → IsQuotaExceeded 在选号阶段读取，
+	// 固定重置模式还要读重置时刻、星期与时区。键缺失时读出来是「没设额度」，
+	// 额度已经用完的账号在缓存命中时照样被选中。
+	"quota_limit",
+	"quota_used",
+	"quota_daily_limit",
+	"quota_daily_used",
+	"quota_daily_start",
+	"quota_daily_reset_mode",
+	"quota_daily_reset_hour",
+	"quota_weekly_limit",
+	"quota_weekly_used",
+	"quota_weekly_start",
+	"quota_weekly_reset_mode",
+	"quota_weekly_reset_day",
+	"quota_weekly_reset_hour",
+	"quota_reset_timezone",
+
+	// OpenAI 透传开关（新键 + 历史兼容键）：候选过滤的模型支持判断读它。
+	// 缺失会把透传账号误判为「不支持该模型」：单独测账号能通，走网关却报 no available accounts。
+	"openai_passthrough",
+	"openai_oauth_passthrough",
+
 	// OpenAI WebSocket / Responses 模式
 	"openai_oauth_responses_websockets_v2_enabled",
 	"openai_oauth_responses_websockets_v2_mode",

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -34,21 +35,29 @@ type capacityVerdict struct {
 	IdleTimeout  int
 	WindowLimit  float64
 	WindowBands  []service.WindowCostSchedulability
+
+	// IsSchedulable 里 API Key / Bedrock 账号自设额度（总 / 日 / 周）的判定。
+	QuotaExceeded bool
+	// 候选过滤的模型支持判断里 OpenAI 透传开关（新键 + 历史兼容键）的判定。
+	OpenAIPassthrough bool
 }
 
 // verdictOf 是被对拍的判定函数，只调用选号阶段真正读取的账号方法：
 // 硬并发上限 EffectiveConcurrency、负载分母 LoadBalanceCapacity、降速后的 RPM 上限 EffectiveBaseRPM，
-// 以及 RPM / 窗口费用的区带判定。
+// RPM / 窗口费用的区带判定，以及 IsSchedulable 里读的额度判定 IsQuotaExceeded、
+// 候选过滤里读的 OpenAI 透传开关 IsOpenAIPassthroughEnabled。
 var verdictOf = func(a *service.Account, rpmProbes []int, costProbes []float64) capacityVerdict {
 	v := capacityVerdict{
-		Concurrency:  a.EffectiveConcurrency(),
-		LoadCapacity: a.LoadBalanceCapacity(),
-		BaseRPM:      a.EffectiveBaseRPM(),
-		RPMStrategy:  a.GetRPMStrategy(),
-		StickyBuffer: a.GetRPMStickyBuffer(),
-		MaxSessions:  a.GetMaxSessions(),
-		IdleTimeout:  a.GetSessionIdleTimeoutMinutes(),
-		WindowLimit:  a.GetWindowCostLimit(),
+		Concurrency:       a.EffectiveConcurrency(),
+		LoadCapacity:      a.LoadBalanceCapacity(),
+		BaseRPM:           a.EffectiveBaseRPM(),
+		RPMStrategy:       a.GetRPMStrategy(),
+		StickyBuffer:      a.GetRPMStickyBuffer(),
+		MaxSessions:       a.GetMaxSessions(),
+		IdleTimeout:       a.GetSessionIdleTimeoutMinutes(),
+		WindowLimit:       a.GetWindowCostLimit(),
+		QuotaExceeded:     a.IsQuotaExceeded(),
+		OpenAIPassthrough: a.IsOpenAIPassthroughEnabled(),
 	}
 	for _, cur := range rpmProbes {
 		v.RPMBands = append(v.RPMBands, a.CheckRPMSchedulability(cur))
@@ -123,6 +132,9 @@ type contractScenario struct {
 	checkBand bool
 	// want 非 nil 时断言完整账号的有效并发 / 负载分母 / 有效 RPM（前置条件）。
 	want *effectiveWant
+	// precondition 非 nil 时在对拍前对完整账号做断言：证明这行用例确实依赖被测的键
+	// （例如「额度已用完」只在键齐全时才成立），否则投影丢键后两边都是 false，用例就空转了。
+	precondition func(t *testing.T, full *service.Account)
 }
 
 func anthropicOAuth(id int64, concurrency int, extra map[string]any) service.Account {
@@ -131,6 +143,16 @@ func anthropicOAuth(id int64, concurrency int, extra map[string]any) service.Acc
 		Platform:    service.PlatformAnthropic,
 		Type:        service.AccountTypeOAuth,
 		Concurrency: concurrency,
+		Extra:       extra,
+	}
+}
+
+func apiKeyAccount(id int64, platform string, extra map[string]any) service.Account {
+	return service.Account{
+		ID:          id,
+		Platform:    platform,
+		Type:        service.AccountTypeAPIKey,
+		Concurrency: 3,
 		Extra:       extra,
 	}
 }
@@ -242,6 +264,69 @@ func contractScenarios() []contractScenario {
 			account: adaptiveLoadAccount,
 			want:    &effectiveWant{concurrency: 2, loadCapacity: 8, baseRPM: 0},
 		},
+
+		// API Key 账号自设额度：IsSchedulable 在选号阶段读 IsQuotaExceeded。键没进投影时读出来是
+		// 「没设额度」，额度已经用完的账号照样被选中（缓存命中时），而单测直接构造完整账号抓不到。
+		{
+			name: "quota_total_exhausted",
+			account: apiKeyAccount(9020, service.PlatformAnthropic, map[string]any{
+				"quota_limit": 10.0, "quota_used": 10.0,
+			}),
+			precondition: requireQuotaExceeded(true),
+		},
+		{
+			// 滚动日额度：周期起点在 1 小时前，仍在 24h 周期内，已用 >= 上限。
+			name: "quota_daily_exhausted_rolling_period",
+			account: apiKeyAccount(9021, service.PlatformAnthropic, map[string]any{
+				"quota_daily_limit": 5.0, "quota_daily_used": 5.0,
+				"quota_daily_start": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+			}),
+			precondition: requireQuotaExceeded(true),
+		},
+		{
+			// 滚动周额度：周期起点在 1 天前，仍在 7d 周期内。
+			name: "quota_weekly_exhausted_rolling_period",
+			account: apiKeyAccount(9022, service.PlatformAnthropic, map[string]any{
+				"quota_weekly_limit": 20.0, "quota_weekly_used": 20.0,
+				"quota_weekly_start": time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339),
+			}),
+			precondition: requireQuotaExceeded(true),
+		},
+		{
+			// 守护行：额度没用完时不能被判超限（证明上面三行的 true 来自键本身，而不是判定恒真）。
+			name: "quota_not_exhausted",
+			account: apiKeyAccount(9023, service.PlatformAnthropic, map[string]any{
+				"quota_limit": 10.0, "quota_used": 3.0,
+			}),
+			precondition: requireQuotaExceeded(false),
+		},
+
+		// OpenAI 透传开关：候选过滤的模型支持判断读它，没进投影会把透传账号误判为「不支持该模型」，
+		// 现象是「单独测账号能通、走网关报 no available accounts」。
+		{
+			name:    "openai_passthrough_flag",
+			account: apiKeyAccount(9024, service.PlatformOpenAI, map[string]any{"openai_passthrough": true}),
+			precondition: func(t *testing.T, full *service.Account) {
+				require.True(t, full.IsOpenAIPassthroughEnabled(), "前置条件：完整账号应判为透传")
+			},
+		},
+		{
+			name: "openai_oauth_passthrough_legacy_flag",
+			account: service.Account{
+				ID: 9025, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Concurrency: 3,
+				Extra: map[string]any{"openai_oauth_passthrough": true},
+			},
+			precondition: func(t *testing.T, full *service.Account) {
+				require.True(t, full.IsOpenAIPassthroughEnabled(), "前置条件：历史兼容键也应判为透传")
+			},
+		},
+	}
+}
+
+func requireQuotaExceeded(want bool) func(t *testing.T, full *service.Account) {
+	return func(t *testing.T, full *service.Account) {
+		t.Helper()
+		require.Equal(t, want, full.IsQuotaExceeded(), "前置条件：完整账号的额度判定")
 	}
 }
 
@@ -252,6 +337,9 @@ func TestSchedulerProjectionContract_VerdictsMatchFullAccount(t *testing.T) {
 			if tc.checkBand {
 				require.Equal(t, tc.band, full.CheckRPMSchedulability(tc.probe),
 					"前置条件：完整账号在探针点应落在该区带，否则这行用例是空转")
+			}
+			if tc.precondition != nil {
+				tc.precondition(t, &full)
 			}
 			if tc.want != nil {
 				require.Equal(t, tc.want.concurrency, full.EffectiveConcurrency(), "前置条件：有效并发")
@@ -320,12 +408,20 @@ func TestSchedulerProjectionContract_RegistryShape(t *testing.T) {
 		seen[key] = struct{}{}
 	}
 
-	// 官方已修过、本 fork 此前缺失的键：RPM 门与动态降速的利用率输入；
-	// 以及动态降速开关本身。
+	// 官方已修过、本 fork 此前缺失的键：RPM 门与动态降速的利用率输入、动态降速开关本身、
+	// API Key 账号自设额度的 14 个键（含固定重置模式要读的重置时刻与时区）、OpenAI 透传开关。
+	// 「键能穿过投影」的测试只遍历登记表里已有的键，管不到被误删的键；这份清单才是删除防护。
 	for _, must := range []string{
 		"base_rpm", "rpm_strategy", "rpm_sticky_buffer",
 		"session_window_utilization", "passive_usage_7d_utilization", "passive_usage_7d_reset",
 		"adaptive_throttle",
+		"quota_limit", "quota_used",
+		"quota_daily_limit", "quota_daily_used", "quota_daily_start",
+		"quota_daily_reset_mode", "quota_daily_reset_hour",
+		"quota_weekly_limit", "quota_weekly_used", "quota_weekly_start",
+		"quota_weekly_reset_mode", "quota_weekly_reset_day", "quota_weekly_reset_hour",
+		"quota_reset_timezone",
+		"openai_passthrough", "openai_oauth_passthrough",
 	} {
 		require.Contains(t, seen, must)
 	}
