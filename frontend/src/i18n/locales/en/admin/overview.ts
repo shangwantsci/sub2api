@@ -1043,7 +1043,7 @@ export default {
         staleFallbackNotice: 'This group holds an unused fallback group "{name}": it is not used while Claude Code only is off.',
         clearStaleFallback: 'Clear',
         danglingFallbackLabel: 'Group #{id} (disabled or deleted)',
-        danglingFallbackNotice: 'The current fallback group is disabled or deleted and saving will fail validation. Pick another group or choose no fallback.',
+        danglingFallbackNotice: 'The current fallback group is disabled or deleted and is not in the list. Saving fails validation if it was deleted. Pick another group or choose no fallback.',
         referrersNotice: 'Groups {names} use this group as their fallback; once this group is Claude Code only their fallback stops working.',
         exposureNotice: 'Open hat: any client can use the accounts of this group.',
         contentReviewNote: 'Independent of the hat'

@@ -1040,7 +1040,7 @@ export default {
         staleFallbackNotice: '本分组存有未生效的降级分组「{name}」：仅限 Claude Code 关闭时不会用到它。',
         clearStaleFallback: '清除',
         danglingFallbackLabel: '分组 #{id}（已停用或已删除）',
-        danglingFallbackNotice: '当前降级分组已停用或已删除，保存时会校验失败。请改选其他分组，或选择「不降级」。',
+        danglingFallbackNotice: '当前降级分组已停用或已删除，不在可选列表里。已删除的分组保存时会校验失败。建议改选其他分组，或选择「不降级」。',
         referrersNotice: '分组 {names} 把本分组当作降级分组；改为「仅限 Claude Code」后，它们的降级会失效。',
         exposureNotice: '开放类：任何客户端都能使用本分组的账号。',
         contentReviewNote: '与帽子无关'
