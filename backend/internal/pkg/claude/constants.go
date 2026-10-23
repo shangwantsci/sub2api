@@ -240,7 +240,7 @@ func cloneStrings(values []string) []string {
 	return append([]string(nil), values...)
 }
 
-// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 2.1.206 profile。
+// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 伪装 profile（版本以 DefaultClaudeCodeMimicryProfileID 为准）。
 func DefaultClaudeCodeMimicryProfile() ClaudeCodeMimicryProfile {
 	return ClaudeCodeMimicryProfile{
 		ID:                DefaultClaudeCodeMimicryProfileID,

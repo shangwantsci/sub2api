@@ -8233,15 +8233,19 @@ const claudeOAuthSystemPromptCacheTTLOptions = computed(() => [
   { value: "1h", label: t("admin.settings.gatewayForwarding.cacheTTL1h") },
 ]);
 
-const currentClaudeCodeMimicryProfileID =
-  "cc-2.1.206-sdk-cli-macos-arm64";
-
-const claudeCodeMimicryProfileOptions = computed(() => [
-  {
-    value: currentClaudeCodeMimicryProfileID,
-    label: t("admin.settings.gatewayForwarding.claudeCodeMimicryProfile2206"),
-  },
-]);
+// 后端只认一个当前 profile，GET /admin/settings 返回的已经是归一后的 ID（setting_parse.go）。
+// 前端不再存「当前版本」常量，原样展示服务端的值：后端升级版本时这里不用跟着改，
+// 也就不会再出现界面写 2.1.206、网关实际用 2.1.211 这种两份真相。
+const claudeCodeMimicryProfileOptions = computed(() =>
+  form.claude_code_mimicry_profile
+    ? [
+        {
+          value: form.claude_code_mimicry_profile,
+          label: form.claude_code_mimicry_profile,
+        },
+      ]
+    : [],
+);
 
 const claudeMimicryGuardModeOptions = computed(() => [
   { value: "warn", label: t("admin.settings.gatewayForwarding.guardModeWarn") },
@@ -8605,7 +8609,7 @@ const form = reactive<SettingsForm>({
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
-  claude_code_mimicry_profile: currentClaudeCodeMimicryProfileID,
+  claude_code_mimicry_profile: "",
   claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   enable_claude_oauth_billable_input_tokens: false,
@@ -9406,8 +9410,6 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
-    form.claude_code_mimicry_profile =
-      currentClaudeCodeMimicryProfileID;
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
         defaultClaudeOAuthSystemPromptBlocks;
@@ -9916,9 +9918,9 @@ async function saveSettings() {
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,
+      // 服务端没报告 profile 时不提交该键，后端保留库里已存的值
       claude_code_mimicry_profile:
-        form.claude_code_mimicry_profile?.trim() ||
-        currentClaudeCodeMimicryProfileID,
+        form.claude_code_mimicry_profile?.trim() || undefined,
       claude_mimicry_guard_mode: form.claude_mimicry_guard_mode || "warn",
       enable_claude_oauth_system_prompt_injection:
         form.enable_claude_oauth_system_prompt_injection,

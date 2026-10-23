@@ -398,7 +398,7 @@ const baseSettingsResponse = {
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
-  claude_code_mimicry_profile: "cc-2.1.197-sdk-cli-macos-arm64",
+  claude_code_mimicry_profile: "cc-2.1.211-sdk-cli-linux-x64",
   claude_mimicry_guard_mode: "warn",
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
@@ -1157,7 +1157,7 @@ describe("admin SettingsView payment visible method controls", () => {
   it("submits the current Claude Code mimicry profile and guard settings", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      claude_code_mimicry_profile: "cc-2.1.206-sdk-cli-macos-arm64",
+      claude_code_mimicry_profile: "cc-2.1.211-sdk-cli-linux-x64",
       claude_mimicry_guard_mode: "block",
     });
 
@@ -1170,37 +1170,51 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledTimes(1);
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        claude_code_mimicry_profile: "cc-2.1.206-sdk-cli-macos-arm64",
+        claude_code_mimicry_profile: "cc-2.1.211-sdk-cli-linux-x64",
         claude_mimicry_guard_mode: "block",
       }),
     );
   });
 
-  it.each([
-    "cc-2.1.197-sdk-cli-macos-arm64",
-    "unknown-profile",
-  ])(
-    "normalizes unsupported Claude Code mimicry profile %s to the current profile",
-    async (storedProfile) => {
-      getSettings.mockResolvedValueOnce({
-        ...baseSettingsResponse,
-        claude_code_mimicry_profile: storedProfile,
-      });
+  // 后端只认一个当前 profile，GET /admin/settings 返回的已经是归一后的 ID。
+  // 前端不能再自带一份「当前版本」常量：后端升级版本后，前端那份会悄悄过期，
+  // 设置页展示的伪装版本就与网关实际使用的不一致（曾经就是 2.1.206 对 2.1.211）。
+  it("submits the mimicry profile the server reports instead of a front-end constant", async () => {
+    // 故意用前端从没听说过的版本：只要前端还存着自己的常量，这里就会被换成别的值。
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      claude_code_mimicry_profile: "cc-9.9.9-sdk-cli-linux-x64",
+    });
 
-      const wrapper = mountView();
-      await flushPromises();
+    const wrapper = mountView();
+    await flushPromises();
 
-      await wrapper.find("form").trigger("submit.prevent");
-      await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
 
-      expect(updateSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          claude_code_mimicry_profile:
-            "cc-2.1.206-sdk-cli-macos-arm64",
-        }),
-      );
-    },
-  );
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claude_code_mimicry_profile: "cc-9.9.9-sdk-cli-linux-x64",
+      }),
+    );
+  });
+
+  it("does not invent a mimicry profile when the server reports none", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      claude_code_mimicry_profile: "",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    // 不提交该键：后端据此保留库里已存的值，而不是被前端的某个默认值覆盖。
+    expect(updateSettings.mock.calls[0][0].claude_code_mimicry_profile).toBeUndefined();
+  });
 
   it("submits Antigravity user agent version gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
