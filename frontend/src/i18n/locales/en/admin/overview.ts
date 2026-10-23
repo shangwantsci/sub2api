@@ -760,6 +760,7 @@ export default {
         name: 'Name',
         id: 'ID',
         platform: 'Platform',
+        hat: 'Hat',
         rateMultiplier: 'Rate Multiplier',
         rpmOverride: 'RPM Override',
         rpmOverrideHint: 'Per-user RPM cap in this group; empty = group default; 0 = unlimited',
@@ -983,6 +984,60 @@ export default {
         enabled: 'Enabled',
         identityOnly: 'Identity Only (<200 tokens)',
         disabled: 'Disabled'
+      },
+      hats: {
+        cc_line: {
+          name: 'Claude Code only',
+          short: 'CC only',
+          purpose:
+            'Only requests recognized as Claude Code are let through; everything else is rejected. Fits a Claude Code dedicated plan backed by OAuth or Setup Token accounts.',
+          detail:
+            'Recognition relies on the User-Agent (claude-cli/version), three required headers (X-App, anthropic-beta and anthropic-version, only checked for being non-empty), a billing block in system or a text block similar to an official Claude Code prompt template, and a valid metadata.user_id. It stops ordinary third-party clients but not someone who knows the rules and forges them on purpose; a forged request that gets through is no longer protected by mimicry and reaches the account as is. A request that is not Claude Code gets 503 on /v1/messages and 403 on the chat/completions and responses endpoints. Account advice: keep the accounts of a dedicated line out of open groups.'
+        },
+        cc_fallback: {
+          name: 'Claude Code first, others fall back',
+          short: 'CC first + fallback',
+          purpose:
+            'Claude Code requests use the accounts of this group; other clients are routed to the accounts of the fallback group.',
+          detail:
+            'Recognition and its strength are the same as Claude Code only. Fallback only applies to /v1/messages and count_tokens; the chat/completions and responses endpoints return 403 for such groups. The prompt policy, billing multiplier and RPM of fallback traffic come from the group of the key, not from the fallback group, so set the prompt policy for fallback traffic below instead of changing the settings of the fallback group. Accounts in the fallback pool receive mimicked third-party traffic, so choose accounts that can take the risk.'
+        },
+        open_follow: {
+          name: 'Open: follow global',
+          short: 'Open: global',
+          purpose:
+            'Any client can use it; whether the system prompt of non-Claude Code traffic is rewritten is decided by the global switch.',
+          detail:
+            'Decided by the global switch under Settings, Gateway, Claude OAuth System injection (on by default, which then equals full mimicry but changes with the global switch). The prompt policy and mimicry only apply to OAuth or Setup Token accounts and to requests that did not pass Claude Code recognition; in a group with only API Key accounts the four open hats make no difference. In an open group any client can use the accounts of the group.'
+        },
+        open_full: {
+          name: 'Open: full mimicry',
+          short: 'Open: full',
+          purpose:
+            'Any client can use it; non-Claude Code traffic is fully rewritten to look like Claude Code on OAuth or Setup Token accounts.',
+          detail:
+            'Forces full injection (even when the global switch is off): system is rewritten into a billing block, a Claude Agent SDK identity block and an extended prompt block, and the original system of the client moves to the start of the messages; metadata, request body normalization, tool renaming and header mimicry are applied as well. Only for OAuth or Setup Token accounts and requests that did not pass Claude Code recognition. Sending third-party traffic through OAuth or Setup Token accounts always carries ban risk; full mimicry only lowers the chance of being recognized, so put accounts that can take the risk here.'
+        },
+        open_light: {
+          name: 'Open: light mimicry',
+          short: 'Open: light',
+          purpose:
+            'Only a billing block and an identity block are injected (under 200 tokens): saves tokens, shallower mimicry.',
+          detail:
+            'system is rewritten into only a billing block and an identity block and the custom prompt content of the global settings is ignored; the rest of the mimicry (metadata, request body normalization, tool renaming, headers) still happens. Fits clients that already send a very long prompt and should not spend context on the extended prompt block. Only for OAuth or Setup Token accounts and requests that did not pass Claude Code recognition.'
+        },
+        open_keep_prompt: {
+          name: 'Open: keep prompt untouched',
+          short: 'Open: keep prompt',
+          purpose: 'Any client can use it; the system prompt is not rewritten.',
+          detail:
+            'Note: only the system rewrite is switched off; metadata injection, request body normalization, tool renaming, header and TLS mimicry still happen, so mimicry is not switched off. When the group contains OAuth or Setup Token accounts, the mimicry guard rejects requests that are not Claude Code in block mode, and in warn mode the account receives third-party traffic whose system was not rewritten. Only suitable for pools made of official API Key accounts, or for clients that bring a complete Claude Code identity themselves.'
+        }
+      },
+      hatCard: {
+        tipFallbackTo: 'Falls back to: {name}',
+        tipFallbackPolicy: 'Prompt policy for fallback traffic: {policy}',
+        tipStaleFallback: 'Holds an unused fallback group: {name}'
       },
       openaiMessages: {
         title: 'OpenAI Messages Dispatch',

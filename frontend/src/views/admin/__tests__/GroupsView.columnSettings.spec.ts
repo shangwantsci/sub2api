@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import type { AdminGroup } from '@/types'
+import GroupHatBadge from '@/components/admin/group/GroupHatBadge.vue'
 import GroupsView from '../GroupsView.vue'
 
 const {
@@ -33,6 +34,7 @@ const messages: Record<string, string> = {
   'admin.groups.columns.name': 'Name',
   'admin.groups.columns.id': 'ID',
   'admin.groups.columns.platform': 'Platform',
+  'admin.groups.columns.hat': 'Hat',
   'admin.groups.columns.billingType': 'Billing Type',
   'admin.groups.columns.rateMultiplier': 'Rate Multiplier',
   'admin.groups.columns.type': 'Type',
@@ -148,6 +150,9 @@ const DataTableStub = {
     <div>
       <div data-test="columns">{{ columns.map((col) => col.key).join(',') }}</div>
       <div data-test="rows">{{ data.map((row) => row.name).join(',') }}</div>
+      <div v-for="row in data" :key="row.id" data-test="hat-cell">
+        <slot name="cell-hat" :row="row" :value="row.hat" />
+      </div>
     </div>
   `,
 }
@@ -192,6 +197,7 @@ const mountView = async () => {
         PlatformIcon: true,
         Icon: IconStub,
         GroupCapacityBadge: true,
+        GroupHatBadge: true,
         GroupRateMultipliersModal: true,
         GroupRPMOverridesModal: true,
         VueDraggable: { template: '<div><slot /></div>' },
@@ -258,6 +264,7 @@ describe('admin GroupsView column settings', () => {
     expect(columnKeys(wrapper)).toEqual([
       'name',
       'platform',
+      'hat',
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
@@ -284,6 +291,7 @@ describe('admin GroupsView column settings', () => {
       'name',
       'id',
       'platform',
+      'hat',
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
@@ -302,6 +310,7 @@ describe('admin GroupsView column settings', () => {
     expect(columnKeys(wrapper)).toEqual([
       'name',
       'platform',
+      'hat',
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
@@ -325,6 +334,7 @@ describe('admin GroupsView column settings', () => {
     expect(columnKeys(wrapper)).toEqual([
       'name',
       'platform',
+      'hat',
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
@@ -348,6 +358,7 @@ describe('admin GroupsView column settings', () => {
       'name',
       'id',
       'platform',
+      'hat',
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
@@ -379,5 +390,29 @@ describe('admin GroupsView column settings', () => {
     await clickColumnToggle(wrapper, 'Capacity')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
     expect(getCapacitySummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a hat badge for every row through the cell-hat slot and resolves group names from the current page', async () => {
+    listGroups.mockResolvedValue({
+      items: [
+        createGroup({ id: 1, name: 'Claude Code Only', claude_code_only: true, fallback_group_id: 2 }),
+        createGroup({ id: 2, name: 'Fallback Pool' }),
+        createGroup({ id: 3, name: 'OpenAI Pool', platform: 'openai' }),
+      ],
+      total: 3,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = await mountView()
+
+    const badges = wrapper.findAllComponents(GroupHatBadge)
+    expect(badges.map((badge) => (badge.props('group') as unknown as { id: number }).id)).toEqual([1, 2, 3])
+
+    // 降级分组的名字从当前页的列表里查；不在当前页的 id 返回 undefined，由徽章自己显示 #id
+    const resolveGroupName = badges[0].props('resolveGroupName') as (id: number) => string | undefined
+    expect(resolveGroupName(2)).toBe('Fallback Pool')
+    expect(resolveGroupName(999)).toBeUndefined()
   })
 })

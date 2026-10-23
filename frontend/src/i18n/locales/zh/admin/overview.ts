@@ -753,6 +753,7 @@ export default {
         name: '名称',
         id: 'ID',
         platform: '平台',
+        hat: '帽子',
         rateMultiplier: '费率倍数',
         rpmOverride: 'RPM 覆盖',
         rpmOverrideHint: '该用户在此分组的 RPM 上限；留空 = 使用分组默认；0 = 不限制',
@@ -981,6 +982,60 @@ export default {
         enabled: '开启',
         identityOnly: '仅必要身份（<200 tokens）',
         disabled: '关闭'
+      },
+      hats: {
+        cc_line: {
+          name: 'Claude Code 专线',
+          short: 'CC 专线',
+          purpose:
+            '只放行被识别为 Claude Code 的请求，其余一律拒绝。适合只放 OAuth/Setup 账号的「Claude Code 专用」套餐。',
+          detail:
+            '识别靠 User-Agent（claude-cli/版本号）、三个必需请求头（X-App、anthropic-beta、anthropic-version，只检查是否非空）、system 里的 billing 块或与 Claude Code 官方提示词模板相似的文本块，以及合法的 metadata.user_id。能挡住普通第三方客户端，但挡不住知道规则、有意伪造的人；被放行的伪造请求不再受伪装保护，会原样进入账号。非 Claude Code 请求在 /v1/messages 上返回 503，在 chat/completions 与 responses 入口一律返回 403。账号侧建议：专线分组的账号不要同时放进开放分组。'
+        },
+        cc_fallback: {
+          name: 'Claude Code 优先 + 降级池',
+          short: 'CC 优先+降级',
+          purpose:
+            'Claude Code 请求使用本分组的账号，其他客户端自动改走降级分组的账号。',
+          detail:
+            '识别方式与强度同「Claude Code 专线」。降级只对 /v1/messages 与 count_tokens 生效；chat/completions 与 responses 入口对这类分组一律返回 403。降级流量的提示词注入策略、计费倍率与 RPM 取 Key 所在的分组，不取降级分组，所以请在下面设置「降级流量的提示词策略」，不要去改降级分组自己的设置。降级池里的账号会收到被伪装过的第三方流量，请选可以承受风险的账号。'
+        },
+        open_follow: {
+          name: '开放 · 跟随全局',
+          short: '开放·跟随',
+          purpose:
+            '任何客户端都能用；非 Claude Code 流量是否重写 system 由全局开关决定。',
+          detail:
+            '由「设置 → 网关服务 → Claude OAuth System 注入」的全局开关决定（缺省开启，此时等同于完整伪装，但会随全局开关变化）。提示词策略与伪装只对 OAuth/Setup 账号、且未通过 Claude Code 识别的请求生效；分组里只有 API Key 账号时，四种开放帽没有区别。开放类分组任何客户端都能使用本组账号。'
+        },
+        open_full: {
+          name: '开放 · 完整伪装',
+          short: '开放·完整',
+          purpose:
+            '任何客户端都能用；非 Claude Code 流量在 OAuth/Setup 账号上被完整改写成 Claude Code 的样子。',
+          detail:
+            '强制完整注入（即使全局开关关闭也注入）：system 重写为 billing 块、Claude Agent SDK 身份块和扩展提示块，客户端原来的 system 迁到消息开头；同时做 metadata、请求体规整、工具改名与请求头伪装。只对 OAuth/Setup 账号、且未通过 Claude Code 识别的请求生效。第三方流量经 OAuth/Setup 账号发出本身就有封号风险，完整伪装只是降低被识别的概率，建议放可以承受风险的账号。'
+        },
+        open_light: {
+          name: '开放 · 轻伪装',
+          short: '开放·轻',
+          purpose:
+            '只注入 billing 与身份两块（不足 200 tokens），省 token，伪装更浅。',
+          detail:
+            'system 只重写为 billing 块和身份块，忽略全局自定义的提示词内容；其余伪装（metadata、请求体规整、工具改名、请求头）照常进行。适合客户端自带很长提示词、不想让扩展提示块占用上下文的场景。只对 OAuth/Setup 账号、且未通过 Claude Code 识别的请求生效。'
+        },
+        open_keep_prompt: {
+          name: '开放 · 不改写提示词',
+          short: '开放·不改写',
+          purpose: '任何客户端都能用；不重写 system 提示词。',
+          detail:
+            '注意：只关闭 system 重写，metadata 注入、请求体规整、工具改名、请求头与 TLS 伪装仍会进行，不是「完全不伪装」。分组里含 OAuth/Setup 账号时，伪装守卫在 block 模式下会拒绝非 Claude Code 请求，在 warn 模式下账号会收到未重写 system 的第三方流量。只适合池里全是官方 API Key 账号，或客户端自带完整 Claude Code 身份的分组。'
+        }
+      },
+      hatCard: {
+        tipFallbackTo: '降级到：{name}',
+        tipFallbackPolicy: '降级流量的提示词策略：{policy}',
+        tipStaleFallback: '存有未生效的降级分组：{name}'
       },
       openaiMessages: {
         title: 'OpenAI Messages 调度配置',

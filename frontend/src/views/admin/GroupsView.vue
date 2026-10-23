@@ -154,6 +154,13 @@
             </span>
           </template>
 
+          <template #cell-hat="{ row }">
+            <GroupHatBadge
+              :group="row"
+              :resolve-group-name="resolveGroupNameById"
+            />
+          </template>
+
           <template #cell-billing_type="{ row }">
             <div class="space-y-1">
               <!-- Type Badge -->
@@ -3857,6 +3864,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import GroupHatBadge from "@/components/admin/group/GroupHatBadge.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
@@ -3913,6 +3921,7 @@ const allColumns = computed<Column[]>(() => [
     label: t("admin.groups.columns.platform"),
     sortable: true,
   },
+  { key: "hat", label: t("admin.groups.columns.hat"), sortable: false },
   {
     key: "billing_type",
     label: t("admin.groups.columns.billingType"),
@@ -4196,6 +4205,8 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 });
 
 const groups = ref<AdminGroup[]>([]);
+const resolveGroupNameById = (id: number) =>
+  groups.value.find((g) => g.id === id)?.name;
 const loading = ref(false);
 type GroupUsageSummary = {
   today_cost: number;
