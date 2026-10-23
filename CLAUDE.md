@@ -6,7 +6,7 @@
 
 官方开源项目 sub2api（Wei-Shaw/sub2api）的私有 fork：把 Claude / OpenAI / Gemini 等订阅账号聚合成 API 中转站。后端 Go（`backend/`，Gin + Ent + Wire + Redis + PostgreSQL），前端 Vue3（`frontend/`）。fork 自有的东西集中在三块：Claude 防封（容量与节流、请求伪装、养号）、供号商上号站点（Provider Portal）、一批网关修复。官方没有的功能，改之前先查 `docs/FEATURES.md`。
 
-当前没有线上部署，这是一个训练项目。本地标签 `archive/pre-cleanup-20261022` 是「项目恢复有序」整理之前的完整状态，被移除的功能都能从那里找回。
+这是晓宇的训练项目，但线上有一台服务器在用它（Docker Compose 部署，镜像由 GitHub Actions 构建，有真实用户在调网关）：改迁移、设置默认值、网关行为之前要想到它，升级前先备份数据库，步骤见 `docs/CURRENT_BEHAVIOR.md` 第 7 节。本地标签 `archive/pre-cleanup-20261022` 是「项目恢复有序」整理之前的完整状态，被移除的功能都能从那里找回。
 
 ## 本机命令与环境限制
 

@@ -175,3 +175,13 @@
 4. **合规确认**：管理员登录后先 `POST /api/v1/admin/compliance/accept`，body 为 `{"phrase":"I have read, understood, and agree to the Sub2API Deployment and Operation Compliance Commitment","language":"en"}`（确认语常量在 `backend/internal/service/admin_compliance.go`），否则所有 `/admin` 接口返回 423 `ADMIN_COMPLIANCE_ACK_REQUIRED`。
 5. **前端（可选）**：必须 `cd frontend` 再运行，否则 tailwind 找不到配置。`VITE_DEV_PROXY_TARGET=http://127.0.0.1:18081 VITE_DEV_PORT=15173 node_modules/.bin/vite .`。**不要运行 `vite build`**：产物会写进 `backend/internal/web/dist`。仓库的 `vite.config.ts` 默认监听 `0.0.0.0` 并把缓存写进 `node_modules/.vite`，本地冒烟建议用一份放在 `$S` 里的包装配置，复用它并把 `host` 改成 `127.0.0.1`、`cacheDir` 放到 `$S`。用浏览器自动化时需要一个开着 `--remote-debugging-port=9222`、使用独立 `--user-data-dir` 的无头 Chrome。
 6. **收尾**：停掉 vite、Chrome、后端、miniredis、PostgreSQL，删掉 `$S`（里面有 PostgreSQL 数据目录、`config.yaml`、令牌和密码文件），用 `lsof` 确认端口已释放。
+
+## 7. 生产部署与升级
+
+线上是一台 Docker Compose 服务器：项目目录 `/opt/sub2api-production`，compose 文件 `docker-compose.local.yml` + `docker-compose.override.yml`，镜像标签由同目录 `.env` 里的 `SUB2API_IMAGE` 决定；前面有一个 Caddy 容器反代到 `sub2api:8080`。同机还跑着别的项目，升级时只动 `sub2api` 这一个服务。镜像在 GitHub Actions 上构建，不在本机、也不在服务器上构建。
+
+1. **构建镜像**：先把分支推到 `origin/custom/prod`，再 `gh workflow run release.yml --repo shangwantsci/sub2api --ref custom/prod -f tag=v0.1.156 -f custom_image_only=true -f source_ref=custom/prod`（只会跑 `custom-image` 这一个 job，约 6 分钟）。产出两个标签：可变的 `ghcr.io/shangwantsci/sub2api:<VERSION>` 和不可变的 `…:<VERSION>-<提交前 8 位>`，部署只用不可变的那个。仓库与镜像包目前都是公开的，服务器不用登录就能拉取。
+2. **升级前（每次都做）**：备份 `.env` 到 `backups/.env.<UTC 时间>.before-<提交>`；把当前镜像写进 `backups/previous-sub2api-image.<UTC 时间>.txt`；备份数据库到 `backups/pgdump-<UTC 时间>-before-<提交>.sql.gz`，命令是 `docker exec sub2api-postgres pg_dump -U sub2api -d sub2api --exclude-table-data=ops_system_logs --exclude-table-data=ops_error_logs --exclude-table-data=ops_system_metrics | gzip`（这三张运维日志表占库的大头，不备份它们的数据，备份只有几十 MB）。再对照 `schema_migrations` 看新迁移会改什么：迁移在启动时自动执行，应用过的不可逆。
+3. **切换**：`docker pull` 新镜像并核对摘要与 Actions 产出一致；只改 `.env` 里的 `SUB2API_IMAGE`；`docker compose -f docker-compose.local.yml -f docker-compose.override.yml up -d --no-deps sub2api`，等容器 healthy（约 10 秒）。
+4. **验证**：本机回环 `127.0.0.1:18080/health`；经 Caddy 的 `/health`，以及带假 key 的 `/v1/models`（应返回 401 `INVALID_API_KEY`）；`schema_migrations` 里有新迁移、迁移改写的设置行在；日志里没有 panic；`ops_system_logs` 里组件为 `http.access` 的行能看出真实请求的路径与状态码。网关请求常常只来自个别客户端，几分钟没有请求不一定是故障，要对照切换前的间隔分布判断。
+5. **回滚**：把 `.env` 改回备份里的镜像标签，再 `up -d --no-deps sub2api`；只有迁移改写过数据时才需要还原数据库备份。
