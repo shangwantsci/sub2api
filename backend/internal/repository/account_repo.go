@@ -730,6 +730,51 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 	return r.accountsToService(ctx, accounts)
 }
 
+// ListPoolHealthAccounts 返回公开 pool-health 统计所需的账号列。
+//
+// 比 ListOpsAccountsForStats 多读 type / extra / 过期与会话窗口字段：统计按账号类型筛选，
+// 用量百分比读 extra，「已过期」「额度耗尽」「恢复时间」读后几列。仍不读 credentials、name 等：
+// 该接口免登录，只返回聚合结果，不该把凭据读进内存。
+//
+// 计算器（service/ops_pool_health.go）新读 Account 的字段时，必须同步加到这里，
+// 并在 ops_pool_health_repo_unit_test.go 补一个只靠该字段才能判对的场景；
+// 直接构造 Account 的测试抓不到「SELECT 没选这一列」。
+func (r *accountRepository) ListPoolHealthAccounts(ctx context.Context, platformFilter string) ([]service.Account, error) {
+	if r == nil || r.client == nil {
+		return []service.Account{}, nil
+	}
+
+	q := r.client.Account.Query()
+	if platformFilter = strings.TrimSpace(platformFilter); platformFilter != "" {
+		q = q.Where(dbaccount.PlatformEQ(platformFilter))
+	}
+
+	accounts, err := q.
+		Select(
+			dbaccount.FieldID,
+			dbaccount.FieldPlatform,
+			dbaccount.FieldType,
+			dbaccount.FieldExtra,
+			dbaccount.FieldConcurrency,
+			dbaccount.FieldLoadFactor,
+			dbaccount.FieldStatus,
+			dbaccount.FieldSchedulable,
+			dbaccount.FieldExpiresAt,
+			dbaccount.FieldAutoPauseOnExpired,
+			dbaccount.FieldRateLimitResetAt,
+			dbaccount.FieldOverloadUntil,
+			dbaccount.FieldTempUnschedulableUntil,
+			dbaccount.FieldSessionWindowEnd,
+			dbaccount.FieldSessionWindowStatus,
+		).
+		Order(dbent.Asc(dbaccount.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
 func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {
 	sortBy := strings.ToLower(strings.TrimSpace(params.SortBy))
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderAsc)

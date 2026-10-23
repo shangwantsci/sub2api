@@ -150,13 +150,32 @@ func (s *OpsService) GetPublicPoolHealth(ctx context.Context, req PublicPoolHeal
 		Horizon:     req.Horizon,
 	})
 
-	accounts, err := s.listAllAccountsForOps(ctx, opts.Platform, nil)
+	accounts, err := s.listAccountsForPoolHealth(ctx, opts.Platform)
 	if err != nil {
 		return nil, err
 	}
 	loadMap := s.getAccountsLoadMapBestEffort(ctx, accounts)
 
 	return buildPublicPoolHealthSnapshot(accounts, loadMap, time.Now().UTC(), opts), nil
+}
+
+// opsPoolHealthAccountRepository 是 pool-health 专用的窄查询，由 repository 实现。
+// 不能复用运维面板的 ListOpsAccountsForStats：它只选了计数用的几列，
+// 缺 type / extra / 过期与会话窗口字段，计算器读到的全是零值（账号数恒为 0）。
+type opsPoolHealthAccountRepository interface {
+	ListPoolHealthAccounts(ctx context.Context, platformFilter string) ([]Account, error)
+}
+
+// listAccountsForPoolHealth 取 pool-health 统计用的账号。repository 没实现专用窄查询时
+// （测试替身等）回退到整行分页读取，保证计算器拿到的字段永远是完整的。
+func (s *OpsService) listAccountsForPoolHealth(ctx context.Context, platformFilter string) ([]Account, error) {
+	if s == nil || s.accountRepo == nil {
+		return []Account{}, nil
+	}
+	if repo, ok := s.accountRepo.(opsPoolHealthAccountRepository); ok {
+		return repo.ListPoolHealthAccounts(ctx, platformFilter)
+	}
+	return s.listAllAccountsPaged(ctx, platformFilter, nil)
 }
 
 func buildPublicPoolHealthSnapshot(accounts []Account, loadMap map[int64]*AccountLoadInfo, now time.Time, opts publicPoolHealthOptions) *PublicPoolHealthSnapshot {

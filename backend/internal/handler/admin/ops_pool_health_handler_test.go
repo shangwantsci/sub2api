@@ -28,8 +28,11 @@ func (r *poolHealthSettingRepo) GetMultiple(ctx context.Context, keys []string) 
 	return r.testSettingRepo.GetMultiple(ctx, keys)
 }
 
-// poolHealthAccountRepo 只实现 OpsService 取数用到的 ListOpsAccountsForStats；其余方法来自内嵌的
+// poolHealthAccountRepo 只实现 OpsService 给 pool-health 取数用的 ListPoolHealthAccounts；其余方法来自内嵌的
 // nil 接口，被意外调用会直接 panic。calls 记录取数次数，用来断言「关闭时根本没取数」。
+//
+// 注意：这个替身直接返回带 Type 的 Account，管不到真实 SELECT 选了哪些列；
+// 取数列是否齐全由 repository 包的 ops_pool_health_repo_unit_test.go 在真实库上验证。
 type poolHealthAccountRepo struct {
 	service.AccountRepository
 	accounts []service.Account
@@ -37,7 +40,7 @@ type poolHealthAccountRepo struct {
 	platform string
 }
 
-func (r *poolHealthAccountRepo) ListOpsAccountsForStats(_ context.Context, platformFilter string, _ *int64) ([]service.Account, error) {
+func (r *poolHealthAccountRepo) ListPoolHealthAccounts(_ context.Context, platformFilter string) ([]service.Account, error) {
 	r.calls++
 	r.platform = platformFilter
 	return r.accounts, nil

@@ -24,7 +24,12 @@ func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter s
 	if repo, ok := s.accountRepo.(opsAccountStatsRepository); ok {
 		return repo.ListOpsAccountsForStats(ctx, platformFilter, groupIDFilter)
 	}
+	return s.listAllAccountsPaged(ctx, platformFilter, groupIDFilter)
+}
 
+// listAllAccountsPaged 用整行分页查询取全部账号，字段是完整的。
+// 没有专用窄查询的 repository（测试替身等）回退到这里；调用方负责先判断 s / s.accountRepo 非空。
+func (s *OpsService) listAllAccountsPaged(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]Account, error) {
 	out := make([]Account, 0, 128)
 	page := 1
 	groupID := int64(0)
