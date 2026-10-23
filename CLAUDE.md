@@ -15,7 +15,7 @@
 - 本机没有 docker / golangci-lint / redis-server：testcontainers 集成测试跑不了。但能起一套**真实的栈**：临时 PostgreSQL + 用 Go 库 miniredis 起的 Redis 兼容服务 + 真实后端进程（再加 Vite 开发服务器与无头 Chrome 就能点界面），配方见 `docs/CURRENT_BEHAVIOR.md` 第 6 节。改了接口形状、设置、账号字段、迁移、供货商流程之后建议走一遍；走不了就在汇报里明说「没有在真实库上验证」「界面未实际点过」。
 - **已知既有失败**（不是你引入的，别当成回归）：后端 `internal/handler` 的 `TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_MixedSchedulingV1` 与 `..._ForcePlatform`；前端 `src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts` 的 2 个用例。除此之外全绿，新增失败就是你引入的。
 - 本机 `grep` 遵守 `.gitignore`：`docs/*` 被忽略规则覆盖，用 `grep -r` 会漏掉。残留检查用 `git grep`（只查已跟踪文件；刚建、未跟踪的新文件用 `grep -n 文件`）。
-- **代码生成**：改 Ent schema 用 `cd backend && go generate ./ent`。**不要跑 `make -C backend generate`，也不要直接用 wire 重新生成**：`backend/cmd/server/wire_gen.go` 里有手工维护的行（`BindCompositeRouteRepository` / `BindAdminCompositeRoutes`），重新生成会静默删掉它们，编译和单测都不报错，运行时复合分组路由绑定却失效。改了构造函数签名就手改 `wire_gen.go`，可以先重新生成到别处做交叉 diff；`cmd/server/wire_gen_test.go` 里有按位置传参的 `nil`，要同步。
+- **代码生成**：改 Ent schema 用 `cd backend && go generate ./ent`（对干净工作区重跑应当零 diff）。改了构造函数签名或各包 `wire.go` 里的 `ProviderSet`（依赖注入的装配清单），用 `cd backend/cmd/server && go run github.com/google/wire/cmd/wire` 重新生成 `wire_gen.go`（离线可用），再 `git diff` 看一眼。`wire_gen.go` 里没有手工维护的行，对当前代码重跑 wire 应当零 diff（2026-10-23 核对）。`cmd/server/wire_gen_test.go` 里按位置传参调用 `provideCleanup`（它定义在 `cmd/server/wire.go`，wire 会原样抄进 `wire_gen.go`），改了它的参数要同步测试。
 - **迁移**（`backend/migrations/`，下一个编号 228）：runner 以文件名为主键并校验 SHA256，**已应用的迁移文件不能再改**；必须幂等；不要在同一文件里写 Down。绕过应用层的 `UPDATE accounts` 要同时写 `scheduler_outbox`（`account_changed`），否则调度快照不会刷新。写新迁移先在临时 PostgreSQL 上彩排，方法见 `docs/CURRENT_BEHAVIOR.md`。
 
 ## 铁律（每一条都是踩过的坑）

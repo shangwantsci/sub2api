@@ -8,9 +8,7 @@ import (
 )
 
 // Platform is derived from group/account (usage_logs has no provider column on upstream schema).
-// Composite groups are a routing layer. Usage facts must use the concrete account
-// platform so they do not aggregate under the never-enabled "composite" key.
-const channelMonitorV2PlatformSQL = `lower(CASE WHEN g.platform = 'composite' THEN COALESCE(NULLIF(TRIM(a.platform), ''), 'unknown') ELSE COALESCE(NULLIF(g.platform,''), a.platform) END)`
+const channelMonitorV2PlatformSQL = `lower(` + usageLogEffectivePlatformExpr + `)`
 const channelMonitorV2ModelSQL = `COALESCE(NULLIF(TRIM(ul.requested_model), ''), NULLIF(TRIM(ul.model), ''), 'unknown')`
 
 // Tiered retention balances UI windows against storage:
@@ -251,15 +249,7 @@ WITH dedup AS (
   )
   SELECT DISTINCT ON (COALESCE(NULLIF(current_error.request_id, ''), 'error:' || current_error.id::text))
     date_trunc('minute', current_error.created_at) AS bucket_start,
-    -- Composite groups are a routing layer: resolve the concrete account
-    -- platform (mirrors usageLogEffectivePlatformExpr on the usage side) so
-    -- error facts share the usage facts' platform key. Without this, composite
-    -- group errors aggregate under platform 'composite', which is never an
-    -- enabled config platform, and are filtered out of every monitor v2 query.
-    lower(CASE
-      WHEN g.platform = 'composite' THEN COALESCE(NULLIF(TRIM(a.platform), ''), NULLIF(NULLIF(lower(TRIM(current_error.platform)), ''), 'composite'), 'unknown')
-      ELSE COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')
-    END) AS platform,
+    lower(COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')) AS platform,
     COALESCE(current_error.group_id, 0) AS group_id,
     COALESCE(NULLIF(TRIM(current_error.requested_model), ''), NULLIF(TRIM(current_error.model), ''), 'unknown') AS model,
     current_error.user_id, current_error.error_type, current_error.error_owner, COALESCE(current_error.status_code, 0) AS status_code,
@@ -269,8 +259,6 @@ WITH dedup AS (
       OR current_error.error_owner = 'provider' OR current_error.upstream_status_code IS NOT NULL) AS upstream_affected,
     CASE WHEN jsonb_typeof(current_error.upstream_errors) = 'array' THEN jsonb_array_length(current_error.upstream_errors) ELSE 0 END AS upstream_attempts
   FROM ops_error_logs current_error
-  LEFT JOIN groups g ON g.id = current_error.group_id
-  LEFT JOIN accounts a ON a.id = current_error.account_id
   WHERE (
       (NULLIF(current_error.request_id, '') IS NULL AND current_error.created_at >= $1 AND current_error.created_at < $2)
       OR (

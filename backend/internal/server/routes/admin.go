@@ -295,11 +295,6 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
 		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
 		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
-		groups.GET("/:id/composite-routes", h.Admin.Group.ListCompositeRoutes)
-		groups.POST("/:id/composite-routes", h.Admin.Group.CreateCompositeRoute)
-		groups.POST("/:id/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)
-		groups.PUT("/:id/composite-routes/:route_id", h.Admin.Group.UpdateCompositeRoute)
-		groups.DELETE("/:id/composite-routes/:route_id", h.Admin.Group.DeleteCompositeRoute)
 	}
 }
 
