@@ -152,7 +152,7 @@
 - **API Key 额度与限额**：都是用户给自己的 Key 设的自限，管理端没有入口；按实际扣费额累计，最后一单可略超。总额度与过期在鉴权中间件里检查，5h/1d/7d 窗口在计费资格检查里检查（不在中间件）。`run_mode=simple` 时整段计费检查跳过（`docs/CURRENT_BEHAVIOR.md` 第 1 节第 1 步）。窗口是固定窗口、非滑动。
 - **订阅分组额度**：窗口自首次使用激活（日 24 小时、周 7 天、月 30 天，非自然月）；有效期不超过 1 天的「日卡」，日额度一次性不重置。
 - **分组倍率**：是计费不是限流；专属倍率有进程内缓存，改后最长约 30 秒生效。
-- **Claude Code 专属分组**：识别靠 User-Agent（`claude-cli/版本号`）、三个必需请求头非空、system 里的计费块或与官方提示词模板相似的文本块、合法的 `metadata.user_id`（细节见 `docs/CURRENT_BEHAVIOR.md` 第 1 节「客户端准入」）。**强度：只防误用，不防有意伪造**——知道规则的人几行代码就能伪造，探测请求（UA + haiku + `max_tokens=1`）只看 UA 就放行；被放行的伪造请求会被当成真的 Claude Code，**不再受伪装保护**，原样进 OAuth 账号。无降级分组时，`/v1/messages` 与 count_tokens 上客户端见 503（读代码，未发请求验证）；`/v1/chat/completions`、`/v1/responses` 对此类分组一律 403；降级只换账号池，system 注入策略、计费与 RPM 仍取 Key 所在分组，降级分组上配的注入策略不起作用。版本窗（`min_claude_code_version` / `max_claude_code_version`）是全局的，不属于分组。
+- **Claude Code 专属分组**：识别靠 User-Agent（`claude-cli/版本号`）、三个必需请求头非空、system 里的计费块或与官方提示词模板相似的文本块、合法的 `metadata.user_id`（细节见 `docs/CURRENT_BEHAVIOR.md` 第 1 节「客户端准入」）。**强度：只防误用，不防有意伪造**——知道规则的人几行代码就能伪造，探测请求（UA + haiku + `max_tokens=1`）只看 UA 就放行；被放行的伪造请求会被当成真的 Claude Code，**不再受伪装保护**，原样进 OAuth 账号。无降级分组时，`/v1/messages` 与 count_tokens 上客户端见 503（读代码，未发请求验证）；`/v1/chat/completions`、`/v1/responses` 对此类分组一律 403；降级时选号读降级分组的整套配置（候选账号池、模型路由、混合池权重、渠道定价预检查、粘性会话），而 system 注入策略、计费与 RPM 仍取 Key 所在分组，降级分组上配的注入策略不起作用。版本窗（`min_claude_code_version` / `max_claude_code_version`）是全局的，不属于分组。
 - **分组帽子**：
   - 帽子只是把三个字段成套写好，**不改后端行为**；每顶帽子的强度与限制写在卡里选中项的展开文字里（文案在 `frontend/src/i18n/locales/{zh,en}/admin/overview.ts` 的 `admin.groups.hats.*`）。两顶 Claude Code 帽子的识别强度与拒绝表现见上一条。
   - 降级池帽子必须在卡内的下拉里选了降级分组才生效；降级流量的注入策略取 Key 所在分组，所以「降级流量的提示词策略」下拉放在本分组的卡上，不要去改降级分组自己的设置。降级池里的账号会收到被伪装过的第三方流量，要选能承受风险的账号。
