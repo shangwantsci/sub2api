@@ -277,6 +277,14 @@ func (s *stubAdminService) GetAllGroupsIncludingInactive(ctx context.Context) ([
 	return s.groups, nil
 }
 
+func (s *stubAdminService) SetGroupAccounts(ctx context.Context, id int64, accountIDs []int64) error {
+	return nil
+}
+
+func (s *stubAdminService) ListGroupAccounts(ctx context.Context, id int64) ([]service.Account, error) {
+	return nil, nil
+}
+
 func (s *stubAdminService) GetGroup(ctx context.Context, id int64) (*service.Group, error) {
 	group := service.Group{ID: id, Name: "group", Status: service.StatusActive}
 	return &group, nil

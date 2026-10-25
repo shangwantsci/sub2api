@@ -94,6 +94,27 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
+	ProcessPool             ProcessPoolConfig             `mapstructure:"process_pool"`
+}
+
+type ProcessPoolConfig struct {
+	BunPath     string `mapstructure:"bun_path"`
+	ForwarderJS string `mapstructure:"forwarder_js"`
+	DataDir     string `mapstructure:"data_dir"`
+	Upstream    string `mapstructure:"upstream"`
+
+	// Claude Code 运输（cc）。CCTransportEnabled 是总开关，默认关；
+	// 打开后 Anthropic OAuth/SetupToken 账号走 CC 进程池，其余账号仍走 Go 路径。
+	CCTransportEnabled     bool   `mapstructure:"cc_transport_enabled"`
+	ClaudeBinary           string `mapstructure:"claude_binary"`
+	CCMaxConcurrent        int    `mapstructure:"cc_max_concurrent"`
+	CCPerAccountConcurrent int    `mapstructure:"cc_per_account_concurrent"`
+	CCQueueLimit           int    `mapstructure:"cc_queue_limit"`
+	CCQueueWaitSeconds     int    `mapstructure:"cc_queue_wait_seconds"`
+	CCPersistentRuns       bool   `mapstructure:"cc_persistent_runs_enabled"`
+	CCCallbackBaseURL      string `mapstructure:"cc_callback_base_url"`
+	CCToolWaitSeconds      int    `mapstructure:"cc_tool_wait_seconds"`
+	CCRunTimeoutSeconds    int    `mapstructure:"cc_run_timeout_seconds"`
 }
 
 type LogConfig struct {
@@ -2179,6 +2200,18 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("log.format is required")
 	default:
 		return fmt.Errorf("log.format must be one of: json/console")
+	}
+	if c.ProcessPool.CCPersistentRuns && !c.ProcessPool.CCTransportEnabled {
+		return fmt.Errorf("process_pool.cc_persistent_runs_enabled requires process_pool.cc_transport_enabled=true")
+	}
+	if base := strings.TrimSpace(c.ProcessPool.CCCallbackBaseURL); base != "" {
+		u, err := url.Parse(base)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("process_pool.cc_callback_base_url must be an absolute http(s) URL")
+		}
+		if u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("process_pool.cc_callback_base_url must not contain query or fragment")
+		}
 	}
 	switch c.Log.StacktraceLevel {
 	case "none", "error", "fatal":

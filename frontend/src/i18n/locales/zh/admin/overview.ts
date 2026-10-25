@@ -975,7 +975,15 @@ export default {
         identityOnly: '仅必要身份（<200 tokens）',
         disabled: '关闭'
       },
-      hats: {
+      groupAccountsTitle: '分组账号',
+    groupAccountsHint: '勾选该客户分组可使用的账号',
+    groupAccountsLoadMore: '加载更多',
+    groupAccountsSearch: '搜索账号',
+    groupAccountsEmpty: '没有可选账号',
+    groupAccountsSave: '保存账号',
+    groupAccountsSaved: '分组账号已保存',
+    manageAccounts: '账号',
+    hats: {
         cc_line: {
           name: 'Claude Code 专线',
           short: 'CC 专线',

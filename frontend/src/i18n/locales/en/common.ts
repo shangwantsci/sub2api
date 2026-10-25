@@ -166,6 +166,7 @@ export default {
     channels: 'Channels',
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
+    pool: 'Pool',
     accounts: 'Accounts',
     proxies: 'Proxies',
     providers: 'Provider Settlement',

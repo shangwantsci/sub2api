@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude 订阅号池运行原理</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#121a2f; --panel2:#0f172a; --line:#27324d;
+    --text:#e7ecf7; --muted:#93a1bd; --blue:#5aa9ff; --cyan:#47d7c8;
+    --green:#5ad48a; --amber:#f2b75b; --red:#ff7a85; --violet:#b18cff;
+    --shadow:0 18px 50px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:
+      radial-gradient(1000px 500px at 15% -10%, #1b2a55 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #173b3a 0%, transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  a{color:var(--cyan)}
+  .wrap{max-width:1240px;margin:0 auto;padding:42px 22px 70px}
+  header{display:flex;gap:20px;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;margin-bottom:28px}
+  h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:.2px}
+  .sub{color:var(--muted);max-width:820px;margin:0}
+  .pill{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px;background:rgba(255,255,255,.03)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green)}
+  h2{font-size:19px;margin:36px 0 14px;display:flex;align-items:center;gap:10px}
+  h2 .num{display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border-radius:8px;background:#1b2742;color:var(--blue);font-size:12px;border:1px solid var(--line)}
+  .grid{display:grid;gap:14px}
+  .topo{grid-template-columns:1fr 1.15fr 1.05fr}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.015));border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+  .card h3{margin:0 0 8px;font-size:14px;letter-spacing:.4px;color:#dbe5f8}
+  .card p{margin:6px 0;color:var(--muted);font-size:13px}
+  .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:6px;border:1px solid var(--line);color:var(--muted);margin:2px 4px 2px 0;white-space:nowrap}
+  .tag.blue{color:var(--blue);border-color:#2b4f7d;background:#12233c}
+  .tag.green{color:var(--green);border-color:#285b40;background:#10251b}
+  .tag.amber{color:var(--amber);border-color:#6b4d22;background:#2a2113}
+  .tag.red{color:var(--red);border-color:#6d3038;background:#2a1418}
+  .tag.violet{color:var(--violet);border-color:#4c3b73;background:#1d1730}
+  .stack{display:flex;flex-direction:column;gap:9px}
+  .layer{border:1px solid var(--line);border-radius:12px;padding:11px 12px;background:var(--panel2)}
+  .layer b{font-size:13px}
+  .layer small{display:block;color:var(--muted);margin-top:2px}
+  .arrow{color:#4c618c;text-align:center;font-size:18px;line-height:1}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .pool{border-radius:12px;padding:12px;border:1px dashed #3a4a6b;background:#0c1427}
+  .pool.cc{border-color:#2e6f68;background:linear-gradient(180deg,#0d2424,#0c1427)}
+  .pool.api{border-color:#5b4a24;background:linear-gradient(180deg,#261f10,#0c1427)}
+  .pool h4{margin:0 0 4px;font-size:13px}
+  .pool ul{margin:6px 0 0 16px;padding:0;color:var(--muted);font-size:12px}
+  .pool li{margin:3px 0}
+  .infra{grid-template-columns:repeat(3,1fr);margin-top:14px}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:7px 14px;font-size:13px}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0}
+  .steps{counter-reset:s;display:grid;gap:9px}
+  .step{position:relative;padding:12px 14px 12px 46px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}
+  .step:before{counter-increment:s;content:counter(s);position:absolute;left:12px;top:12px;width:24px;height:24px;border-radius:8px;background:#162649;color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid #2b4470}
+  .step b{font-size:13px}
+  .step p{margin:3px 0 0;color:var(--muted);font-size:12.5px}
+  .timeline{display:grid;grid-template-columns:130px 1fr;gap:8px 14px;align-items:start}
+  .tl-time{font-size:12px;color:var(--muted);padding-top:4px}
+  .tl-box{border-left:2px solid #2b4470;padding:8px 0 8px 14px}
+  .tl-box b{font-size:13px}
+  .tl-box p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+  table{width:100%;border-collapse:collapse;font-size:13px;overflow:hidden;border-radius:12px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#151f37;color:#cfdaee;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  td{color:var(--muted)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#cfe0ff;background:#0a1224;border:1px solid #22304c;border-radius:5px;padding:1px 5px}
+  .note{border:1px solid #6b4d22;background:#241d10;color:#f3d7a5;border-radius:12px;padding:12px 14px;font-size:13px}
+  .ok{border:1px solid #285b40;background:#0f241a;color:#b7ebc9}
+  .bad{border:1px solid #6d3038;background:#281317;color:#ffc4c8}
+  .footer{color:var(--muted);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:8px 0 0}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+  @media (max-width:980px){
+    .topo,.infra{grid-template-columns:1fr}
+    .split{grid-template-columns:1fr}
+    .kv{grid-template-columns:120px 1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Claude 订阅号池：现在的运行原理</h1>
+      <p class="sub">客户 → 分组 → 账号集合 → 运输选择 → 调度/槽位 → Claude Code 进程或 Go 网关。分组不再按功能帽子区分，只决定“这个客户能用哪些账号”。</p>
+    </div>
+    <span class="pill"><span class="dot"></span> 当前实现 · P2</span>
+  </header>
+
+  <div class="legend">
+    <span><i class="sw" style="background:#47d7c8"></i> CC 运输</span>
+    <span><i class="sw" style="background:#f2b75b"></i> Go 网关</span>
+    <span><i class="sw" style="background:#b18cff"></i> Redis 状态</span>
+    <span><i class="sw" style="background:#5aa9ff"></i> 调度/网关层</span>
+  </div>
+
+  <h2><span class="num">1</span> 拓扑</h2>
+  <div class="grid topo">
+    <div class="card">
+      <h3>客户端</h3>
+      <p><b>Claude Code / Anthropic SDK</b><br><code>/v1/messages</code>，可带 tools、image。</p>
+      <p><b>OpenAI SDK</b><br><code>/v1/chat/completions</code>、<code>/v1/responses</code>。</p>
+      <p><b>其它</b><br><code>/v1/messages/count_tokens</code>、模型列表等。</p>
+      <div style="margin-top:10px">
+        <span class="tag blue">Authorization: Bearer API Key</span>
+        <span class="tag">session 头 / metadata.user_id</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="layer"><b>鉴权 / 客户识别</b><small>API Key → 客户 → 分组；用户并发、计费资格、内容审计。</small></div>
+      <div class="arrow">↓</div>
+      <div class="layer"><b>分组 = 客户可用账号集合</b><small>分组只提供账号集合、限额、RPM/并发、模型路由、运营配置；不再有 CC-only/fallback/功能帽子。</small></div>
+      <div class="arrow">↓</div>
+      <div class="layer"><b>模型路由 / 候选过滤</b><small>平台、模型、状态、限额、RPM、5h 窗口、健康度、会话粘性。</small></div>
+      <div class="arrow">↓</div>
+      <div class="layer"><b>调度器</b><small>优先级 → 负载 → 最早重置 → LRU；原子预占账号槽；有界队列。</small></div>
+    </div>
+
+    <div class="stack">
+      <div class="pool cc">
+        <h4>OAuth / SetupToken 账号</h4>
+        <div><span class="tag green">Transport = cc</span></div>
+        <ul>
+          <li>每账号独立 HOME / credentials / forwarder</li>
+          <li>真实 Claude Code 二进制</li>
+          <li>RunManager：session → 进程 / 槽 / lease</li>
+          <li>MCP 工具桥、图片、session resume</li>
+        </ul>
+      </div>
+      <div class="pool api">
+        <h4>API Key / Bedrock 账号</h4>
+        <div><span class="tag amber">Transport = api</span></div>
+        <ul>
+          <li>Go HTTP 直连上游</li>
+          <li>不做 CC 进程 / mimicry</li>
+          <li>支持 chat/responses 等 OpenAI 兼容端点</li>
+          <li>与 CC 账号不互相 fallback</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid infra">
+    <div class="card">
+      <h3>Redis</h3>
+      <p><code>sticky_session:*</code> 账号粘性</p>
+      <p><code>cc_sticky_first:*</code> 2h 绝对上限</p>
+      <p><code>cc_run_lease:*</code> 多实例 run owner</p>
+      <p><code>session / queue / RPM</code> 运行时状态</p>
+    </div>
+    <div class="card">
+      <h3>PostgreSQL</h3>
+      <p>客户、API Key、分组、账号、AccountGroups 绑定。</p>
+      <p>分组账号集合通过 <code>GET/PUT /admin/groups/:id/accounts</code> 维护。</p>
+      <p>替换账号集合使用事务：DELETE + INSERT + scheduler outbox。</p>
+    </div>
+    <div class="card">
+      <h3>每账号运行时</h3>
+      <p><code>&lt;data_dir&gt;/cc/acct-&lt;id&gt;/</code></p>
+      <p><code>.claude/.credentials.json</code></p>
+      <p><code>.claude.json</code> 设备/会话状态</p>
+      <p>本地 HTTPS forwarder 作为 <code>ANTHROPIC_BASE_URL</code></p>
+    </div>
+  </div>
+
+  <h2><span class="num">2</span> 一次 /v1/messages 请求怎么走</h2>
+  <div class="steps">
+    <div class="step"><b>鉴权与客户/分组</b><p>API Key 找到客户与分组；分组给出可用账号集合，不再判断“是不是 CC 分组”。</p></div>
+    <div class="step"><b>解析请求</b><p>模型、system、messages、tools、image、max_tokens。CC 路径目前不接受 temperature，max_tokens 接受但忽略。</p></div>
+    <div class="step"><b>候选账号</b><p>按分组账号集合、平台、模型、状态、限额、5h 窗口、RPM、健康度过滤；会话粘性优先。</p></div>
+    <div class="step"><b>原子预占槽位</b><p>CC 账号用 <code>TryAcquire</code> 预占账号槽 + 全局槽；满了先试其它账号，仍有界排队。API Key 账号走 Redis 账号槽。</p></div>
+    <div class="step"><b>确定运输</b><p>账号类型决定运输：OAuth/SetupToken → CC；API Key/Bedrock → Go。一次请求不会跨运输 fallback。</p></div>
+    <div class="step"><b>CC 路径</b><p>Build turn → 选择/恢复 session → 拿 MCP token → 启动或复用进程 → 写 stream-json → 读事件 → 转 SSE。</p></div>
+    <div class="step"><b>计费 / 记录</b><p>按客户输入 + 上游 output 归一化 usage；CC 注入前缀不计客户费；记录账号、模型、渠道、session。</p></div>
+  </div>
+
+  <h2><span class="num">3</span> 持久 run 与工具调用</h2>
+  <div class="card">
+    <div class="timeline">
+      <div class="tl-time">请求 A</div>
+      <div class="tl-box"><b>普通文本 / 图片</b><p>RunManager 启动 CC 进程，发送首轮 user turn，流式返回。</p></div>
+      <div class="tl-time">工具阶段</div>
+      <div class="tl-box"><b>CC 决定调用客户端工具</b><p>MCP helper 回调网关；RunManager 发 <code>tool_use</code> SSE，结束当前 HTTP 响应，但进程、账号槽、run lease 保持。</p></div>
+      <div class="tl-time">请求 B</div>
+      <div class="tl-box"><b>客户端回填 tool_result</b><p>同一个 session 命中同一个 run；Resolve pending，<code>ContinueSession</code> 继续读 CC，最终 result 返回并计费。</p></div>
+      <div class="tl-time">idle / 超时</div>
+      <div class="tl-box"><b>3min idle 或 15min 总寿命</b><p>关闭进程，保存 sessionID；下一次请求用 <code>--resume</code> 恢复。工具等待默认 5min，超时释放 run。</p></div>
+    </div>
+    <div class="note" style="margin-top:12px">工具桥需要：<code>cc_persistent_runs_enabled=true</code> + <code>cc_callback_base_url</code>；否则只有纯文本/图片路径。</div>
+  </div>
+
+  <h2><span class="num">4</span> 如果请求不是 /v1/messages</h2>
+  <table>
+    <thead><tr><th>请求</th><th>OAuth / SetupToken 账号</th><th>API Key / Bedrock 账号</th></tr></thead>
+    <tbody>
+      <tr><td><code>/v1/messages</code></td><td>CC 运输；CC 开关关闭时 503</td><td>Go 网关</td></tr>
+      <tr><td><code>/v1/messages/count_tokens</code></td><td>400，CC 不提供该端点</td><td>Go 网关</td></tr>
+      <tr><td><code>/v1/chat/completions</code></td><td>400，明确要求用 API Key 分组</td><td>Go 网关，支持</td></tr>
+      <tr><td><code>/v1/responses</code></td><td>400，明确要求用 API Key 分组</td><td>Go 网关，支持</td></tr>
+      <tr><td><code>/v1/models</code></td><td>账号/分组维度的模型列表</td><td>同左</td></tr>
+    </tbody>
+  </table>
+  <div class="bad" style="margin-top:12px">当前没有“把 OpenAI chat/responses 翻译成 CC”的适配层。OAuth 号池只服务 Anthropic Messages 形态；OpenAI 形态客户端必须走 API Key/Bedrock 分组。</div>
+  <div class="note" style="margin-top:10px">如果分组里同时有 OAuth 和 API Key 账号，非 messages 请求如果先选中 OAuth，会直接 400，不会自动换到 API Key 账号。生产上建议按客户端协议拆分组，或后续增加“按端点过滤账号类型”。</div>
+
+  <h2><span class="num">5</span> 分组现在是什么</h2>
+  <div class="grid" style="grid-template-columns:1.2fr 1fr">
+    <div class="card">
+      <h3>客户导向</h3>
+      <p><b>客户 → API Key → 分组 → 账号集合</b></p>
+      <p>分组不再表达“CC 分组 / 非 CC / 降级分组 / 功能帽子”。它只回答：这个客户能用哪些账号，以及限额、RPM/并发、模型路由。</p>
+      <p>已删除：<span class="tag red">claude_code_only</span><span class="tag red">fallback_group_id</span><span class="tag red">invalid-request fallback</span><span class="tag red">require_oauth_only</span><span class="tag red">require_privacy_set</span><span class="tag red">mixed type weights</span><span class="tag red">system prompt policy</span></p>
+      <p>保留为运营配置：<span class="tag blue">限额</span><span class="tag blue">RPM / 并发</span><span class="tag blue">模型路由</span><span class="tag blue">内容审计</span><span class="tag blue">OpenAI messages dispatch</span></p>
+    </div>
+    <div class="card">
+      <h3>账号集合操作</h3>
+      <p><code>GET /api/v1/admin/groups/:id/accounts</code></p>
+      <p><code>PUT /api/v1/admin/groups/:id/accounts</code></p>
+      <p>请求：<code>{"account_ids":[1,2,3]}</code></p>
+      <p>管理端“分组 → 账号”弹窗支持搜索、分页、勾选、保存。</p>
+      <p>写入使用 <code>ReplaceGroupAccounts</code> 事务，并写 scheduler outbox 刷新调度快照。</p>
+    </div>
+  </div>
+
+  <h2><span class="num">6</span> 生产开关与边界</h2>
+  <div class="card">
+    <dl class="kv">
+      <dt><code>cc_transport_enabled</code></dt><dd>CC 总开关。关闭时 OAuth <code>/v1/messages</code> 返回 503，不回退旧 Go 伪装。</dd>
+      <dt><code>cc_persistent_runs_enabled</code></dt><dd>同一 session 复用 CC 进程；关闭时一请求一进程。</dd>
+      <dt><code>cc_callback_base_url</code></dt><dd>MCP helper 回调地址；不带 tools 的请求不依赖它。</dd>
+      <dt><code>cc_tool_wait_seconds</code></dt><dd>等待客户端 tool_result 的超时，默认 300s。</dd>
+      <dt><code>cc_max_concurrent / cc_per_account_concurrent</code></dt><dd>全局 / 单账号并发。一个并发槽 = 一个活跃 run。</dd>
+      <dt><code>cc_run_timeout_seconds</code></dt><dd>一次性 CC 请求超时，默认 90s。</dd>
+      <dt>Redis lease</dt><dd><code>cc_run_lease:{session}</code>；10min TTL、3min 心跳、非 owner 409。</dd>
+      <dt>2h 粘性</dt><dd><code>cc_sticky_first:{group}:{session}</code>；到期清理 sticky binding，重新选号。</dd>
+    </dl>
+  </div>
+
+  <div class="footer">
+    说明：本图对应当前工作区实现。号池前端按约定未做；真实 CC + MCP 冒烟尚未在本机执行（本机没有 claude 二进制），图中运行时行为来自代码与单测。
+  </div>
+</div>
+</body>
+</html>

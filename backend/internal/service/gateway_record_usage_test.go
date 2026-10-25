@@ -33,7 +33,6 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,
 		&BillingCacheService{},
 		nil,
-		nil,
 		&DeferredService{},
 		nil,
 		nil,
@@ -45,6 +44,7 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,
 		nil,
 		nil, // userPlatformQuotaRepo
+		nil, // claudeCodeRuntime
 	)
 }
 

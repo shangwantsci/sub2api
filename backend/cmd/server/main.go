@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/internal/ccmcp"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -53,6 +54,14 @@ func init() {
 // initLogger configures the default slog handler based on gin.Mode().
 // In non-release mode, Debug level logs are enabled.
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "cc-mcp-helper" {
+		if err := ccmcp.Run(context.Background(), os.Args[2:]); err != nil {
+			log.Printf("cc-mcp-helper: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	logger.InitBootstrap()
 	defer logger.Sync()
 
@@ -175,6 +184,11 @@ func runMainServer() {
 
 	if err := app.Server.Shutdown(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	// 停掉每个账号的 forwarder 子进程；不做的话 Go 每次重启都会漏一批 Bun 进程。
+	if app.ProcessPool != nil {
+		app.ProcessPool.Shutdown()
 	}
 
 	log.Println("Server exited")

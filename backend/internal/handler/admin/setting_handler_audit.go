@@ -404,27 +404,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableCCHSigning != after.EnableCCHSigning {
 		changed = append(changed, "enable_cch_signing")
 	}
-	if before.ClaudeCodeMimicryProfile != after.ClaudeCodeMimicryProfile {
-		changed = append(changed, "claude_code_mimicry_profile")
-	}
-	if before.ClaudeMimicryGuardMode != after.ClaudeMimicryGuardMode {
-		changed = append(changed, "claude_mimicry_guard_mode")
-	}
-	if before.EnableClaudeOAuthSystemPromptInjection != after.EnableClaudeOAuthSystemPromptInjection {
-		changed = append(changed, "enable_claude_oauth_system_prompt_injection")
-	}
-	if before.EnableClaudeOAuthBillableInputTokens != after.EnableClaudeOAuthBillableInputTokens {
-		changed = append(changed, "enable_claude_oauth_billable_input_tokens")
-	}
-	if before.ClaudeOAuthBillableInputTokensOverride != after.ClaudeOAuthBillableInputTokensOverride {
-		changed = append(changed, "claude_oauth_billable_input_tokens_override")
-	}
-	if before.ClaudeOAuthSystemPrompt != after.ClaudeOAuthSystemPrompt {
-		changed = append(changed, "claude_oauth_system_prompt")
-	}
-	if before.ClaudeOAuthSystemPromptBlocks != after.ClaudeOAuthSystemPromptBlocks {
-		changed = append(changed, "claude_oauth_system_prompt_blocks")
-	}
 	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
 		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
 	}

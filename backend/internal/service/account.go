@@ -1856,8 +1856,7 @@ func (a *Account) IsTLSFingerprintEnabled() bool {
 }
 
 // TLSFingerprintSetting 返回 extra.enable_tls_fingerprint 的三态原值，供管理端展示：
-//   - nil：extra 里没有这个键（缺省）。运行时由 ResolveTLSProfileForClaudeMimic 决定——
-//     Claude Code 伪装路径默认使用内置 TLS 指纹，其它路径不伪装；
+//   - nil：extra 里没有这个键（缺省），运行时由通用 ResolveTLSProfile 决定；
 //   - true / false：显式开启 / 关闭；
 //   - 键存在但不是 bool：与 accountHasExplicitTLSFingerprintNonTrue 一致，按显式关闭（false）。
 //

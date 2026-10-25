@@ -44,7 +44,6 @@ func TestGatewayService_BuildAnthropicVertexServiceAccountRequest(t *testing.T) 
 		"service_account",
 		"claude-sonnet-4-5@20250929",
 		false,
-		false,
 	)
 	require.NoError(t, err)
 	require.Equal(t, "https://us-east5-aiplatform.googleapis.com/v1/projects/vertex-proj/locations/us-east5/publishers/anthropic/models/claude-sonnet-4-5@20250929:rawPredict", req.URL.String())
@@ -89,7 +88,7 @@ func TestGatewayService_BuildAnthropicVertexServiceAccount_StripsContextManageme
 	svc := &GatewayService{}
 	req, _, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body,
-		"vertex-token", "service_account", "claude-haiku-4-5@20251001", false, false,
+		"vertex-token", "service_account", "claude-haiku-4-5@20251001", false,
 	)
 	require.NoError(t, err)
 
@@ -119,7 +118,7 @@ func TestGatewayService_BuildAnthropicVertexServiceAccount_PreservesContextManag
 	svc := &GatewayService{}
 	req, _, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body,
-		"vertex-token", "service_account", "claude-sonnet-4-6@20260218", false, false,
+		"vertex-token", "service_account", "claude-sonnet-4-6@20260218", false,
 	)
 	require.NoError(t, err)
 

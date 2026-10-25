@@ -179,24 +179,17 @@ type SystemSettings struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification           bool   `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough              bool   `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                       bool   `json:"enable_cch_signing"`
-	ClaudeCodeMimicryProfile               string `json:"claude_code_mimicry_profile"`
-	ClaudeMimicryGuardMode                 string `json:"claude_mimicry_guard_mode"`
-	EnableClaudeOAuthSystemPromptInjection bool   `json:"enable_claude_oauth_system_prompt_injection"`
-	EnableClaudeOAuthBillableInputTokens   bool   `json:"enable_claude_oauth_billable_input_tokens"`
-	ClaudeOAuthBillableInputTokensOverride int    `json:"claude_oauth_billable_input_tokens_override"`
-	ClaudeOAuthSystemPrompt                string `json:"claude_oauth_system_prompt"`
-	ClaudeOAuthSystemPromptBlocks          string `json:"claude_oauth_system_prompt_blocks"`
-	EnableAnthropicCacheTTL1hInjection     bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl             bool   `json:"rewrite_message_cache_control"`
-	EnableClientDatelineNormalization      bool   `json:"enable_client_dateline_normalization"`
-	AccountNurturingEnabled                bool   `json:"account_nurturing_enabled"`
-	PoolHealthEnabled                      bool   `json:"pool_health_enabled"`
-	PoolHealthGroupName                    string `json:"pool_health_group_name"`
-	AntigravityUserAgentVersion            string `json:"antigravity_user_agent_version"`
-	OpenAICodexUserAgent                   string `json:"openai_codex_user_agent"`
+	EnableFingerprintUnification       bool   `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          bool   `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   bool   `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl         bool   `json:"rewrite_message_cache_control"`
+	EnableClientDatelineNormalization  bool   `json:"enable_client_dateline_normalization"`
+	AccountNurturingEnabled            bool   `json:"account_nurturing_enabled"`
+	PoolHealthEnabled                  bool   `json:"pool_health_enabled"`
+	PoolHealthGroupName                string `json:"pool_health_group_name"`
+	AntigravityUserAgentVersion        string `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent               string `json:"openai_codex_user_agent"`
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`

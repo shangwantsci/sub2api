@@ -298,22 +298,18 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *t
 			Concurrency: 3,
 		},
 		Group: &Group{
-			ID:                              groupID,
-			Name:                            "anthropic",
-			Platform:                        PlatformAnthropic,
-			Status:                          StatusActive,
-			SubscriptionType:                SubscriptionTypeStandard,
-			RateMultiplier:                  1,
-			VideoRateIndependent:            true,
-			VideoRateMultiplier:             1.25,
-			VideoPrice480P:                  &videoPrice480P,
-			VideoPrice720P:                  &videoPrice720P,
-			VideoPrice1080P:                 &videoPrice1080P,
-			AnthropicMixedTypeWeightEnabled: true,
-			AnthropicSetupTokenPoolWeight:   70,
-			AnthropicAPIKeyPoolWeight:       30,
-			ContentReviewPolicy:             GroupPolicyDisabled,
-			ClaudeOAuthSystemPromptPolicy:   GroupPolicyIdentityOnly,
+			ID:                   groupID,
+			Name:                 "anthropic",
+			Platform:             PlatformAnthropic,
+			Status:               StatusActive,
+			SubscriptionType:     SubscriptionTypeStandard,
+			RateMultiplier:       1,
+			VideoRateIndependent: true,
+			VideoRateMultiplier:  1.25,
+			VideoPrice480P:       &videoPrice480P,
+			VideoPrice720P:       &videoPrice720P,
+			VideoPrice1080P:      &videoPrice1080P,
+			ContentReviewPolicy:  GroupPolicyDisabled,
 		},
 	}
 
@@ -327,11 +323,7 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesAnthropicMixedTypeWeights(t *t
 	require.Equal(t, &videoPrice480P, roundTrip.Group.VideoPrice480P)
 	require.Equal(t, &videoPrice720P, roundTrip.Group.VideoPrice720P)
 	require.Equal(t, &videoPrice1080P, roundTrip.Group.VideoPrice1080P)
-	require.True(t, roundTrip.Group.AnthropicMixedTypeWeightEnabled)
-	require.Equal(t, 70, roundTrip.Group.AnthropicSetupTokenPoolWeight)
-	require.Equal(t, 30, roundTrip.Group.AnthropicAPIKeyPoolWeight)
 	require.Equal(t, GroupPolicyDisabled, roundTrip.Group.ContentReviewPolicy)
-	require.Equal(t, GroupPolicyIdentityOnly, roundTrip.Group.ClaudeOAuthSystemPromptPolicy)
 }
 
 func TestAPIKeyService_GetByKey_IgnoresLegacyAuthCacheSnapshotWithoutMessagesDispatchConfig(t *testing.T) {

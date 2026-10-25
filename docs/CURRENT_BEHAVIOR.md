@@ -9,12 +9,14 @@
 路由 `backend/internal/server/routes/gateway.go` · `RegisterGatewayRoutes`：body 大小限制 → 请求 ID → Ops 错误日志 → 端点归一 → API Key 鉴权 → `RequireGroupAssignment`（Key 没绑分组、且设置 `allow_ungrouped_key_scheduling` 为关，就 403）→ 按分组平台分流。Claude 分组进 `backend/internal/handler/gateway_handler.go` · `GatewayHandler.Messages`，下面第 2–10 步都在这个函数里按序发生。
 总览：鉴权 → 内容审查 → 用户并发槽 → 计费资格 → 选号 → 预热拦截/排队等槽 → 用户消息限速 → 转发 → 失败处理 → 收尾记账。
 
+> **P2 当前（2026-10-25）**：Anthropic OAuth/SetupToken 账号只支持 `/v1/messages` 的 Claude Code 运输（`process_pool.cc_transport_enabled` 打开时）；关闭时返回 503，不回退 Go 伪装。API Key/Bedrock 继续走 Go 转发。分组已删除 CC-only/fallback/准入筛选等功能帽子，只保留账号集合、限额、模型路由等内容。持久 run 由 `process_pool.cc_persistent_runs_enabled` 控制（默认 false），多实例靠 Redis run lease；工具桥通过 `cc_callback_base_url` + MCP helper。
+
 1. **鉴权**（`backend/internal/server/middleware/api_key_auth.go` · `apiKeyAuthWithSubscription`）。取 Key（`Authorization: Bearer` → `x-api-key` → `x-goog-api-key`；URL 里带 `key` 直接 400）→ Key 存在 → Key 状态（`disabled` 等直接 401；`expired`/`quota_exhausted` 留给本函数的计费段）→ Key 的 IP 白/黑名单（403）→ 用户存在且 active → 分组未删除且启用 → 专属分组仍允许该用户（订阅分组免查）→ 订阅分组取有效订阅（没有就 403）→ 计费段：Key 已过期（403）、Key 总额度 `quota` 用尽（429）→ 订阅日/周/月限额（429），非订阅分组则余额 ≤ 0（403）。`run_mode=simple` 时过了前几关就放行、不查计费。
 2. **内容审查**（`backend/internal/handler/content_moderation_helper.go` · `checkContentModeration` → `backend/internal/service/content_moderation.go` · `ContentModerationService.Check`）。上游自带的「风控中心」。读：设置 `risk_control_enabled`（总开关）与 `content_moderation_config`（enabled、模式 off/observe/pre_block、分组与模型范围、关键词、审核 API Key）、分组自己的审查策略。总开关关着就什么都不做；observe 只异步记录；pre_block 才同步拦截（关键词 → 历史命中 hash → 审核 API），拦截返回 `content_policy_violation`（状态码取配置，默认 403）；审查自身出错一律放行。
 3. **用户并发槽**（`backend/internal/handler/gateway_helper.go` · `ConcurrencyHelper.AcquireUserSlotWithWait`）。读该用户的 `users.concurrency`（鉴权时放进 `AuthSubject`）。占满就排队（排队人数也有上限，满了直接报错），流式请求等待期间发 SSE ping（心跳帧，防客户端等得断开），超时报错；请求结束释放。
 4. **计费资格检查**（`backend/internal/service/billing_cache_service.go` · `BillingCacheService.CheckBillingEligibility`；排完队再查一遍）。顺序：熔断器 → 余额（> 0 且不低于配置 `billing.minimum_balance_reserve`）或订阅状态与限额 → （余额模式）用户×平台日/周/月额度 → Key 的 5h/1d/7d 限速窗口 → RPM（每分钟请求数）。RPM 放最后（避免给注定失败的请求计数），且几项**并行生效、任一超限即 429**（带 `Retry-After`）：用户×分组覆盖值 `rpm_override` 存在时替代分组的 `rpm_limit`（覆盖值 0 = 该用户在该分组免检），用户自己的 `rpm_limit` 始终另外生效；Redis 出错放行。
 5. **选号**（`backend/internal/service/gateway_scheduling.go` · `GatewayService.SelectAccountWithLoadAwareness`）。
-   - 前置：`checkClaudeCodeRestriction`（分组开了 `claude_code_only` 而客户端不是 Claude Code → 改走降级分组或拒绝）、`checkChannelPricingRestriction`（渠道定价限制）；取该会话绑定的账号 id（handler 预取，否则读 Redis）。
+   - 前置：解析分组与渠道定价限制；分组不再按 `claude_code_only`/fallback 改路由，只按绑定账号集合调度；取会话绑定账号 id（handler 预取，否则读 Redis）。
    - 候选集：`listSchedulableAccounts` → `backend/internal/service/scheduler_snapshot_service.go` · `ListSchedulableAccounts`，读 Redis 里「分组×平台×模式」的**调度快照**（可调度账号的精简副本，`extra` 只留白名单键，见第 2 节）；没命中才查库并回填。随后批量预取各账号 5h 窗口花费与 RPM 计数、读运行时冷却表（`RateLimitService.GetAccountRuntimeSchedulingBlocks`）。选中的账号最后会被「水合」（`hydrateSelectedAccount`：用完整账号替换精简副本，之后转发/计费/UMQ 读的都是完整账号）。
    - 三层按序尝试，命中即返回：
      - **模型路由层**（仅 anthropic 分组，且分组开了 `model_routing_enabled`、规则匹配所请求的模型）：候选只限规则指定的账号，**优先于粘性复用**；路由列表内先看粘性绑定账号，没有再排序抢槽；路由账号全不可用才落到负载感知层（此时不再做粘性复用，候选扩大到整个分组）。
@@ -27,8 +29,7 @@
 8. **转发**（`backend/internal/service/gateway_forward.go` · `GatewayService.Forward` → `backend/internal/service/gateway_upstream_request.go` · `buildUpstreamRequest`）。
    - Beta 策略（`evaluateBetaPolicy`，读设置 `beta_policy_settings`）：命中 block 规则 → 直接 400、不换号；命中 filter 规则 → 从 `anthropic-beta` 头里剔除对应 token。
    - 指纹统一（所有 OAuth/SetupToken 账号，设置 `enable_fingerprint_unification`，默认开）：账号固定一份指纹（User-Agent、X-Stainless-* 等），并改写 `metadata.user_id`（设置 `enable_metadata_passthrough` 开则透传不改）。
-   - 伪装（mimicry，让第三方客户端的请求看起来像官方 Claude Code CLI）：仅当账号是 OAuth/SetupToken、且客户端**不是**通过 handler 严格校验的真 Claude Code 时才做（`Forward` 里的 `shouldMimicClaudeCode` 判定）：改写 system、`metadata.user_id`、工具名、`cache_control`，并写入 Claude Code 的指纹头；TLS 指纹取账号自己的配置（`enable_tls_fingerprint` / 指纹模板），没配置时用内置的 Claude Code TLS profile。真 Claude Code 客户端不做这些 body 级改写（模型映射、`cache_control` 限 4 块、dateline 归一等通用整理照常执行）。读设置 `claude_code_mimicry_profile`（`tools/cc-calibrate` 标定出的 `claude_code_calibrated_profile` 存在且守卫通过时，优先于内置常量）、`claude_oauth_system_prompt` 与 `claude_oauth_system_prompt_blocks`。
-   - 伪装守卫（`backend/internal/service/claude_mimicry_guard.go` · `enforceClaudeMimicryGuard`）：请求组装完、发出之前，对照 profile 审计请求头、`anthropic-beta`、system 块（含计费块里的 `cc_version`）、`metadata.user_id` 与会话头，读设置 `claude_mimicry_guard_mode`：`off` 不查；`warn`（默认）只记 `[ClaudeMimicryGuard]` 日志；`block` 发现不一致就本地拒绝、不发上游。只在 OAuth 伪装路径执行。
+   - OAuth/SetupToken 已走 Claude Code 进程（P2）：不再由网关做 body/TLS mimic；API Key/Bedrock 走 Go 转发，也不做 mimicry。旧 body builder、identity、mimic guard、calibrated profile 与相关设置已删除。
 9. **失败处理**（由里到外三层）。
    - ① `Forward` 内部同号重试：最多 5 次、总耗时 ≤ 10 秒，退避 0.3 秒起翻倍、封顶 3 秒。Claude OAuth/SetupToken 账号只对 403 重试；API Key 账号只有开了「自定义错误码」、且该状态码不在清单里才重试（默认不重试）；400 的 thinking 签名/预算错误由整流器（失败后自动改写请求体再试一次的容错逻辑）重试一次（设置里有开关）。
    - ② 重试用完、或不可重试的 401/403/429/529/5xx：先 `handleFailoverSideEffects` 把账号状态改好（冷却见下），再返回 `UpstreamFailoverError` 给 handler。
@@ -36,14 +37,16 @@
    - 冷却（`backend/internal/service/ratelimit_service.go` · `HandleUpstreamError`）：429 → 解析 5h/7d 窗口重置时间写 `rate_limit_reset_at`（该时间前账号不可调度；Fable 的 7d 窗口只记模型级限流）；没有重置时间头的 429 → 固定 1 分钟运行时冷却（设置 `rate_limit_429_cooldown_settings` 可关）。529 → 写 `overload_until`，默认冷却 10 分钟（设置 `overload_cooldown_settings`）。401：`type=oauth` 的账号清 token 缓存并临时不可调度 `rate_limit.oauth_401_cooldown_minutes`（默认 10 分钟），没有 refresh_token 则直接标 error；其它类型（setup-token、API Key）的 401 直接标 error。冷却期内账号会被第 5 步的 ②③ 过滤掉。
 10. **成功收尾**（`Messages`）。RPM 计数 +1（`IncrementAccountRPM`，仅 Claude OAuth/SetupToken 且配了 `base_rpm`；读-加之间允许短暂超额）→ 写/续粘性绑定（`BindStickySession`；首次，或选中的就是原绑定账号时才写，原绑定账号只是被临时跳过时不覆盖）→ 把用量交给有界 worker 池记账（`RecordUsage`，不阻塞响应）。
 
-### 客户端准入（分组开了 `claude_code_only`）：怎么判定、有多强、拒绝时什么样
+### 客户端识别（分组功能限制已移除）
 
 第 5 步前置里的 `checkClaudeCodeRestriction` 是它的执行点。管理端界面上，这个开关、降级分组与 system 注入策略合在分组的「帽子」里（`frontend/src/components/admin/group/groupHats.ts`），帽子只是把三个字段成套写好，**不改后端行为**；各帽子的字段映射见 `docs/FEATURES.md` 第 5 节「分组帽子」。
 
-- **判定**（`backend/internal/handler/gateway_helper.go` · `SetClaudeCodeClientContext` → `backend/internal/service/claude_code_validator.go` · `ClaudeCodeValidator.Validate`；鉴权之后、选号之前给请求打「是否 Claude Code」标记，只在 `GatewayHandler.Messages` 与 `GatewayHandler.CountTokens` 两个入口执行）。User-Agent 匹配 `claude-cli/数字.数字.数字`（忽略大小写，只看开头）是前提，之后分情况：非 `messages` 路径到此即为真；`max_tokens=1` 且模型是 haiku 的探测请求到此即为真；count_tokens 只再查三个头与 `metadata.user_id`，不查 system；普通 `/v1/messages` 还要同时满足 ① `system` 是数组，且其中有计费块（以 `x-anthropic-billing-header` 开头并含 `cc_entrypoint=`）或与 6 条官方提示词模板之一的 Dice 相似度（按字符二元组算的相似度）≥ 0.5 的文本块，② `X-App`、`anthropic-beta`、`anthropic-version` 三个头都非空（只查非空，不查内容），③ `metadata.user_id` 能被 `ParseMetadataUserID` 解析，且请求若带了 `X-Claude-Code-Session-Id` 头，必须与 user_id 里的 session 一致。
-- **强度**：这是「长得像」的启发式检查，不是身份证明，服务端没有任何可验证的凭据；知道规则的人几行代码就能伪造（读代码并用桩跑校验函数得出，没有对真实服务发过伪造请求）；最便宜的绕法是探测豁免（UA + haiku + `max_tokens=1`，只看 UA）。**被放行的伪造请求会被当成真的 Claude Code**：`shouldMimicClaudeCode` 为假，不做 system 重写、元数据改写、工具改名等伪装，原样进 OAuth 账号。所以它能挡住普通第三方客户端，挡不住有意伪造；账号侧建议：专线分组的账号不要同时放进开放分组（账号本身跨分组共享）。
-- **拒绝时的表现**（读代码，未发请求验证）：客户端不是 Claude Code 且分组开了 `claude_code_only` → `GatewayService.resolveGatewayGroup` 沿降级分组链往下找（链上有环会报错），遇到第一个没开 `claude_code_only` 的分组就改用它的账号池；没有降级分组 → `ErrClaudeCodeOnly`，handler 没有单独映射它，落进「选不到账号」的通用分支（`backend/internal/handler/no_account_error.go` · `classifyNoAccountError`），`/v1/messages` 与 count_tokens 都是 503 `Service temporarily unavailable`（所请求的模型在该分组里没有任何账号支持时，是 404 `model_not_found`）。`/v1/chat/completions` 与 `/v1/responses` 入口对 `claude_code_only` 分组**一律 403**：`gateway_handler_chat_completions.go`、`gateway_handler_responses.go` 直接判分组开关，不管有没有降级分组、也不管客户端是谁。
-- **降级时选号读降级分组的配置，其余仍取 Key 所在分组**：`SelectAccountWithLoadAwareness` 里 `checkClaudeCodeRestriction` 解析出的降级分组会替换掉 `groupID` 与 `group`，所以候选账号池、模型路由、混合池权重、渠道定价的预检查、粘性会话都取降级分组；而 system 注入策略（读请求上下文里的分组，写入点是 `backend/internal/server/middleware/api_key_auth.go`，即 Key 所在分组）、计费倍率与 RPM 仍取 Key 所在分组。降级分组自己配的注入策略对这类流量不起作用，所以界面把「降级流量的提示词策略」放在本分组的卡上。
+- **客户端识别**：`SetClaudeCodeClientContext` 仍用于判断上游请求是否来自 Claude Code（版本窗、部分兼容逻辑）；它不再决定分组路由。分组已无 `claude_code_only`、`fallback_group_id`、OAuth-only/privacy 准入字段。
+- **调度**：分组只提供绑定账号集合、限额、RPM/并发、模型路由；CC 账号按 OAuth/SetupToken 类型走进程池，API Key/Bedrock 走 Go 网关，二者不互相 fallback。- **保留的运营配置**：模型路由、OpenAI Messages dispatch、内容审计属于客户/平台运营配置，不是功能分组；它们不会改变“该分组可用哪些账号”的语义。
+
+- **持久 run**：`cc_persistent_runs_enabled=true` 时同一 session 复用进程；idle 3min、总寿命 15min；Redis `cc_run_lease:{session}` 决定 owner，非 owner 返回 409 `session_owned_elsewhere`。
+- **工具桥**：带 tools 的请求需要 `cc_callback_base_url`；runtime 写 tools/MCP config、注册 per-run token，MCP helper 回调 `/internal/cc/tools`；工具超时 5min，超时释放 run。
+
 - **版本窗**（设置 `min_claude_code_version` / `max_claude_code_version`，空 = 不查；`GatewayHandler.checkClaudeCodeVersion`）与分组无关：对**所有**被识别为 Claude Code 的 `/v1/messages` 请求生效（只在 `GatewayHandler.Messages` 里查，count_tokens 不查），版本不在窗内、或取不到版本，返回 400。
 
 ## 2. 容量模型（统一后的唯一模型）
@@ -155,7 +158,7 @@
 | 前端三个弹窗共用一个容量漏斗：容量键字面量只出现在 `capacityBuilder.ts`；旧实现残留（persona、启用开关、魔法默认 RPM）不许回来；新建弹窗 `buildAnthropicOAuthExtra(` 恰好 3 处调用 | `frontend/src/components/account/__tests__/accountCapacity.guard.spec.ts` |
 | 各提交路径的 payload（新建 OAuth / Cookie / 批量导入、编辑、批量编辑）与 builder 纯函数 | `frontend/src/components/account/__tests__/CreateAccountModal.capacity.spec.ts`、`frontend/src/components/account/__tests__/EditAccountModal.capacity.spec.ts`、`frontend/src/components/account/__tests__/BulkEditAccountModal.capacity.spec.ts`、`frontend/src/components/account/__tests__/capacityBuilder.spec.ts` |
 | i18n 键覆盖：`t('…')` 引用的键在 zh / en 都存在、zh / en 子树一一对应、已删除词条不回来、全部文案可编译、顶层键不撞车 | `frontend/src/i18n/__tests__/capacityI18nKeys.spec.ts`、`frontend/src/i18n/__tests__/providerI18nKeys.spec.ts`、`frontend/src/i18n/__tests__/adminLargeFilesI18nKeys.spec.ts`、`frontend/src/i18n/__tests__/messageCompilation.spec.ts`、`frontend/src/i18n/__tests__/localesNoKeyCollision.spec.ts` |
-| 分组帽子：6 顶帽子是三个字段的完整划分（16 种字段组合各落恰好一顶）、`applyHat` 写 null 不写 0、Claude Code 帽保留已存的注入策略而开放帽覆盖它；卡片交互（点击不提交表单、降级池没选降级分组不写字段、残留与悬空降级分组只提示不改写）；创建 / 编辑请求体的接线（四个 v-model 各接各的字段、平台切走时重置、候选取全量、referrers、加载失败回落）；词条完整、无孤儿、已删除的词条不回来。接线测试挂载真实的 `GroupsView` 与真实的卡片，断言 `adminAPI` 收到的 payload | `frontend/src/components/admin/group/__tests__/groupHats.spec.ts`、`frontend/src/components/admin/group/__tests__/GroupClaudePolicyCard.spec.ts`、`frontend/src/components/admin/group/__tests__/GroupHatBadge.spec.ts`、`frontend/src/views/admin/__tests__/groupsAnthropicPolicies.spec.ts`、`frontend/src/views/admin/__tests__/groupsClaudePolicyWiring.spec.ts`、`frontend/src/i18n/__tests__/groupHatsI18nKeys.spec.ts` |
+| 分组功能帽子（已移除） | 2026-10-25 删除 `claude_code_only`/fallback/system prompt policy/require flags；分组改为客户账号集合，卡片只保留内容审计。 | — | — | `groupHats.ts`、`GroupHatBadge.vue`、相关 specs 已删除 | — | 已移除（P2） |
 | 前端关键清单：`Makefile` 的 `FRONTEND_CRITICAL_VITEST`（34 个文件：登录回调、支付、系统设置、容量与三个弹窗、供货商、公开号池健康页、分组帽子等），`make test-frontend-critical` 只跑它 | `Makefile` |
 
 怎么跑：
@@ -185,3 +188,30 @@
 3. **切换**：`docker pull` 新镜像并核对摘要与 Actions 产出一致；只改 `.env` 里的 `SUB2API_IMAGE`；`docker compose -f docker-compose.local.yml -f docker-compose.override.yml up -d --no-deps sub2api`，等容器 healthy（约 10 秒）。
 4. **验证**：本机回环 `127.0.0.1:18080/health`；经 Caddy 的 `/health`，以及带假 key 的 `/v1/models`（应返回 401 `INVALID_API_KEY`）；`schema_migrations` 里有新迁移、迁移改写的设置行在；日志里没有 panic；`ops_system_logs` 里组件为 `http.access` 的行能看出真实请求的路径与状态码。网关请求常常只来自个别客户端，几分钟没有请求不一定是故障，要对照切换前的间隔分布判断。
 5. **回滚**：把 `.env` 改回备份里的镜像标签，再 `up -d --no-deps sub2api`；只有迁移改写过数据时才需要还原数据库备份。
+
+### 7.1 Claude Code 运输上线检查
+
+1. **前置**
+   - 镜像内有真实 `claude` 二进制，`process_pool.claude_binary` 指向它；
+   - forwarder 所需 Bun 可用，`process_pool.data_dir` 可写；
+   - Anthropic OAuth/SetupToken 账号已导入且能单独完成文本请求。
+2. **配置**
+   - `process_pool.cc_transport_enabled: true` 才允许 OAuth 账号走 CC；
+   - 首次上线保持 `cc_persistent_runs_enabled: false`，先验证一次性文本；
+   - 持久 run 验证通过后再开 `cc_persistent_runs_enabled: true`；
+   - 工具需要 `cc_callback_base_url` 指向本实例（如 `http://127.0.0.1:8080`），并确保 server 二进制在同容器可执行；
+   - 多实例必须共享同一 Redis，run lease/2h sticky 依赖 Redis。
+3. **启用顺序**
+   - 文本 `/v1/messages`（无 tools）→ 图片 → 持久 run → 工具调用；
+   - 每一步都观察账号 429、进程退出、Redis lease、`cc_sticky_first`。
+4. **冒烟**
+   - 无 tools 文本返回正常；
+   - 带 image block 请求返回正常；
+   - 同一 session 两轮请求命中同一 run/账号；
+   - tools 请求收到 `tool_use`，回填 `tool_result` 后继续；
+   - 非 owner 实例返回 409 `session_owned_elsewhere`。
+5. **回滚**
+   - 先关 `cc_persistent_runs_enabled`，回到一次性 runner；
+   - 仍异常再关 `cc_transport_enabled`（OAuth `/v1/messages` 会 503，API Key 不受影响）；
+   - 工具问题可只清空 `cc_callback_base_url`；
+   - lease/sticky 是 Redis TTL 数据，不需要迁移回滚。

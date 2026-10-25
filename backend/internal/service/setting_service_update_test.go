@@ -10,7 +10,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -513,42 +512,6 @@ func TestSettingService_UpdateSettings_RejectsInvalidPaymentVisibleMethodSource(
 	require.Nil(t, repo.updates)
 }
 
-func TestSettingService_InitializeDefaultSettings_MimicryDefaults(t *testing.T) {
-	repo := &settingInitializeRepoStub{}
-	svc := NewSettingService(repo, &config.Config{})
-
-	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
-	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.updates[SettingKeyClaudeCodeMimicryProfile])
-	require.Equal(t, claudeMimicryGuardWarn, repo.updates[SettingKeyClaudeMimicryGuardMode])
-}
-
-func TestSettingService_ParseSettings_MimicryDefaults(t *testing.T) {
-	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
-
-	got := svc.parseSettings(map[string]string{})
-
-	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, got.ClaudeCodeMimicryProfile)
-	require.Equal(t, claudeMimicryGuardWarn, got.ClaudeMimicryGuardMode)
-}
-
-func TestSettingService_UpdateSettings_MimicryRoundTrip(t *testing.T) {
-	repo := &settingUpdateRepoStub{}
-	svc := NewSettingService(repo, &config.Config{})
-
-	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		ClaudeCodeMimicryProfile: "unknown-profile",
-		ClaudeMimicryGuardMode:   " BLOCK ",
-	})
-	require.NoError(t, err)
-	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, repo.updates[SettingKeyClaudeCodeMimicryProfile])
-	require.Equal(t, claudeMimicryGuardBlock, repo.updates[SettingKeyClaudeMimicryGuardMode])
-
-	got := svc.parseSettings(repo.updates)
-	require.Equal(t, claude.DefaultClaudeCodeMimicryProfileID, got.ClaudeCodeMimicryProfile)
-	require.Equal(t, claudeMimicryGuardBlock, got.ClaudeMimicryGuardMode)
-}
-
-// 账号养号全局开关：默认关闭，严格 "true" 才开（与账号上的 nurturing_enabled 是双重开关）。
 func TestSettingService_ParseSettings_AccountNurturingEnabledIsStrictAndDefaultsOff(t *testing.T) {
 	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
 

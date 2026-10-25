@@ -1202,6 +1202,21 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "jwt.secret must be at least 32 bytes",
 		},
 		{
+			name: "cc persistent requires transport",
+			mutate: func(c *Config) {
+				c.ProcessPool.CCPersistentRuns = true
+				c.ProcessPool.CCTransportEnabled = false
+			},
+			wantErr: "cc_persistent_runs_enabled requires",
+		},
+		{
+			name: "cc callback URL must be absolute",
+			mutate: func(c *Config) {
+				c.ProcessPool.CCCallbackBaseURL = "not-a-url"
+			},
+			wantErr: "cc_callback_base_url must be an absolute",
+		},
+		{
 			name:    "subscription maintenance worker_count non-negative",
 			mutate:  func(c *Config) { c.SubscriptionMaintenance.WorkerCount = -1 },
 			wantErr: "subscription_maintenance.worker_count",

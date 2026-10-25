@@ -33,15 +33,15 @@ func newForwardPartialUsageServiceForTest(upstream *anthropicHTTPUpstreamRecorde
 	}
 }
 
-func newAnthropicOAuthAccountForPartialUsageTest() *Account {
+func newAnthropicAPIKeyAccountForPartialUsageTest() *Account {
 	return &Account{
 		ID:          501,
 		Name:        "anthropic-oauth-partial-usage",
 		Platform:    PlatformAnthropic,
-		Type:        AccountTypeOAuth,
+		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"access_token": "oauth-token",
+			"api_key": "sk-ant-api03-test",
 		},
 		Status:      StatusActive,
 		Schedulable: true,
@@ -82,7 +82,7 @@ func TestGatewayService_Forward_StreamMissingTerminalPreservesPartialUsage(t *te
 		Body: io.NopCloser(strings.NewReader(upstreamSSE)),
 	}}
 	svc := newForwardPartialUsageServiceForTest(upstream)
-	account := newAnthropicOAuthAccountForPartialUsageTest()
+	account := newAnthropicAPIKeyAccountForPartialUsageTest()
 
 	result, err := svc.Forward(context.Background(), c, account, parsed)
 	require.Error(t, err)
@@ -117,7 +117,7 @@ func TestGatewayService_Forward_StreamReadErrorAfterOutputPreservesPartialUsage(
 		},
 	}}
 	svc := newForwardPartialUsageServiceForTest(upstream)
-	account := newAnthropicOAuthAccountForPartialUsageTest()
+	account := newAnthropicAPIKeyAccountForPartialUsageTest()
 
 	result, err := svc.Forward(context.Background(), c, account, parsed)
 	require.Error(t, err)
@@ -145,7 +145,7 @@ func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testi
 		Body:       io.NopCloser(strings.NewReader("event: ping\ndata: {\"type\": \"ping\"}\n\n")),
 	}}
 	svc := newForwardPartialUsageServiceForTest(upstream)
-	account := newAnthropicOAuthAccountForPartialUsageTest()
+	account := newAnthropicAPIKeyAccountForPartialUsageTest()
 
 	result, err := svc.Forward(context.Background(), c, account, parsed)
 	require.Error(t, err)
@@ -174,7 +174,7 @@ func TestGatewayService_Forward_FailoverErrorKeepsNilResult(t *testing.T) {
 		},
 	}}
 	svc := newForwardPartialUsageServiceForTest(upstream)
-	account := newAnthropicOAuthAccountForPartialUsageTest()
+	account := newAnthropicAPIKeyAccountForPartialUsageTest()
 
 	result, err := svc.Forward(context.Background(), c, account, parsed)
 	require.Error(t, err)

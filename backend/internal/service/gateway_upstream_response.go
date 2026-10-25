@@ -687,9 +687,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
-	// 本次请求注入进 usage.input_tokens 的身份 block 体量（0 表示不介入）。
-	injectedInputTokens := recalledClaudeMimicInjectedInputTokens(c)
-
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -832,11 +829,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	noopDeltaKeepaliveBlockIndex := -1
 	noopDeltaKeepaliveDeltaType := ""
 
-	// 客户端没要 thinking 却被网关注入时，摘掉上游多返回的 thinking block 事件
-	// 并前移其后各块的 index（见 claude_injected_thinking.go）。
-	stripInjectedThinking := recalledClaudeMimicInjectedThinking(c)
-	injectedThinkingFilter := &injectedThinkingStreamFilter{}
-
 	pendingEventLines := make([]string, 0, 4)
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
@@ -891,17 +883,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			eventName = eventType
 		}
 		eventChanged := false
-
-		// 放在其余改写之前：被丢弃的事件无需再走后续处理，而 index 改写后
-		// keepalive 记录的块序号才与实际下发给客户端的一致。
-		// 推理块事件不携带 usage、也不是终止事件，整条丢弃不影响计费与收尾判定。
-		if stripInjectedThinking {
-			drop, changed := injectedThinkingFilter.apply(eventType, event)
-			if drop {
-				return nil, "", nil, nil
-			}
-			eventChanged = changed || eventChanged
-		}
 
 		if useNoopDeltaKeepalive {
 			switch eventType {
@@ -981,21 +962,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		// 计费口径先固定：usagePatch 取的是上游原始 usage。
 		usagePatch := s.extractSSEUsagePatch(event)
-
-		// 之后才改回给客户端的展示值，扣掉注入的身份 blocks。
-		// 顺序不能颠倒 —— 反过来会把扣减后的数字记进账。
-		if eventType == "message_start" && injectedInputTokens > 0 {
-			if msg, ok := event["message"].(map[string]any); ok {
-				if u, ok := msg["usage"].(map[string]any); ok {
-					if official, billable, ok := rewriteInputTokensInMap(u, injectedInputTokens); ok {
-						eventChanged = true
-						logger.LegacyPrintf("service.gateway",
-							"usage.input_tokens: deducted %d injected identity tokens (account=%d, %d -> %d, streaming)",
-							injectedInputTokens, account.ID, official, billable)
-					}
-				}
-			}
-		}
 
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
@@ -1471,25 +1437,6 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	}
 
 	body = reverseToolNamesIfPresent(c, body)
-
-	// 客户端没要 thinking 却被网关注入时，把上游据此多返回的 thinking block 摘掉，
-	// 让响应回到客户端请求时的形态。usage 不受影响。
-	if recalledClaudeMimicInjectedThinking(c) {
-		if next, stripped := stripInjectedThinkingFromResponseBody(body); stripped {
-			body = next
-		}
-	}
-
-	// 从回给客户端的展示值里扣掉注入的身份 blocks。
-	// 返回给计费/审计的 response.Usage 保持上游原值，此处只动 body。
-	if injected := recalledClaudeMimicInjectedInputTokens(c); injected > 0 {
-		if next, official, billable, ok := rewriteInputTokensInJSON(body, "usage", injected); ok {
-			body = next
-			logger.LegacyPrintf("service.gateway",
-				"usage.input_tokens: deducted %d injected identity tokens (account=%d, %d -> %d, non-streaming)",
-				injected, account.ID, official, billable)
-		}
-	}
 
 	// 写入响应
 	c.Data(resp.StatusCode, contentType, body)

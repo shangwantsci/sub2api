@@ -285,6 +285,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/sort-order", h.Admin.Group.UpdateSortOrder)
 		groups.GET("/:id/models-list-candidates", h.Admin.Group.GetModelsListCandidates)
 		groups.GET("/:id", h.Admin.Group.GetByID)
+		groups.GET("/:id/accounts", h.Admin.Group.ListAccounts)
+		groups.PUT("/:id/accounts", h.Admin.Group.SetAccounts)
 		groups.POST("", h.Admin.Group.Create)
 		groups.PUT("/:id", h.Admin.Group.Update)
 		groups.DELETE("/:id", h.Admin.Group.Delete)
@@ -533,9 +535,6 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			adminSettings.PUT("/capacity-presets", h.Admin.Provider.UpdateCapacityPresets)
 		}
 		// Claude Code 标定 profile（真身抓包 → 热加载出站字节）
-		adminSettings.GET("/claude-calibrated-profile", h.Admin.Setting.GetClaudeCalibratedProfile)
-		adminSettings.POST("/claude-calibrated-profile", h.Admin.Setting.PublishClaudeCalibratedProfile)
-		adminSettings.DELETE("/claude-calibrated-profile", h.Admin.Setting.ClearClaudeCalibratedProfile)
 		// Web Search 模拟配置
 		adminSettings.GET("/web-search-emulation", h.Admin.Setting.GetWebSearchEmulationConfig)
 		adminSettings.PUT("/web-search-emulation", h.Admin.Setting.UpdateWebSearchEmulationConfig)

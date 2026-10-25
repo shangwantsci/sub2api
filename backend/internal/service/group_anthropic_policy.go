@@ -40,30 +40,9 @@ func ResolveGroupPolicy(globalEnabled bool, policy string) bool {
 	}
 }
 
-func NormalizeClaudeOAuthSystemPromptPolicy(policy string) string {
-	if strings.ToLower(strings.TrimSpace(policy)) == GroupPolicyIdentityOnly {
-		return GroupPolicyIdentityOnly
-	}
-	return NormalizeGroupPolicy(policy)
-}
-
-func IsValidClaudeOAuthSystemPromptPolicy(policy string) bool {
-	if strings.ToLower(strings.TrimSpace(policy)) == GroupPolicyIdentityOnly {
-		return true
-	}
-	return IsValidGroupPolicy(policy)
-}
-
 func (g *Group) AnthropicContentReviewPolicy() string {
 	if g == nil || g.Platform != PlatformAnthropic {
 		return GroupPolicyInherit
 	}
 	return NormalizeGroupPolicy(g.ContentReviewPolicy)
-}
-
-func (g *Group) AnthropicClaudeOAuthSystemPromptPolicy() string {
-	if g == nil || g.Platform != PlatformAnthropic {
-		return GroupPolicyInherit
-	}
-	return NormalizeClaudeOAuthSystemPromptPolicy(g.ClaudeOAuthSystemPromptPolicy)
 }

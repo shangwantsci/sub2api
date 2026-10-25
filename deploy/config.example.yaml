@@ -1185,3 +1185,47 @@ update:
   # Leave empty for direct connection (recommended for overseas servers)
   # 留空表示直连（适用于海外服务器）
   proxy_url: ""
+
+# =============================================================================
+# Process Pool (Claude Code local HTTPS forwarder / 每账号出站进程)
+# =============================================================================
+# OAuth/SetupToken 账号走 Claude Code 进程时，每个账号会起一个本地 HTTPS
+# passthrough forwarder，CC 通过 ANTHROPIC_BASE_URL 指向它出站。Go 网关的旧
+# Unix socket + token 注入路径已删除。
+# 注意：forwarder_js 为空时 CC 运输不可用。
+process_pool:
+  # bun 可执行文件路径；留空则从 PATH 找 bun
+  bun_path: ""
+  # forwarder.js 的绝对路径（本仓库为 tools/bun-forwarder/forwarder.js）
+  forwarder_js: ""
+  # 每个账号的 CC HOME 所在目录
+  data_dir: "/tmp/sub2api-process-pool"
+  # 上游地址
+  upstream: "https://api.anthropic.com"
+
+  # ===========================================================================
+  # Claude Code transport (cc)
+  # ===========================================================================
+  # 打开后 Anthropic OAuth/SetupToken 账号改由官方 Claude Code 进程执行：
+  # Go 网关把客户请求转成 stream-json 喂给 CC，CC 经本地 forwarder 出站。
+  # API Key / Bedrock 账号不受影响，仍走原来的 Go 路径。
+  # 默认关闭；打开前必须确认 claude_binary 与 forwarder_js 可用。
+  cc_transport_enabled: false
+  # 官方 Claude Code 可执行文件（建议用 versions/<ver>/ 目录 + current 软链，便于升级回滚）
+  claude_binary: ""
+  # 全局限流：同一进程内同时运行的 CC 进程数；0 = 不限
+  cc_max_concurrent: 0
+  # 单账号并发；默认 4
+  cc_per_account_concurrent: 4
+  # 账号/全局等待队列上限（0 = 不限制）
+  cc_queue_limit: 0
+  # 队列等待超时（秒；0 = 一直等到请求取消）
+  cc_queue_wait_seconds: 0
+  # 同一 session 复用持久 CC 进程（灰度）
+  cc_persistent_runs_enabled: false
+  # MCP helper 回调网关的 base URL（如 http://127.0.0.1:8080；留空则不支持工具）
+  cc_callback_base_url: ""
+  # MCP helper 等待客户端 tool_result 的超时（秒；默认 300）
+  cc_tool_wait_seconds: 300
+  # 单次 CC 请求超时（秒）；默认 90
+  cc_run_timeout_seconds: 90

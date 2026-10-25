@@ -85,45 +85,6 @@ func TestOpenAICompatibleHandlersRejectInvalidStreamFieldType(t *testing.T) {
 	}
 }
 
-func TestGatewayOpenAICompatibleHandlersAllowBooleanStreamToContinue(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	tests := []struct {
-		name string
-		path string
-		body string
-		run  func(*gin.Context)
-	}{
-		{
-			name: "responses_false",
-			path: "/v1/responses",
-			body: `{"model":"gpt-5","stream":false,"input":"hello"}`,
-			run: func(c *gin.Context) {
-				(&GatewayHandler{gatewayService: &service.GatewayService{}}).Responses(c)
-			},
-		},
-		{
-			name: "chat_completions_true",
-			path: "/v1/chat/completions",
-			body: `{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`,
-			run: func(c *gin.Context) {
-				(&GatewayHandler{gatewayService: &service.GatewayService{}}).ChatCompletions(c)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, rec := newOpenAICompatibleStreamValidationContext(tt.path, tt.body, true)
-
-			tt.run(c)
-
-			require.Equal(t, http.StatusForbidden, rec.Code)
-			require.Contains(t, rec.Body.String(), "This group is restricted to Claude Code clients")
-		})
-	}
-}
-
 func newOpenAICompatibleStreamValidationContext(path, body string, claudeCodeOnly bool) (*gin.Context, *httptest.ResponseRecorder) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -134,7 +95,7 @@ func newOpenAICompatibleStreamValidationContext(path, body string, claudeCodeOnl
 	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
 		ID:      11,
 		GroupID: &groupID,
-		Group:   &service.Group{ID: groupID, ClaudeCodeOnly: claudeCodeOnly},
+		Group:   &service.Group{ID: groupID},
 		User:    &service.User{ID: 13},
 	})
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 13, Concurrency: 1})

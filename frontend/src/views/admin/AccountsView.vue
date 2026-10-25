@@ -17,6 +17,10 @@
             @create="openCreateAccount"
           >
             <template #after>
+              <RouterLink to="/admin/pool" class="btn btn-secondary px-2 md:px-3">
+                <Icon name="server" size="sm" />
+                <span class="hidden md:inline">{{ t('nav.pool') }}</span>
+              </RouterLink>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -1967,6 +1971,14 @@ onMounted(async () => {
     params.provider_user_id = providerFromQuery.trim()
     hiddenColumns.delete('provider')
   }
+  const typeFromQuery = route?.query?.type
+  if (typeof typeFromQuery === 'string' && typeFromQuery.trim() !== '') {
+    params.type = typeFromQuery.trim()
+  }
+  const platformFromQuery = route?.query?.platform
+  if (typeof platformFromQuery === 'string' && platformFromQuery.trim() !== '') {
+    params.platform = platformFromQuery.trim()
+  }
   load()
   try {
     const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
@@ -1974,6 +1986,16 @@ onMounted(async () => {
     groups.value = g
   } catch (error) {
     console.error('Failed to load proxies/groups:', error)
+  }
+  const accountFromQuery = Number(route?.query?.account)
+  if (Number.isFinite(accountFromQuery) && accountFromQuery > 0) {
+    try {
+      const account = await adminAPI.accounts.getById(accountFromQuery)
+      edAcc.value = account
+      showEdit.value = true
+    } catch (error) {
+      console.error('Failed to open account from query:', error)
+    }
   }
   window.addEventListener('scroll', handleScroll, true)
   document.addEventListener('click', handleClickOutside)

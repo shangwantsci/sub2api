@@ -176,7 +176,6 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		nil, // billingService
 		nil, // rateLimitService
 		nil, // billingCacheService
-		nil, // identityService
 		nil, // httpUpstream
 		nil, // deferredService
 		nil, // claudeTokenProvider
@@ -189,6 +188,7 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		nil, // resolver
 		nil, // balanceNotifyService
 		nil, // userPlatformQuotaRepo
+		nil, // claudeCodeRuntime
 	)
 
 	// RunModeSimple：跳过计费检查，避免引入 repo/cache 依赖。

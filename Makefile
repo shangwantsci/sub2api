@@ -7,6 +7,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/views/admin/__tests__/PoolView.spec.ts \
+	src/components/admin/group/__tests__/GroupAccountsModal.spec.ts \
+	src/components/admin/pool/__tests__/PoolRunDrawer.spec.ts \
 	src/components/account/__tests__/accountCapacity.guard.spec.ts \
 	src/components/account/__tests__/capacityBuilder.spec.ts \
 	src/components/account/__tests__/CreateAccountModal.spec.ts \

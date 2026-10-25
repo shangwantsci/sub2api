@@ -126,25 +126,17 @@ type Group struct {
 	WebSearchPricePerCall *float64 `json:"web_search_price_per_call"`
 
 	// Claude Code 客户端限制
-	ClaudeCodeOnly  bool   `json:"claude_code_only"`
-	FallbackGroupID *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组
-	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
 
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
 
 	// 账号过滤控制（仅 OpenAI/Antigravity 平台有效）
-	RequireOAuthOnly  bool `json:"require_oauth_only"`
-	RequirePrivacySet bool `json:"require_privacy_set"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
 	RPMLimit int `json:"rpm_limit"`
 
 	// Anthropic setup-token/api-key 混合类型权重调度配置
-	AnthropicMixedTypeWeightEnabled bool `json:"anthropic_mixed_type_weight_enabled"`
-	AnthropicSetupTokenPoolWeight   int  `json:"anthropic_setup_token_pool_weight"`
-	AnthropicAPIKeyPoolWeight       int  `json:"anthropic_api_key_pool_weight"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -156,10 +148,9 @@ type AdminGroup struct {
 	Group
 
 	// 模型路由配置（仅 anthropic 平台使用）
-	ModelRouting                  map[string][]int64 `json:"model_routing"`
-	ModelRoutingEnabled           bool               `json:"model_routing_enabled"`
-	ContentReviewPolicy           string             `json:"content_review_policy"`
-	ClaudeOAuthSystemPromptPolicy string             `json:"claude_oauth_system_prompt_policy"`
+	ModelRouting        map[string][]int64 `json:"model_routing"`
+	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
+	ContentReviewPolicy string             `json:"content_review_policy"`
 
 	// MCP XML 协议注入（仅 antigravity 平台使用）
 	MCPXMLInject bool `json:"mcp_xml_inject"`

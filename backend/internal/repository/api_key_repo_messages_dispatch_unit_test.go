@@ -36,22 +36,16 @@ func TestGroupEntityToService_PreservesMessagesDispatchModelConfig(t *testing.T)
 
 func TestGroupEntityToService_PreservesAnthropicMixedTypeWeights(t *testing.T) {
 	group := &dbent.Group{
-		ID:                              2,
-		Name:                            "anthropic-weighted",
-		Platform:                        service.PlatformAnthropic,
-		Status:                          service.StatusActive,
-		SubscriptionType:                service.SubscriptionTypeStandard,
-		RateMultiplier:                  1,
-		AnthropicMixedTypeWeightEnabled: true,
-		AnthropicSetupTokenPoolWeight:   100,
-		AnthropicAPIKeyPoolWeight:       25,
+		ID:               2,
+		Name:             "anthropic-weighted",
+		Platform:         service.PlatformAnthropic,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+		RateMultiplier:   1,
 	}
 
 	got := groupEntityToService(group)
 	require.NotNil(t, got)
-	require.True(t, got.AnthropicMixedTypeWeightEnabled)
-	require.Equal(t, 100, got.AnthropicSetupTokenPoolWeight)
-	require.Equal(t, 25, got.AnthropicAPIKeyPoolWeight)
 }
 
 func TestAPIKeyRepository_GetByKeyForAuth_PreservesMessagesDispatchModelConfig_SQLite(t *testing.T) {
@@ -123,5 +117,4 @@ func TestAPIKeyRepository_GetByKeyForAuth_PreservesAnthropicGroupPolicies_SQLite
 	require.NoError(t, err)
 	require.NotNil(t, got.Group)
 	require.Equal(t, service.GroupPolicyDisabled, got.Group.ContentReviewPolicy)
-	require.Equal(t, service.GroupPolicyDisabled, got.Group.ClaudeOAuthSystemPromptPolicy)
 }

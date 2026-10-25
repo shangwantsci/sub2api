@@ -13,7 +13,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
@@ -207,8 +206,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:                        "false",
-		SettingKeyClaudeCodeMimicryProfile:                           claude.DefaultClaudeCodeMimicryProfileID,
-		SettingKeyClaudeMimicryGuardMode:                             claudeMimicryGuardWarn,
 		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
 		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
 		SettingKeyEnableClientDatelineNormalization:                  "true",
@@ -754,24 +751,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.EnableMetadataPassthrough = settings[SettingKeyEnableMetadataPassthrough] == "true"
 	result.EnableCCHSigning = settings[SettingKeyEnableCCHSigning] == "true"
-	result.ClaudeCodeMimicryProfile = normalizeClaudeCodeMimicryProfileID(settings[SettingKeyClaudeCodeMimicryProfile])
-	result.ClaudeMimicryGuardMode = normalizeClaudeMimicryGuardMode(settings[SettingKeyClaudeMimicryGuardMode])
-	if v, ok := settings[SettingKeyEnableClaudeOAuthSystemPromptInjection]; ok && v != "" {
-		result.EnableClaudeOAuthSystemPromptInjection = v == "true"
-	} else {
-		result.EnableClaudeOAuthSystemPromptInjection = true
-	}
-	// 默认关闭：键缺失或非 "true" 一律 false，存量部署行为不变。
-	result.EnableClaudeOAuthBillableInputTokens = settings[SettingKeyEnableClaudeOAuthBillableInputTokens] == "true"
-	// 0/缺失/非法 => 用本地估算
-	result.ClaudeOAuthBillableInputTokensOverride = 0
-	if raw := strings.TrimSpace(settings[SettingKeyClaudeOAuthBillableInputTokensOverride]); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			result.ClaudeOAuthBillableInputTokensOverride = v
-		}
-	}
-	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
-	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
 	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
 	if v, ok := settings[SettingKeyRewriteMessageCacheControl]; ok && v != "" {
 		result.RewriteMessageCacheControl = v == "true"

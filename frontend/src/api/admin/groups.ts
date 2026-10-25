@@ -364,7 +364,19 @@ export const groupsAPI = {
   updateSortOrder,
   getUsageSummary,
   getCapacitySummary,
-  getSchedulingPriorities
+  getSchedulingPriorities,
+  getGroupAccounts,
+  setGroupAccounts
 }
 
 export default groupsAPI
+
+/** 分组可用账号集合（客户导向）。 */
+export async function getGroupAccounts(groupID: number): Promise<import('@/types').Account[]> {
+  const { data } = await apiClient.get(`/admin/groups/${groupID}/accounts`)
+  return data
+}
+
+export async function setGroupAccounts(groupID: number, accountIDs: number[]): Promise<void> {
+  await apiClient.put(`/admin/groups/${groupID}/accounts`, { account_ids: accountIDs })
+}

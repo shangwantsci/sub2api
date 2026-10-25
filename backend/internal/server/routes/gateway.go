@@ -126,6 +126,9 @@ func RegisterGatewayRoutes(
 		}
 	}
 
+	// MCP helper 回调：per-run token 鉴权，不走 API Key 中间件。
+	r.POST("/internal/cc/tools", h.Gateway.ClaudeCodeToolCallback)
+
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)

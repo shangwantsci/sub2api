@@ -174,7 +174,6 @@ export interface ProviderGroupPolicyView {
   platform: string
   rate_multiplier: number
   content_review_policy: string
-  claude_oauth_system_prompt_policy: string
   status: string
   /**
    * 该分组内非供号商账号已有的 priority 去重值。

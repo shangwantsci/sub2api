@@ -79,12 +79,6 @@ const ADDED_KEYS = [
   'admin.accounts.poolWeightHint',
   // Codex PAT 导入成功提示
   'admin.accounts.messages.accountCreated',
-  // 伪装守卫模式
-  'admin.settings.gatewayForwarding.claudeMimicryGuardMode',
-  'admin.settings.gatewayForwarding.claudeMimicryGuardModeHint',
-  'admin.settings.gatewayForwarding.guardModeWarn',
-  'admin.settings.gatewayForwarding.guardModeBlock',
-  'admin.settings.gatewayForwarding.guardModeOff',
   // 功能开关页签里的「公开号池监控」卡片
   'admin.settings.features.poolHealth.title',
   'admin.settings.features.poolHealth.description',
@@ -136,29 +130,5 @@ describe('429 默认回避秒数的说明', () => {
     }
     expect(text(zh, KEY).indexOf('1-7200')).toBeLessThan(text(zh, KEY).indexOf('Anthropic'))
     expect(text(en, KEY).indexOf('1-7200')).toBeLessThan(text(en, KEY).indexOf('Anthropic'))
-  })
-})
-
-describe('伪装守卫模式的文案', () => {
-  const BASE = 'admin.settings.gatewayForwarding'
-
-  it('缺省值 warn 的选项带「默认」标记，拦截与关闭不带', () => {
-    expect(text(zh, `${BASE}.guardModeWarn`)).toContain('默认')
-    expect(text(en, `${BASE}.guardModeWarn`).toLowerCase()).toContain('default')
-    for (const key of ['guardModeBlock', 'guardModeOff']) {
-      expect(text(zh, `${BASE}.${key}`)).not.toContain('默认')
-      expect(text(en, `${BASE}.${key}`).toLowerCase()).not.toContain('default')
-    }
-  })
-
-  it('说明里三个取值的含义都讲到了', () => {
-    const zhHint = text(zh, `${BASE}.claudeMimicryGuardModeHint`)
-    for (const word of ['仅告警', '拦截', '关闭']) {
-      expect(zhHint).toContain(word)
-    }
-    const enHint = text(en, `${BASE}.claudeMimicryGuardModeHint`)
-    for (const word of ['Warn only', 'Block', 'Off']) {
-      expect(enHint).toContain(word)
-    }
   })
 })

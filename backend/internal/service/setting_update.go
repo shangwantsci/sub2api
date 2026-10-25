@@ -378,16 +378,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableFingerprintUnification] = strconv.FormatBool(settings.EnableFingerprintUnification)
 	updates[SettingKeyEnableMetadataPassthrough] = strconv.FormatBool(settings.EnableMetadataPassthrough)
 	updates[SettingKeyEnableCCHSigning] = strconv.FormatBool(settings.EnableCCHSigning)
-	updates[SettingKeyClaudeCodeMimicryProfile] = normalizeClaudeCodeMimicryProfileID(settings.ClaudeCodeMimicryProfile)
-	updates[SettingKeyClaudeMimicryGuardMode] = normalizeClaudeMimicryGuardMode(settings.ClaudeMimicryGuardMode)
-	updates[SettingKeyEnableClaudeOAuthSystemPromptInjection] = strconv.FormatBool(settings.EnableClaudeOAuthSystemPromptInjection)
-	updates[SettingKeyEnableClaudeOAuthBillableInputTokens] = strconv.FormatBool(settings.EnableClaudeOAuthBillableInputTokens)
-	updates[SettingKeyClaudeOAuthBillableInputTokensOverride] = strconv.Itoa(settings.ClaudeOAuthBillableInputTokensOverride)
-	updates[SettingKeyClaudeOAuthSystemPrompt] = settings.ClaudeOAuthSystemPrompt
-	if err := ValidateClaudeOAuthSystemPromptBlocksConfig(settings.ClaudeOAuthSystemPromptBlocks); err != nil {
-		return nil, err
-	}
-	updates[SettingKeyClaudeOAuthSystemPromptBlocks] = settings.ClaudeOAuthSystemPromptBlocks
 	updates[SettingKeyEnableAnthropicCacheTTL1hInjection] = strconv.FormatBool(settings.EnableAnthropicCacheTTL1hInjection)
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
@@ -536,20 +526,13 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	})
 	gatewayForwardingSF.Forget("gateway_forwarding")
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
-		fingerprintUnification:           settings.EnableFingerprintUnification,
-		metadataPassthrough:              settings.EnableMetadataPassthrough,
-		cchSigning:                       settings.EnableCCHSigning,
-		claudeCodeMimicryProfile:         normalizeClaudeCodeMimicryProfileID(settings.ClaudeCodeMimicryProfile),
-		claudeMimicryGuardMode:           normalizeClaudeMimicryGuardMode(settings.ClaudeMimicryGuardMode),
-		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
-		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
-		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
-		claudeOAuthBillableInputTokens:   settings.EnableClaudeOAuthBillableInputTokens,
-		claudeOAuthBillableOverride:      settings.ClaudeOAuthBillableInputTokensOverride,
-		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
-		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
-		clientDatelineNormalization:      settings.EnableClientDatelineNormalization,
-		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
+		fingerprintUnification:       settings.EnableFingerprintUnification,
+		metadataPassthrough:          settings.EnableMetadataPassthrough,
+		cchSigning:                   settings.EnableCCHSigning,
+		anthropicCacheTTL1hInjection: settings.EnableAnthropicCacheTTL1hInjection,
+		rewriteMessageCacheControl:   settings.RewriteMessageCacheControl,
+		clientDatelineNormalization:  settings.EnableClientDatelineNormalization,
+		expiresAt:                    time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	s.antigravityUAVersionSF.Forget("antigravity_user_agent_version")
 	antigravityUserAgentVersion := antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)

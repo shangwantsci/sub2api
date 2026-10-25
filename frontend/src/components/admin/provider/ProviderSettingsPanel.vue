@@ -240,9 +240,6 @@
                   />
                 </td>
                 <td class="px-3 py-2 text-xs text-gray-400">{{ group.content_review_policy }}</td>
-                <td class="px-3 py-2 text-xs text-gray-400">
-                  {{ group.claude_oauth_system_prompt_policy }}
-                </td>
                 <td class="px-3 py-2 text-right text-xs text-gray-400">
                   {{ group.rate_multiplier }}
                 </td>

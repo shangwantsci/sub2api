@@ -28,11 +28,6 @@ on:
         required: false
         type: string
         default: 'custom/prod'
-      calibrate_only:
-        description: 'Run real Claude Code calibration and publish profile; do not build a release'
-        required: false
-        type: boolean
-        default: false
 
 # 环境变量：合并 workflow_dispatch 输入和 repository variable
 # tag push 触发时读取 vars.SIMPLE_RELEASE，workflow_dispatch 时使用输入参数
@@ -44,68 +39,6 @@ permissions:
   packages: write
 
 jobs:
-  claude-calibration:
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.calibrate_only == 'true') }}
-    runs-on: ubuntu-latest
-    env:
-      GATEWAY_URL: ${{ secrets.CC_CALIBRATE_GATEWAY_URL }}
-      ADMIN_API_KEY: ${{ secrets.CC_CALIBRATE_ADMIN_API_KEY }}
-    steps:
-      - name: Checkout calibration source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'schedule' && 'custom/prod' || github.event.inputs.source_ref }}
-          fetch-depth: 1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-
-      - name: Run real Claude Code calibration
-        env:
-          CC_VERSION: latest
-          CC_CALIBRATE_MODELS: haiku sonnet opus fable
-          CC_CALIBRATE_KEEP_CAP: '1'
-          CAL_DIR: ${{ github.workspace }}/tools/cc-calibrate
-          OUT_DIR: ${{ runner.temp }}/cc-calibrate-out
-        run: |
-          mkdir -p "$OUT_DIR"
-          bash tools/cc-calibrate/calibrate-run.sh
-          node -e '
-            const fs = require("fs");
-            const path = process.argv[1];
-            const p = JSON.parse(fs.readFileSync(path, "utf8"));
-            if (!p.guard?.salt_verified || p.guard.ok !== p.guard.checked || p.guard.checked < 1) {
-              throw new Error(`fingerprint guard failed: ${JSON.stringify(p.guard)}`);
-            }
-            console.log(`guard passed ${p.guard.ok}/${p.guard.checked}, CLI ${p.cli_version}`);
-          ' "$(ls "$OUT_DIR"/profile-*.json | head -1)"
-
-      - name: Upload calibration evidence
-        uses: actions/upload-artifact@v7
-        with:
-          name: claude-calibration-${{ github.run_id }}
-          path: ${{ runner.temp }}/cc-calibrate-out/
-          retention-days: 14
-
-      - name: Publish calibrated profile to gateway
-        if: ${{ env.GATEWAY_URL != '' && env.ADMIN_API_KEY != '' }}
-        run: |
-          PROFILE="$(ls "${{ runner.temp }}"/cc-calibrate-out/profile-*.json | head -1)"
-          node tools/cc-calibrate/publish.js "$PROFILE" "$GATEWAY_URL" "$ADMIN_API_KEY"
-
-      - name: Calibration summary
-        if: always()
-        run: |
-          {
-            echo "## Claude Code calibration"
-            echo ""
-            echo "- Runs on GitHub-hosted Linux x64; production CPU/RAM is untouched."
-            echo "- Raw capture + profile retained as a 14-day artifact."
-            echo "- Publish requires repository secrets CC_CALIBRATE_GATEWAY_URL and CC_CALIBRATE_ADMIN_API_KEY."
-          } >> "$GITHUB_STEP_SUMMARY"
-
   # Fork production path: build remotely on GitHub Actions without creating a new
   # Git tag. The application VERSION remains backend/cmd/server/VERSION (official
   # semver), while a second immutable image tag includes the source commit.
@@ -176,7 +109,7 @@ jobs:
 
   # Update VERSION file with tag version
   update-version:
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.custom_image_only != 'true' && github.event.inputs.calibrate_only != 'true') }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.custom_image_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -201,7 +134,7 @@ jobs:
           retention-days: 1
 
   build-frontend:
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.custom_image_only != 'true' && github.event.inputs.calibrate_only != 'true') }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.custom_image_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -235,7 +168,7 @@ jobs:
           retention-days: 1
 
   release:
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.custom_image_only != 'true' && github.event.inputs.calibrate_only != 'true') }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.custom_image_only != 'true') }}
     needs: [update-version, build-frontend]
     runs-on: ubuntu-latest
     steps:

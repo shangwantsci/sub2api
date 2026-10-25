@@ -206,26 +206,6 @@ func (s *TLSFingerprintProfileService) resolveConfiguredTLSProfile(account *Acco
 	return builtInClaudeCodeTLSProfile()
 }
 
-// ResolveTLSProfileForClaudeMimic 为 Anthropic OAuth/SetupToken 的 synthetic Claude Code
-// mimic 路径解析 TLS profile。显式账号配置优先生效；未配置时仅 synthetic mimic
-// 默认启用内置 current observed Claude Code TLS profile。
-func (s *TLSFingerprintProfileService) ResolveTLSProfileForClaudeMimic(account *Account, mimicClaudeCode bool) *tlsfingerprint.Profile {
-	if account == nil {
-		return nil
-	}
-	if accountHasExplicitTLSFingerprintNonTrue(account) {
-		return nil
-	}
-	id := account.GetTLSFingerprintProfileID()
-	if account.IsTLSFingerprintEnabled() || id > 0 || id == -1 {
-		return s.resolveConfiguredTLSProfile(account)
-	}
-	if mimicClaudeCode && account.IsAnthropicOAuthOrSetupToken() {
-		return builtInClaudeCodeTLSProfile()
-	}
-	return nil
-}
-
 func accountHasExplicitTLSFingerprintNonTrue(account *Account) bool {
 	if account == nil || account.Extra == nil {
 		return false

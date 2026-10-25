@@ -56,32 +56,29 @@ type APIKeyAuthUserSnapshot struct {
 
 // APIKeyAuthGroupSnapshot 分组快照
 type APIKeyAuthGroupSnapshot struct {
-	ID                              int64    `json:"id"`
-	Name                            string   `json:"name"`
-	Platform                        string   `json:"platform"`
-	IsExclusive                     bool     `json:"is_exclusive"`
-	Status                          string   `json:"status"`
-	SubscriptionType                string   `json:"subscription_type"`
-	RateMultiplier                  float64  `json:"rate_multiplier"`
-	DailyLimitUSD                   *float64 `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD                  *float64 `json:"weekly_limit_usd,omitempty"`
-	MonthlyLimitUSD                 *float64 `json:"monthly_limit_usd,omitempty"`
-	AllowImageGeneration            bool     `json:"allow_image_generation"`
-	AllowBatchImageGeneration       bool     `json:"allow_batch_image_generation"`
-	ImageRateIndependent            bool     `json:"image_rate_independent"`
-	ImageRateMultiplier             float64  `json:"image_rate_multiplier"`
-	ImagePrice1K                    *float64 `json:"image_price_1k,omitempty"`
-	ImagePrice2K                    *float64 `json:"image_price_2k,omitempty"`
-	ImagePrice4K                    *float64 `json:"image_price_4k,omitempty"`
-	VideoRateIndependent            bool     `json:"video_rate_independent"`
-	VideoRateMultiplier             float64  `json:"video_rate_multiplier"`
-	VideoPrice480P                  *float64 `json:"video_price_480p,omitempty"`
-	VideoPrice720P                  *float64 `json:"video_price_720p,omitempty"`
-	VideoPrice1080P                 *float64 `json:"video_price_1080p,omitempty"`
-	WebSearchPricePerCall           *float64 `json:"web_search_price_per_call,omitempty"`
-	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id,omitempty"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request,omitempty"`
+	ID                        int64    `json:"id"`
+	Name                      string   `json:"name"`
+	Platform                  string   `json:"platform"`
+	IsExclusive               bool     `json:"is_exclusive"`
+	Status                    string   `json:"status"`
+	SubscriptionType          string   `json:"subscription_type"`
+	RateMultiplier            float64  `json:"rate_multiplier"`
+	DailyLimitUSD             *float64 `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD            *float64 `json:"weekly_limit_usd,omitempty"`
+	MonthlyLimitUSD           *float64 `json:"monthly_limit_usd,omitempty"`
+	AllowImageGeneration      bool     `json:"allow_image_generation"`
+	AllowBatchImageGeneration bool     `json:"allow_batch_image_generation"`
+	ImageRateIndependent      bool     `json:"image_rate_independent"`
+	ImageRateMultiplier       float64  `json:"image_rate_multiplier"`
+	ImagePrice1K              *float64 `json:"image_price_1k,omitempty"`
+	ImagePrice2K              *float64 `json:"image_price_2k,omitempty"`
+	ImagePrice4K              *float64 `json:"image_price_4k,omitempty"`
+	VideoRateIndependent      bool     `json:"video_rate_independent"`
+	VideoRateMultiplier       float64  `json:"video_rate_multiplier"`
+	VideoPrice480P            *float64 `json:"video_price_480p,omitempty"`
+	VideoPrice720P            *float64 `json:"video_price_720p,omitempty"`
+	VideoPrice1080P           *float64 `json:"video_price_1080p,omitempty"`
+	WebSearchPricePerCall     *float64 `json:"web_search_price_per_call,omitempty"`
 
 	// Model routing is used by gateway account selection, so it must be part of auth cache snapshot.
 	// Only anthropic groups use these fields; others may leave them empty.
@@ -102,11 +99,7 @@ type APIKeyAuthGroupSnapshot struct {
 	RPMLimit int `json:"rpm_limit"`
 
 	// Anthropic setup-token/api-key 混合类型权重调度配置。
-	AnthropicMixedTypeWeightEnabled bool   `json:"anthropic_mixed_type_weight_enabled"`
-	AnthropicSetupTokenPoolWeight   int    `json:"anthropic_setup_token_pool_weight"`
-	AnthropicAPIKeyPoolWeight       int    `json:"anthropic_api_key_pool_weight"`
-	ContentReviewPolicy             string `json:"content_review_policy"`
-	ClaudeOAuthSystemPromptPolicy   string `json:"claude_oauth_system_prompt_policy"`
+	ContentReviewPolicy string `json:"content_review_policy"`
 
 	// 高峰时段倍率：PeakRateEnabled 为 true 且请求时刻处于 [PeakStart, PeakEnd) 时，
 	// token 计费倍率额外乘以 PeakRateMultiplier（详见 Group.PeakMultiplierAt）。

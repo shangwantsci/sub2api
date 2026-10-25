@@ -254,7 +254,6 @@ type ProviderGroupPolicyView struct {
 	Platform               string  `json:"platform"`
 	RateMultiplier         float64 `json:"rate_multiplier"`
 	ContentReviewPolicy    string  `json:"content_review_policy"`
-	SystemPromptPolicy     string  `json:"claude_oauth_system_prompt_policy"`
 	Status                 string  `json:"status"`
 	AccountCountForDisplay int     `json:"account_count,omitempty"`
 	// ExistingPriorities 是该分组内非供号商账号已有的 priority 去重值。
@@ -302,7 +301,6 @@ func (h *ProviderHandler) GetSettings(c *gin.Context) {
 			Platform:            g.Platform,
 			RateMultiplier:      g.RateMultiplier,
 			ContentReviewPolicy: g.AnthropicContentReviewPolicy(),
-			SystemPromptPolicy:  g.AnthropicClaudeOAuthSystemPromptPolicy(),
 			Status:              g.Status,
 			ExistingPriorities:  existing,
 		})

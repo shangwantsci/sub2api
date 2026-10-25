@@ -978,7 +978,15 @@ export default {
         identityOnly: 'Identity Only (<200 tokens)',
         disabled: 'Disabled'
       },
-      hats: {
+      groupAccountsTitle: 'Group accounts',
+    groupAccountsHint: 'Select accounts available to this customer group',
+    groupAccountsLoadMore: 'Load more',
+    groupAccountsSearch: 'Search accounts',
+    groupAccountsEmpty: 'No accounts available',
+    groupAccountsSave: 'Save accounts',
+    groupAccountsSaved: 'Group accounts saved',
+    manageAccounts: 'Accounts',
+    hats: {
         cc_line: {
           name: 'Claude Code only',
           short: 'CC only',

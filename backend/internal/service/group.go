@@ -55,10 +55,7 @@ type Group struct {
 	WebSearchPricePerCall *float64
 
 	// Claude Code 客户端限制
-	ClaudeCodeOnly  bool
-	FallbackGroupID *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
-	FallbackGroupIDOnInvalidRequest *int64
 
 	// 模型路由配置
 	// key: 模型匹配模式（支持 * 通配符，如 "claude-opus-*"）
@@ -78,8 +75,6 @@ type Group struct {
 
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool
-	RequireOAuthOnly            bool // 仅允许非 apikey 类型账号关联（OpenAI/Antigravity/Anthropic/Gemini）
-	RequirePrivacySet           bool // 调度时仅允许 privacy 已成功设置的账号（OpenAI/Antigravity/Anthropic/Gemini）
 	DefaultMappedModel          string
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
 	ModelsListConfig            GroupModelsListConfig
@@ -89,11 +84,7 @@ type Group struct {
 	RPMLimit int
 
 	// Anthropic setup-token/api-key 混合类型权重调度配置。
-	AnthropicMixedTypeWeightEnabled bool
-	AnthropicSetupTokenPoolWeight   int
-	AnthropicAPIKeyPoolWeight       int
-	ContentReviewPolicy             string
-	ClaudeOAuthSystemPromptPolicy   string
+	ContentReviewPolicy string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

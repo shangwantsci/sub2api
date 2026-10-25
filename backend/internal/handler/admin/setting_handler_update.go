@@ -216,24 +216,18 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification           *bool   `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough              *bool   `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                       *bool   `json:"enable_cch_signing"`
-	ClaudeCodeMimicryProfile               *string `json:"claude_code_mimicry_profile"`
-	ClaudeMimicryGuardMode                 *string `json:"claude_mimicry_guard_mode"`
-	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
-	EnableClaudeOAuthBillableInputTokens   *bool   `json:"enable_claude_oauth_billable_input_tokens"`
-	ClaudeOAuthBillableInputTokensOverride *int    `json:"claude_oauth_billable_input_tokens_override"`
-	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
-	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
-	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
-	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
-	AccountNurturingEnabled                *bool   `json:"account_nurturing_enabled"`
-	PoolHealthEnabled                      *bool   `json:"pool_health_enabled"`
-	PoolHealthGroupName                    *string `json:"pool_health_group_name"`
-	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
-	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
+	EnableFingerprintUnification       *bool   `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          *bool   `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   *bool   `json:"enable_cch_signing"`
+	ClaudeCodeMimicryProfile           *string `json:"claude_code_mimicry_profile"`
+	EnableAnthropicCacheTTL1hInjection *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl         *bool   `json:"rewrite_message_cache_control"`
+	EnableClientDatelineNormalization  *bool   `json:"enable_client_dateline_normalization"`
+	AccountNurturingEnabled            *bool   `json:"account_nurturing_enabled"`
+	PoolHealthEnabled                  *bool   `json:"pool_health_enabled"`
+	PoolHealthGroupName                *string `json:"pool_health_group_name"`
+	AntigravityUserAgentVersion        *string `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -1354,48 +1348,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableCCHSigning
 		}(),
-		ClaudeCodeMimicryProfile: func() string {
-			if req.ClaudeCodeMimicryProfile != nil {
-				return *req.ClaudeCodeMimicryProfile
-			}
-			return previousSettings.ClaudeCodeMimicryProfile
-		}(),
-		ClaudeMimicryGuardMode: func() string {
-			if req.ClaudeMimicryGuardMode != nil {
-				return *req.ClaudeMimicryGuardMode
-			}
-			return previousSettings.ClaudeMimicryGuardMode
-		}(),
-		EnableClaudeOAuthSystemPromptInjection: func() bool {
-			if req.EnableClaudeOAuthSystemPromptInjection != nil {
-				return *req.EnableClaudeOAuthSystemPromptInjection
-			}
-			return previousSettings.EnableClaudeOAuthSystemPromptInjection
-		}(),
-		EnableClaudeOAuthBillableInputTokens: func() bool {
-			if req.EnableClaudeOAuthBillableInputTokens != nil {
-				return *req.EnableClaudeOAuthBillableInputTokens
-			}
-			return previousSettings.EnableClaudeOAuthBillableInputTokens
-		}(),
-		ClaudeOAuthBillableInputTokensOverride: func() int {
-			if req.ClaudeOAuthBillableInputTokensOverride != nil && *req.ClaudeOAuthBillableInputTokensOverride >= 0 {
-				return *req.ClaudeOAuthBillableInputTokensOverride
-			}
-			return previousSettings.ClaudeOAuthBillableInputTokensOverride
-		}(),
-		ClaudeOAuthSystemPrompt: func() string {
-			if req.ClaudeOAuthSystemPrompt != nil {
-				return *req.ClaudeOAuthSystemPrompt
-			}
-			return previousSettings.ClaudeOAuthSystemPrompt
-		}(),
-		ClaudeOAuthSystemPromptBlocks: func() string {
-			if req.ClaudeOAuthSystemPromptBlocks != nil {
-				return *req.ClaudeOAuthSystemPromptBlocks
-			}
-			return previousSettings.ClaudeOAuthSystemPromptBlocks
-		}(),
 		EnableAnthropicCacheTTL1hInjection: func() bool {
 			if req.EnableAnthropicCacheTTL1hInjection != nil {
 				return *req.EnableAnthropicCacheTTL1hInjection
@@ -1867,13 +1819,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableFingerprintUnification:                           updatedSettings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                       updatedSettings.EnableCCHSigning,
-		ClaudeCodeMimicryProfile:                               updatedSettings.ClaudeCodeMimicryProfile,
-		ClaudeMimicryGuardMode:                                 updatedSettings.ClaudeMimicryGuardMode,
-		EnableClaudeOAuthSystemPromptInjection:                 updatedSettings.EnableClaudeOAuthSystemPromptInjection,
-		EnableClaudeOAuthBillableInputTokens:                   updatedSettings.EnableClaudeOAuthBillableInputTokens,
-		ClaudeOAuthBillableInputTokensOverride:                 updatedSettings.ClaudeOAuthBillableInputTokensOverride,
-		ClaudeOAuthSystemPrompt:                                updatedSettings.ClaudeOAuthSystemPrompt,
-		ClaudeOAuthSystemPromptBlocks:                          updatedSettings.ClaudeOAuthSystemPromptBlocks,
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,

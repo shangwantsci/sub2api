@@ -557,13 +557,6 @@ export interface SystemSettings {
   enable_fingerprint_unification: boolean;
   enable_metadata_passthrough: boolean;
   enable_cch_signing: boolean;
-  claude_code_mimicry_profile: string;
-  claude_mimicry_guard_mode: string;
-  enable_claude_oauth_system_prompt_injection: boolean;
-  enable_claude_oauth_billable_input_tokens: boolean;
-  claude_oauth_billable_input_tokens_override: number;
-  claude_oauth_system_prompt: string;
-  claude_oauth_system_prompt_blocks: string;
   enable_anthropic_cache_ttl_1h_injection: boolean;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
@@ -843,13 +836,6 @@ export interface UpdateSettingsRequest {
   enable_fingerprint_unification?: boolean;
   enable_metadata_passthrough?: boolean;
   enable_cch_signing?: boolean;
-  claude_code_mimicry_profile?: string;
-  claude_mimicry_guard_mode?: string;
-  enable_claude_oauth_system_prompt_injection?: boolean;
-  enable_claude_oauth_billable_input_tokens?: boolean;
-  claude_oauth_billable_input_tokens_override?: number;
-  claude_oauth_system_prompt?: string;
-  claude_oauth_system_prompt_blocks?: string;
   enable_anthropic_cache_ttl_1h_injection?: boolean;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
@@ -1401,79 +1387,6 @@ export async function updateCapacityPresets(
   return data;
 }
 
-// ==================== Claude Code Calibrated Profile ====================
-
-/**
- * Read-only status of the Claude Code calibrated wire profile that the gateway
- * hot-loads (produced by tools/cc-calibrate). When not published (or invalid),
- * the gateway falls back to compiled-in constants.
- */
-export interface ClaudeCalibratedProfileStatus {
-  published: boolean;
-  valid: boolean;
-  cli_version: string;
-  captured_at: string;
-  source: string;
-  user_agent: string;
-  salt_verified: boolean;
-  guard_checked: number;
-  guard_ok: number;
-  beta_rule_keys: string[];
-  absent_headers: string[];
-  raw: string;
-  error?: string;
-}
-
-export function normalizeClaudeCalibratedProfileStatus(
-  input: Partial<ClaudeCalibratedProfileStatus> | null | undefined,
-): ClaudeCalibratedProfileStatus {
-  return {
-    published: input?.published === true,
-    valid: input?.valid === true,
-    cli_version: typeof input?.cli_version === "string" ? input.cli_version : "",
-    captured_at: typeof input?.captured_at === "string" ? input.captured_at : "",
-    source: typeof input?.source === "string" ? input.source : "",
-    user_agent: typeof input?.user_agent === "string" ? input.user_agent : "",
-    salt_verified: input?.salt_verified === true,
-    guard_checked: Number.isFinite(input?.guard_checked) ? Number(input?.guard_checked) : 0,
-    guard_ok: Number.isFinite(input?.guard_ok) ? Number(input?.guard_ok) : 0,
-    beta_rule_keys: Array.isArray(input?.beta_rule_keys) ? input.beta_rule_keys : [],
-    absent_headers: Array.isArray(input?.absent_headers) ? input.absent_headers : [],
-    raw: typeof input?.raw === "string" ? input.raw : "",
-    ...(typeof input?.error === "string" && input.error ? { error: input.error } : {}),
-  };
-}
-
-export async function getClaudeCalibratedProfile(): Promise<ClaudeCalibratedProfileStatus> {
-  const { data } = await apiClient.get<ClaudeCalibratedProfileStatus>(
-    "/admin/settings/claude-calibrated-profile",
-  );
-  return normalizeClaudeCalibratedProfileStatus(data);
-}
-
-/**
- * Publish a calibrated profile. `raw` is the profile-<version>.json content
- * produced by tools/cc-calibrate. The backend validates it (schema, UA↔version
- * consistency, fingerprint guard) and rejects invalid profiles.
- */
-export async function publishClaudeCalibratedProfile(
-  raw: string,
-): Promise<ClaudeCalibratedProfileStatus> {
-  const { data } = await apiClient.post<ClaudeCalibratedProfileStatus>(
-    "/admin/settings/claude-calibrated-profile",
-    raw,
-    { headers: { "Content-Type": "application/json" } },
-  );
-  return normalizeClaudeCalibratedProfileStatus(data);
-}
-
-export async function clearClaudeCalibratedProfile(): Promise<ClaudeCalibratedProfileStatus> {
-  const { data } = await apiClient.delete<ClaudeCalibratedProfileStatus>(
-    "/admin/settings/claude-calibrated-profile",
-  );
-  return normalizeClaudeCalibratedProfileStatus(data);
-}
-
 // --- Web Search Emulation Config ---
 
 export interface WebSearchProviderConfig {
@@ -1559,9 +1472,6 @@ export const settingsAPI = {
   updateBetaPolicySettings,
   getCapacityPresets,
   updateCapacityPresets,
-  getClaudeCalibratedProfile,
-  publishClaudeCalibratedProfile,
-  clearClaudeCalibratedProfile,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,

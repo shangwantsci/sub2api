@@ -71,3 +71,74 @@ func (c *gatewayCache) IsCyberSessionBlocked(ctx context.Context, key string) (b
 	}
 	return n > 0, nil
 }
+
+const claudeCodeStickyFirstPrefix = "cc_sticky_first:"
+
+func buildClaudeCodeStickyFirstKey(groupID int64, sessionHash string) string {
+	return fmt.Sprintf("%s%d:%s", claudeCodeStickyFirstPrefix, groupID, sessionHash)
+}
+
+// GetClaudeCodeStickyFirst 返回 CC 会话首次绑定时间；不存在时返回零值。
+func (c *gatewayCache) GetClaudeCodeStickyFirst(ctx context.Context, groupID int64, sessionHash string) (time.Time, error) {
+	seconds, err := c.rdb.Get(ctx, buildClaudeCodeStickyFirstKey(groupID, sessionHash)).Int64()
+	if err == redis.Nil {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(seconds, 0), nil
+}
+
+// SetClaudeCodeStickyFirst 仅在不存在时写入首次绑定时间，TTL 2h。
+func (c *gatewayCache) SetClaudeCodeStickyFirst(ctx context.Context, groupID int64, sessionHash string) error {
+	return c.rdb.SetNX(ctx, buildClaudeCodeStickyFirstKey(groupID, sessionHash), time.Now().Unix(), 2*time.Hour).Err()
+}
+
+const claudeCodeRunLeasePrefix = "cc_run_lease:"
+
+func buildClaudeCodeRunLeaseKey(sessionKey string) string {
+	return claudeCodeRunLeasePrefix + sessionKey
+}
+
+// AcquireClaudeCodeRunLease 尝试成为 session 的 owner；成功返回 true。
+func (c *gatewayCache) AcquireClaudeCodeRunLease(ctx context.Context, sessionKey, owner string, ttl time.Duration) (bool, error) {
+	if sessionKey == "" || owner == "" {
+		return false, nil
+	}
+	return c.rdb.SetNX(ctx, buildClaudeCodeRunLeaseKey(sessionKey), owner, ttl).Result()
+}
+
+var refreshClaudeCodeRunLeaseScript = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+end
+return 0
+`)
+
+// RefreshClaudeCodeRunLease 仅当 owner 匹配时续期。
+func (c *gatewayCache) RefreshClaudeCodeRunLease(ctx context.Context, sessionKey, owner string, ttl time.Duration) (bool, error) {
+	if sessionKey == "" || owner == "" {
+		return false, nil
+	}
+	result, err := refreshClaudeCodeRunLeaseScript.Run(ctx, c.rdb, []string{buildClaudeCodeRunLeaseKey(sessionKey)}, owner, ttl.Milliseconds()).Int64()
+	if err != nil {
+		return false, err
+	}
+	return result > 0, nil
+}
+
+var releaseClaudeCodeRunLeaseScript = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0
+`)
+
+// ReleaseClaudeCodeRunLease 仅当 owner 匹配时删除 lease。
+func (c *gatewayCache) ReleaseClaudeCodeRunLease(ctx context.Context, sessionKey, owner string) error {
+	if sessionKey == "" || owner == "" {
+		return nil
+	}
+	return releaseClaudeCodeRunLeaseScript.Run(ctx, c.rdb, []string{buildClaudeCodeRunLeaseKey(sessionKey)}, owner).Err()
+}

@@ -255,8 +255,6 @@ func selectWithCapacitySite(t *testing.T, site capacitySite) capacityOutcome {
 			model = routedMod
 		}
 		if site.mixed {
-			group.AnthropicMixedTypeWeightEnabled = true
-			group.AnthropicSetupTokenPoolWeight = 1
 		}
 		svc.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}}
 		groupArg = &[]int64{groupID}[0]

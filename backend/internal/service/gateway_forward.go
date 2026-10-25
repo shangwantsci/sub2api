@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 
 	"github.com/gin-gonic/gin"
 )
@@ -86,6 +87,13 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// forwardToUpstream sends the request through Go's HTTP client with the
+// account's TLS profile. The old Bun process-pool Go path was removed; OAuth
+// traffic now goes through the Claude Code runtime instead.
+func (s *GatewayService) forwardToUpstream(req *http.Request, proxyURL string, account *Account, tlsProfile *tlsfingerprint.Profile) (*http.Response, error) {
+	return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
+}
+
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (*ForwardResult, error) {
 	startTime := time.Now()
@@ -103,7 +111,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		passthroughModel := parsed.Model
 		if passthroughModel != "" {
 			if mappedModel := account.GetMappedModel(passthroughModel); mappedModel != passthroughModel {
-				passthroughBody = s.replaceModelInBody(passthroughBody, mappedModel)
+				passthroughBody = s.ReplaceModelInBody(passthroughBody, mappedModel)
 				logger.LegacyPrintf("service.gateway", "Passthrough model mapping: %s -> %s (account: %s)", parsed.Model, mappedModel, account.Name)
 				passthroughModel = mappedModel
 			}
@@ -166,99 +174,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	//
 	// 对于非 Claude Code 的第三方客户端（opencode 等），即使伪造 claude-cli/*
 	// UA 和合法 metadata.user_id，仍然走完整 mimicry。
-	isClaudeCode := IsClaudeCodeClient(ctx)
-	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
-
-	// 环境小节要在提取首条用户文本之前改完，计费指纹才和发出去的正文一致。
-	if next, ok := s.normalizeClaudePromptEnv(ctx, account, body); ok {
-		if err := replaceBody(next); err != nil {
-			return nil, err
-		}
-	}
-
-	if shouldMimicClaudeCode {
-		firstUserText := extractFirstUserText(body)
-		rememberClaudeMimicFirstUserText(c, firstUserText)
-
-		// 与 Parrot 对齐：OAuth 账号无条件重写 system（即使客户端已发了 Claude Code
-		// 风格的 system prompt）。原因：第三方工具（opencode 等）会发 "You are Claude
-		// Code..." system prompt 但缺少 billing attribution block，导致 Anthropic
-		// 检测到"有 CC prompt 但无 billing block"的不一致而判为 third-party。
-		// Parrot 的 transform_request 从不检查客户端 system 内容，直接覆盖。
-		systemRewritten := false
-		systemRaw, _ := parsed.SystemValue()
-		systemPromptMode, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
-		if systemPromptMode.enabled() {
-			nextBody := rewriteSystemForNonClaudeCodeWithPromptBlocksModeAndFirstUserText(
-				body, systemRaw, systemPrompt, systemPromptBlocks, true, firstUserText,
-			)
-			if err := replaceBody(nextBody); err != nil {
-				return nil, err
-			}
-			systemRewritten = true
-		}
-
-		// system 被重写时保留 CC prompt 的 cache_control: ephemeral（匹配真实 Claude Code 行为）；
-		// 未重写时（注入开关关闭）剥离客户端 cache_control，与原有行为一致。
-		// 两种情况下 enforceCacheControlLimit 都会兜底处理上限。
-		normalizeOpts := claudeOAuthNormalizeOptions{
-			stripSystemCacheControl: !systemRewritten,
-			ensureMimicBodyDefaults: account.IsAnthropicOAuthOrSetupToken(),
-		}
-		if s.identityService != nil && c != nil {
-			fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header)
-			if err == nil && fp != nil {
-				metadataFP := claudeCodeMimicryFingerprint(fp, s.calibratedProfile(ctx))
-				// metadata 透传开启时跳过 metadata 注入
-				_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)
-				if !mimicMPT {
-					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, metadataFP, firstUserText); metadataUserID != "" {
-						normalizeOpts.injectMetadata = true
-						normalizeOpts.metadataUserID = metadataUserID
-					}
-				}
-			}
-		}
-
-		// 注入前后对比 thinking，网关注入的才打标记，供响应侧摘块。
-		beforeNormalize := body
-
-		var normalizedBody []byte
-		normalizedBody, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
-		if err := replaceBody(normalizedBody); err != nil {
-			return nil, err
-		}
-		markInjectedThinkingIfAdded(c, beforeNormalize, body)
-
-		// D/E/F: 可选 messages cache 策略 + 工具名混淆 + tools[-1] 断点
-		// 与 forward_as_chat_completions / forward_as_responses 路径对齐，
-		// 原生 /v1/messages 路径也走同一套可配置字段级改写。
-		if err := replaceBody(s.rewriteMessageCacheControlIfEnabled(ctx, body)); err != nil {
-			return nil, err
-		}
-		if rw := buildToolNameRewriteFromBody(body); rw != nil {
-			if err := replaceBody(applyToolNameRewriteToBody(body, rw)); err != nil {
-				return nil, err
-			}
-			if c != nil {
-				c.Set(toolNameRewriteKey, rw)
-			}
-		} else {
-			if err := replaceBody(applyToolsLastCacheBreakpoint(body)); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// 客户端 dateline 归一化：仅对 Anthropic OAuth/SetupToken 账号生效。
-	// 抹除 "Today's date is …" 语句里可能被注入的隐写指纹（4 种撇号 × 2 种日期
-	// 分隔符），还原为 ASCII 撇号 + "-" 分隔符。运行在 mimicry 分支之外，
-	// 保证真实 Claude Code 客户端注入的指纹同样被清洗。
-	if next, ok := s.normalizeClientDatelineIfEnabled(ctx, account, body); ok {
-		if err := replaceBody(next); err != nil {
-			return nil, err
-		}
-	}
 
 	// 强制执行 cache_control 块数量限制（最多 4 个）
 	if err := replaceBody(enforceCacheControlLimit(body)); err != nil {
@@ -288,7 +203,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			}
 		}
 	}
-	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
+	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
 		normalized := claude.NormalizeModelID(reqModel)
 		if normalized != reqModel {
 			mappedModel = normalized
@@ -297,18 +212,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	if mappedModel != reqModel {
 		// 替换请求体中的模型名
-		if err := replaceBody(s.replaceModelInBody(body, mappedModel)); err != nil {
+		if err := replaceBody(s.ReplaceModelInBody(body, mappedModel)); err != nil {
 			return nil, err
 		}
 		reqModel = mappedModel
 		parsed.Model = mappedModel
 		logger.LegacyPrintf("service.gateway", "Model mapping applied: %s -> %s (account: %s, source=%s)", originalModel, mappedModel, account.Name, mappingSource)
-	}
-
-	if s.shouldInjectAnthropicCacheTTL1h(ctx, account) {
-		if err := replaceBody(injectAnthropicCacheControlTTL1h(body)); err != nil {
-			return nil, err
-		}
 	}
 
 	// 获取凭证
@@ -326,7 +235,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// 解析 TLS 指纹 profile（同一请求生命周期内不变，避免重试循环中重复解析）
-	tlsProfile := s.tlsFPProfileService.ResolveTLSProfileForClaudeMimic(account, shouldMimicClaudeCode)
+	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 
 	// 调试日志：记录即将转发的账号信息
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
@@ -373,7 +282,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
@@ -381,8 +290,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
 		lastWireBody = wireBody
 
-		// 发送请求
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		resp, err = s.forwardToUpstream(upstreamReq, proxyURL, account, tlsProfile)
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -457,10 +365,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream)
 					releaseRetryCtx()
 					if buildErr == nil {
-						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						retryResp, retryErr := s.forwardToUpstream(retryReq, proxyURL, account, tlsProfile)
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
 								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
@@ -498,10 +406,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									logger.LegacyPrintf("service.gateway", "Account %d: signature retry still failing and looks tool-related, retrying with tool blocks downgraded", account.ID)
 									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
-									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream)
 									releaseRetryCtx2()
 									if buildErr2 == nil {
-										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										retryResp2, retryErr2 := s.forwardToUpstream(retryReq2, proxyURL, account, tlsProfile)
 										if retryErr2 == nil {
 											if retryResp2.StatusCode < 400 {
 												// 二阶段工具块降级成功时也必须更新当前 body。
@@ -577,10 +485,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					if applied && time.Since(retryStart) < maxRetryElapsed {
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream)
 						releaseBudgetRetryCtx()
 						if buildErr == nil {
-							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							budgetRetryResp, retryErr := s.forwardToUpstream(budgetRetryReq, proxyURL, account, tlsProfile)
 							if retryErr == nil {
 								if budgetRetryResp.StatusCode < 400 {
 									// budget 修正请求成功后，ParsedRequest 也要描述被接受的修正版。
@@ -802,7 +710,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var firstTokenMs *int
 	var clientDisconnect bool
 	if reqStream {
-		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, shouldMimicClaudeCode)
+		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, false)
 		if err != nil {
 			var sseErr *sseStreamErrorEventError
 			if errors.As(err, &sseErr) {

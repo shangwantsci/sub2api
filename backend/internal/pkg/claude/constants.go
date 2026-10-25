@@ -1,8 +1,6 @@
 // Package claude provides constants and helpers for Claude API integration.
 package claude
 
-import "strings"
-
 // Claude Code 客户端相关常量
 
 // Beta header 常量
@@ -86,30 +84,9 @@ const (
 )
 
 // ClaudeCodeMimicryProfile 描述一个可复用的 Claude Code wire profile。
-type ClaudeCodeMimicryProfile struct {
-	ID                string
-	CLIVersion        string
-	BillingEntrypoint string
-	SystemPrompt      string
-	Headers           map[string]string
-	MessageBetas      []string
-	CountTokensBetas  []string
-}
-
-// ClaudeCodeMimicryModelProfile 描述 Claude Code 2.1.206 对不同模型族的
-// beta/body 默认形态差异。
-type ClaudeCodeMimicryModelProfile struct {
-	ID                          string
-	MessageBetas                []string
-	CountTokensBetas            []string
-	DefaultMaxTokens            int
-	CountTokensDefaultMaxTokens int
-	DefaultThinkingType         string
-	DefaultThinkingBudgetTokens int
-	DefaultOutputConfigEffort   string
-}
-
-var defaultClaudeCodeMimicryHeaders = map[string]string{
+// defaultClaudeHeaders 是 Anthropic 客户端默认请求头（模型列表同步等辅助请求使用）。
+// OAuth 请求伪装已随 P2 删除；这里只保留 API Key/模型同步需要的基础头。
+var defaultClaudeHeaders = map[string]string{
 	"User-Agent":                                "claude-cli/" + CLICurrentVersion + " (external, sdk-cli)",
 	"X-Stainless-Lang":                          "js",
 	"X-Stainless-Package-Version":               "0.94.0",
@@ -123,112 +100,10 @@ var defaultClaudeCodeMimicryHeaders = map[string]string{
 	"Anthropic-Dangerous-Direct-Browser-Access": "true",
 }
 
-// defaultClaudeCodeMimicryMessageBetas 是 sonnet/opus 主对话轮的 anthropic-beta 集合。
-//
-// 注：tools/cc-calibrate 对真身 2.1.211 的抓包显示真身主轮集合为
-// {claude-code, interleaved-thinking, thinking-token-count, context-management,
-// prompt-caching-scope, mid-conversation-system, effort}（不含 tool-search-tool）。
-// 但把 context-management 加入会联动 body 层 sanitize（保留/剥离 body.context_management），
-// 影响面较大，属于需受控灰度的能力维度改动，因此 beta 集合的完整重标定交由标定 profile
-// 加载器（plan 阶段二 p2-loader）承载，此处暂保留既有集合以限定改动爆炸半径。
-var defaultClaudeCodeMimicryMessageBetas = []string{
-	BetaClaudeCode,
-	BetaInterleavedThinking,
-	BetaToolSearchTool,
-	BetaEffort,
-}
-
-var defaultClaudeCodeMimicryCountTokensBetas = []string{
-	BetaClaudeCode,
-	BetaInterleavedThinking,
-	BetaThinkingTokenCount,
-	BetaContextManagement,
-	BetaPromptCachingScope,
-	BetaMidConversationSystem,
-	BetaAdvancedToolUse,
-	BetaEffort,
-	BetaTokenCounting,
-}
-
-var claudeCodeMimicryHaikuMessageBetas = []string{
-	BetaClaudeCode,
-	BetaToolSearchTool,
-}
-
-var claudeCodeMimicryFableMessageBetas = []string{
-	BetaClaudeCode,
-	BetaInterleavedThinking,
-	BetaToolSearchTool,
-	BetaEffort,
-	BetaFallbackCredit,
-}
-
-var claudeCodeMimicryHaikuCountTokensBetas = []string{
-	BetaInterleavedThinking,
-	BetaThinkingTokenCount,
-	BetaContextManagement,
-	BetaPromptCachingScope,
-	BetaClaudeCode,
-	BetaAdvancedToolUse,
-	BetaTokenCounting,
-}
-
-var claudeCodeMimicryFableCountTokensBetas = []string{
-	BetaClaudeCode,
-	BetaInterleavedThinking,
-	BetaThinkingTokenCount,
-	BetaContextManagement,
-	BetaPromptCachingScope,
-	BetaMidConversationSystem,
-	BetaAdvancedToolUse,
-	BetaEffort,
-	BetaServerSideFallback,
-	BetaFallbackCredit,
-	BetaTokenCounting,
-}
-
-// claudeCodeMimicryPreAdaptiveMessageBetas / ...CountTokensBetas 是 4.5 代模型的
-// beta 集合：在默认集合基础上去掉 effort-2025-11-24。该 beta 的发布日期晚于这一代
-// 模型本身（如 claude-sonnet-4-5-20250929），真实 CLI 调用它们时不会带上。
-var claudeCodeMimicryPreAdaptiveMessageBetas = []string{
-	BetaClaudeCode,
-	BetaInterleavedThinking,
-	BetaToolSearchTool,
-}
-
-var claudeCodeMimicryPreAdaptiveCountTokensBetas = []string{
-	BetaClaudeCode,
-	BetaInterleavedThinking,
-	BetaThinkingTokenCount,
-	BetaContextManagement,
-	BetaPromptCachingScope,
-	BetaMidConversationSystem,
-	BetaAdvancedToolUse,
-	BetaTokenCounting,
-}
-
-// preAdaptiveThinkingModelMarkers 标记早于 adaptive thinking / output_config.effort
-// 的模型代次。
-//
-// 这两个字段都是 4.6 代才引入的能力，Anthropic 对 4.5 代模型会直接以 400 拒绝
-// （adaptive thinking is not supported on this model / does not support the effort
-// parameter）。真实 CLI 按模型能力下发参数，调用这一代模型时本来就不会带上它们 ——
-// 注入反而制造出真实客户端不可能产生的参数组合，既打不通也不像真身。
-//
-// haiku-4-5 同属这一代，但它在 ResolveClaudeCodeMimicryModelProfile 中由更靠前的
-// haiku 分支命中（其 enabled + budget_tokens 形态来自真身抓包），不走这里。
-var preAdaptiveThinkingModelMarkers = []string{"sonnet-4-5", "opus-4-5"}
-
-func isPreAdaptiveThinkingModel(normalized string) bool {
-	for _, marker := range preAdaptiveThinkingModelMarkers {
-		if strings.Contains(normalized, marker) {
-			return true
-		}
-	}
-	return false
-}
-
 func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
 	out := make(map[string]string, len(values))
 	for k, v := range values {
 		out[k] = v
@@ -236,117 +111,8 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return out
 }
 
-func cloneStrings(values []string) []string {
-	return append([]string(nil), values...)
-}
+var DefaultHeaders = cloneStringMap(defaultClaudeHeaders)
 
-// DefaultClaudeCodeMimicryProfile 返回默认的 Claude Code 伪装 profile（版本以 DefaultClaudeCodeMimicryProfileID 为准）。
-func DefaultClaudeCodeMimicryProfile() ClaudeCodeMimicryProfile {
-	return ClaudeCodeMimicryProfile{
-		ID:                DefaultClaudeCodeMimicryProfileID,
-		CLIVersion:        CLICurrentVersion,
-		BillingEntrypoint: "sdk-cli",
-		SystemPrompt:      defaultClaudeAgentSDKSystemPrompt,
-		Headers:           cloneStringMap(defaultClaudeCodeMimicryHeaders),
-		MessageBetas:      cloneStrings(defaultClaudeCodeMimicryMessageBetas),
-		CountTokensBetas:  cloneStrings(defaultClaudeCodeMimicryCountTokensBetas),
-	}
-}
-
-// ResolveClaudeCodeMimicryProfile 解析 profile ID。未知值回退到当前默认 profile。
-func ResolveClaudeCodeMimicryProfile(id string) ClaudeCodeMimicryProfile {
-	switch strings.TrimSpace(id) {
-	case "", DefaultClaudeCodeMimicryProfileID:
-		return DefaultClaudeCodeMimicryProfile()
-	default:
-		return DefaultClaudeCodeMimicryProfile()
-	}
-}
-
-// ResolveClaudeCodeMimicryModelProfile 返回指定模型在 Claude Code 2.1.206
-// synthetic mimic 路径上的模型族 profile。未知模型保守按 Sonnet/Opus profile 处理。
-func ResolveClaudeCodeMimicryModelProfile(modelID string) ClaudeCodeMimicryModelProfile {
-	normalized := strings.ToLower(strings.TrimSpace(NormalizeModelID(modelID)))
-	switch {
-	case strings.Contains(normalized, "haiku"):
-		return ClaudeCodeMimicryModelProfile{
-			ID:                          "haiku",
-			MessageBetas:                cloneStrings(claudeCodeMimicryHaikuMessageBetas),
-			CountTokensBetas:            cloneStrings(claudeCodeMimicryHaikuCountTokensBetas),
-			DefaultMaxTokens:            32000,
-			CountTokensDefaultMaxTokens: 32000,
-			DefaultThinkingType:         "enabled",
-			DefaultThinkingBudgetTokens: 31999,
-		}
-	case strings.Contains(normalized, "fable"):
-		return ClaudeCodeMimicryModelProfile{
-			ID:                          "fable",
-			MessageBetas:                cloneStrings(claudeCodeMimicryFableMessageBetas),
-			CountTokensBetas:            cloneStrings(claudeCodeMimicryFableCountTokensBetas),
-			DefaultMaxTokens:            64000,
-			CountTokensDefaultMaxTokens: 64000,
-			DefaultThinkingType:         "adaptive",
-			DefaultOutputConfigEffort:   "high",
-		}
-	// 必须排在 sonnet 分支之前：claude-sonnet-4-5-* 同时含 "sonnet"，
-	// 落到下面的 sonnet 分支会被套上这一代不支持的 adaptive + effort。
-	case isPreAdaptiveThinkingModel(normalized):
-		return ClaudeCodeMimicryModelProfile{
-			ID:                          "pre-adaptive",
-			MessageBetas:                cloneStrings(claudeCodeMimicryPreAdaptiveMessageBetas),
-			CountTokensBetas:            cloneStrings(claudeCodeMimicryPreAdaptiveCountTokensBetas),
-			DefaultMaxTokens:            32000,
-			CountTokensDefaultMaxTokens: 32000,
-			// DefaultThinkingType / DefaultOutputConfigEffort 刻意留空：
-			// 这一代模型不接受 adaptive 与 effort，客户端没主动要求时不下发。
-		}
-	case strings.Contains(normalized, "sonnet"):
-		return ClaudeCodeMimicryModelProfile{
-			ID:                          "sonnet",
-			MessageBetas:                cloneStrings(defaultClaudeCodeMimicryMessageBetas),
-			CountTokensBetas:            cloneStrings(defaultClaudeCodeMimicryCountTokensBetas),
-			DefaultMaxTokens:            32000,
-			CountTokensDefaultMaxTokens: 64000,
-			DefaultThinkingType:         "adaptive",
-			DefaultOutputConfigEffort:   "high",
-		}
-	default:
-		return ClaudeCodeMimicryModelProfile{
-			ID:                          "opus",
-			MessageBetas:                cloneStrings(defaultClaudeCodeMimicryMessageBetas),
-			CountTokensBetas:            cloneStrings(defaultClaudeCodeMimicryCountTokensBetas),
-			DefaultMaxTokens:            64000,
-			CountTokensDefaultMaxTokens: 64000,
-			DefaultThinkingType:         "adaptive",
-			DefaultOutputConfigEffort:   "high",
-		}
-	}
-}
-
-func ClaudeCodeMimicryMessageBetasForModel(modelID string) []string {
-	return ResolveClaudeCodeMimicryModelProfile(modelID).MessageBetas
-}
-
-func ClaudeCodeMimicryCountTokensBetasForModel(modelID string) []string {
-	return ResolveClaudeCodeMimicryModelProfile(modelID).CountTokensBetas
-}
-
-// FullClaudeCodeMimicryBetas 返回默认模型族最"像"真实 Claude Code CLI 的 beta 列表。
-// 新代码应优先使用 ClaudeCodeMimicryMessageBetasForModel，以便保留 Haiku/Fable
-// 等模型族的抓包差异。
-//
-// 使用建议：
-//   - OAuth synthetic mimic：使用 ClaudeCodeMimicryMessageBetasForModel。
-//   - API-key 账号：不要使用本函数，参见 APIKeyBetaHeader。
-//   - 不默认加入 redact-thinking，避免上游抹除 thinking 内容；客户端显式传入时由合并逻辑保留。
-func FullClaudeCodeMimicryBetas() []string {
-	return ClaudeCodeMimicryMessageBetasForModel("")
-}
-
-// DefaultHeaders 是 Claude Code 客户端默认请求头。
-var DefaultHeaders = cloneStringMap(defaultClaudeCodeMimicryHeaders)
-
-// Model 表示一个 Claude 模型
 type Model struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`

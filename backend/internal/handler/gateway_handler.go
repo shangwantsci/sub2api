@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	pkgerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -291,6 +290,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
+	}
+
+	// 工具续轮：客户端回填 tool_result，直接续同一个 CC run。
+	if toolResults, _ := service.ExtractClaudeCodeToolResults(body); len(toolResults) > 0 {
+		if h.serveClaudeCodeToolContinue(c, apiKey, sessionKey, toolResults, body, reqModel, subscription, channelMapping, reqStream, &streamStarted) {
+			return
+		}
 	}
 
 	// 查询粘性会话绑定的账号 ID
@@ -584,12 +590,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	currentAPIKey := apiKey
 	currentSubscription := subscription
-	var fallbackGroupID *int64
-	if apiKey.Group != nil {
-		fallbackGroupID = apiKey.Group.FallbackGroupIDOnInvalidRequest
-	}
-	fallbackUsed := false
-
 	// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 	// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
 	if h.gatewayService.IsSingleAntigravityAccountGroup(c.Request.Context(), currentAPIKey.GroupID) {
@@ -597,9 +597,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		c.Request = c.Request.WithContext(ctx)
 	}
 
+	// 一次请求一旦选定运输方式，failover 不得跨到另一种运输（cc ↔ api）。
+	var requestTransport service.AccountTransport
+
 	for {
 		fs := h.newFailoverState(h.maxAccountSwitches, hasBoundSession, platform)
-		retryWithFallback := false
 
 		for {
 			attemptParsedReq, err := parsedReq.CloneForBody(body)
@@ -626,7 +628,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.String("model", reqModel),
 						zap.Int64p("group_id", currentAPIKey.GroupID),
 						zap.String("platform", platform),
-						zap.Bool("fallback_used", fallbackUsed),
 						zap.Bool("model_not_found", cls.ModelNotFound),
 						zap.Error(err),
 					)
@@ -656,7 +657,28 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
+			if status, code, message, reject := h.claudeCodeEndpointRejection(account, "/v1/messages"); reject {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				h.handleStreamingAwareError(c, status, code, message, streamStarted)
+				return
+			}
+			selectedTransport := service.TransportAPI
+			if h.isClaudeCodeTransport(account) {
+				selectedTransport = service.TransportClaudeCode
+			}
+			if requestTransport == "" {
+				requestTransport = selectedTransport
+			} else if selectedTransport != requestTransport {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			isClaudeCode := h.isClaudeCodeTransport(account)
 
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
@@ -749,6 +771,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// ===== 用户消息串行队列 START =====
 			var queueRelease func()
 			umqMode := h.getUserMsgQueueMode(account, attemptParsedReq)
+			if isClaudeCode {
+				// CC 自己控制发消息节奏；UMQ 只服务 Go 转发路径。
+				umqMode = ""
+			}
 
 			switch umqMode {
 			case config.UMQModeSerialize:
@@ -817,13 +843,39 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 转发请求 - 根据账号平台分流
 			c.Set("parsed_request", attemptParsedReq)
 			var result *service.ForwardResult
+			ccBadRequestMessage := ""
 			requestCtx := c.Request.Context()
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
+			if isClaudeCode {
+				var slotOwned bool
+				result, slotOwned, err = h.serveClaudeCodeMessages(c, account, attemptBody, reqModel, sessionKey, reqStream, selection.Acquired, accountReleaseFunc, &streamStarted)
+				if slotOwned {
+					accountReleaseFunc = nil
+				}
+				if err != nil {
+					reqLog.Warn("gateway.claude_code_failed",
+						zap.Int64("account_id", account.ID),
+						zap.Bool("stream_started", streamStarted),
+						zap.Error(err),
+					)
+					if errors.Is(err, service.ErrClaudeCodeSessionOwned) {
+						h.handleStreamingAwareError(c, http.StatusConflict, "session_owned_elsewhere",
+							"Claude Code session is active on another instance; retry with session affinity", streamStarted)
+						return
+					}
+					badRequestMessage, failoverErr := classifyClaudeCodeHandlerError(err)
+					if badRequestMessage != "" {
+						ccBadRequestMessage = badRequestMessage
+					}
+					if failoverErr != nil {
+						err = failoverErr
+					}
+				}
+			} else if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
@@ -896,6 +948,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				})
 			}
 
+			if ccBadRequestMessage != "" {
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", ccBadRequestMessage, streamStarted)
+				return
+			}
+
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError
@@ -909,45 +966,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if errors.As(err, &promptTooLongErr) {
 					reqLog.Warn("gateway.prompt_too_long_from_antigravity",
 						zap.Any("current_group_id", currentAPIKey.GroupID),
-						zap.Any("fallback_group_id", fallbackGroupID),
-						zap.Bool("fallback_used", fallbackUsed),
+						zap.Error(promptTooLongErr),
 					)
-					if !fallbackUsed && fallbackGroupID != nil && *fallbackGroupID > 0 {
-						fallbackGroup, err := h.gatewayService.ResolveGroupByID(c.Request.Context(), *fallbackGroupID)
-						if err != nil {
-							reqLog.Warn("gateway.resolve_fallback_group_failed", zap.Int64("fallback_group_id", *fallbackGroupID), zap.Error(err))
-							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
-							return
-						}
-						if fallbackGroup.Platform != service.PlatformAnthropic ||
-							fallbackGroup.SubscriptionType == service.SubscriptionTypeSubscription ||
-							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
-							reqLog.Warn("gateway.fallback_group_invalid",
-								zap.Int64("fallback_group_id", fallbackGroup.ID),
-								zap.String("fallback_platform", fallbackGroup.Platform),
-								zap.String("fallback_subscription_type", fallbackGroup.SubscriptionType),
-							)
-							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
-							return
-						}
-						fallbackAPIKey := cloneAPIKeyWithGroup(apiKey, fallbackGroup)
-						if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), fallbackAPIKey.User, fallbackAPIKey, fallbackGroup, nil, service.PlatformFromAPIKey(fallbackAPIKey)); err != nil {
-							status, code, message, retryAfter := billingErrorDetails(err)
-							if retryAfter > 0 {
-								c.Header("Retry-After", strconv.Itoa(retryAfter))
-							}
-							h.handleStreamingAwareError(c, status, code, message, streamStarted)
-							return
-						}
-						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
-						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
-						c.Request = c.Request.WithContext(ctx)
-						currentAPIKey = fallbackAPIKey
-						currentSubscription = nil
-						fallbackUsed = true
-						retryWithFallback = true
-						break
-					}
 					_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 					return
 				}
@@ -1025,9 +1045,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			submitForwardUsage(result)
-			return
-		}
-		if !retryWithFallback {
 			return
 		}
 	}
@@ -1938,6 +1955,11 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, account.Platform)
+
+	if status, code, message, reject := h.claudeCodeEndpointRejection(account, "/v1/messages/count_tokens"); reject {
+		h.errorResponse(c, status, code, message)
+		return
+	}
 
 	// 转发请求（不记录使用量）
 	if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {

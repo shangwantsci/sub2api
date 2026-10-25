@@ -16,7 +16,6 @@ const {
   getStreamTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
-  getClaudeCalibratedProfile,
   getGroups,
   listProxies,
   getProviders,
@@ -39,7 +38,6 @@ const {
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
-  getClaudeCalibratedProfile: vi.fn(),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
@@ -68,7 +66,6 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
-      getClaudeCalibratedProfile,
     },
     groups: {
       getAll: getGroups,
@@ -398,11 +395,7 @@ const baseSettingsResponse = {
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
   enable_cch_signing: false,
-  claude_code_mimicry_profile: "cc-2.1.211-sdk-cli-linux-x64",
   claude_mimicry_guard_mode: "warn",
-  enable_claude_oauth_system_prompt_injection: true,
-  claude_oauth_system_prompt: "",
-  claude_oauth_system_prompt_blocks: "",
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   enable_client_dateline_normalization: true,
@@ -536,21 +529,6 @@ async function openGatewayTab(wrapper: ReturnType<typeof mountView>) {
 }
 
 beforeEach(() => {
-  getClaudeCalibratedProfile.mockReset();
-  getClaudeCalibratedProfile.mockResolvedValue({
-    published: false,
-    valid: false,
-    cli_version: "",
-    captured_at: "",
-    source: "",
-    user_agent: "",
-    salt_verified: false,
-    guard_checked: 0,
-    guard_ok: 0,
-    beta_rule_keys: [],
-    absent_headers: [],
-    raw: "",
-  });
 });
 
 describe("admin SettingsView payment visible method controls", () => {
@@ -630,26 +608,6 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
-  });
-
-  it("renders the gateway tab when the calibrated profile endpoint returns a partial payload", async () => {
-    getClaudeCalibratedProfile.mockResolvedValue({
-      published: true,
-      valid: true,
-      cli_version: "2.1.211",
-      source: "cc-calibrate",
-      // Simulates an older/partial response; the page must not go blank.
-      beta_rule_keys: [],
-      absent_headers: [],
-    });
-
-    const wrapper = mountView();
-    await flushPromises();
-    await openGatewayTab(wrapper);
-
-    expect(wrapper.find("form").exists()).toBe(true);
-    expect(wrapper.text()).toContain("2.1.211");
-    expect(getClaudeCalibratedProfile).toHaveBeenCalled();
   });
 
   it("does not render legacy visible payment method controls", async () => {
@@ -1053,169 +1011,9 @@ describe("admin SettingsView payment visible method controls", () => {
     });
   });
 
-  it("submits Claude OAuth system prompt injection gateway settings", async () => {
-    const blocks = `[{"type":"text","text":"custom block","cache_control":true}]`;
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      enable_claude_oauth_system_prompt_injection: false,
-      claude_oauth_system_prompt_blocks: blocks,
-    });
-
-    const wrapper = mountView();
-
-    await flushPromises();
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledTimes(1);
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enable_claude_oauth_system_prompt_injection: false,
-      }),
-    );
-    const payload = updateSettings.mock.calls[0][0] as {
-      claude_oauth_system_prompt_blocks: string;
-    };
-    expect(JSON.parse(payload.claude_oauth_system_prompt_blocks)).toEqual([
-      {
-        enabled: true,
-        type: "text",
-        text: "custom block",
-        cache_control: {
-          type: "ephemeral",
-          ttl: "5m",
-        },
-      },
-    ]);
-  });
-
-  it("uses backend template placeholders for default OAuth system blocks", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      claude_oauth_system_prompt_blocks: "",
-    });
-
-    const wrapper = mountView();
-
-    await flushPromises();
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledTimes(1);
-    const payload = updateSettings.mock.calls[0][0] as {
-      claude_oauth_system_prompt_blocks: string;
-    };
-    const blocks = JSON.parse(payload.claude_oauth_system_prompt_blocks) as Array<{
-      text: string;
-    }>;
-
-    expect(blocks[1]?.text).toBe("{claude_code_system_prompt}");
-    expect(blocks[2]?.text).toBe("{claude_code_expansion_prompt}");
-    expect(blocks[1]?.text).not.toBe(
-      "You are Claude Code, Anthropic's official CLI for Claude.",
-    );
-  });
-
-  it("normalizes legacy Claude Code identity blocks to the Agent SDK identity", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      claude_oauth_system_prompt_blocks: JSON.stringify([
-        { enabled: true, type: "text", text: "{billing_header}" },
-        {
-          enabled: true,
-          type: "text",
-          text: "You are Claude Code, Anthropic's official CLI for Claude.",
-        },
-        {
-          enabled: true,
-          type: "text",
-          text: "custom expansion",
-          cache_control: { type: "ephemeral", ttl: "5m" },
-        },
-      ]),
-    });
-
-    const wrapper = mountView();
-
-    await flushPromises();
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledTimes(1);
-    const payload = updateSettings.mock.calls[0][0] as {
-      claude_oauth_system_prompt_blocks: string;
-    };
-    const blocks = JSON.parse(payload.claude_oauth_system_prompt_blocks) as Array<{
-      text: string;
-    }>;
-
-    expect(blocks[1]?.text).toBe(
-      "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
-    );
-  });
-
-  it("submits the current Claude Code mimicry profile and guard settings", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      claude_code_mimicry_profile: "cc-2.1.211-sdk-cli-linux-x64",
-      claude_mimicry_guard_mode: "block",
-    });
-
-    const wrapper = mountView();
-
-    await flushPromises();
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledTimes(1);
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        claude_code_mimicry_profile: "cc-2.1.211-sdk-cli-linux-x64",
-        claude_mimicry_guard_mode: "block",
-      }),
-    );
-  });
-
   // 后端只认一个当前 profile，GET /admin/settings 返回的已经是归一后的 ID。
   // 前端不能再自带一份「当前版本」常量：后端升级版本后，前端那份会悄悄过期，
   // 设置页展示的伪装版本就与网关实际使用的不一致（曾经就是 2.1.206 对 2.1.211）。
-  it("submits the mimicry profile the server reports instead of a front-end constant", async () => {
-    // 故意用前端从没听说过的版本：只要前端还存着自己的常量，这里就会被换成别的值。
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      claude_code_mimicry_profile: "cc-9.9.9-sdk-cli-linux-x64",
-    });
-
-    const wrapper = mountView();
-    await flushPromises();
-
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        claude_code_mimicry_profile: "cc-9.9.9-sdk-cli-linux-x64",
-      }),
-    );
-  });
-
-  it("does not invent a mimicry profile when the server reports none", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      claude_code_mimicry_profile: "",
-    });
-
-    const wrapper = mountView();
-    await flushPromises();
-
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledTimes(1);
-    // 不提交该键：后端据此保留库里已存的值，而不是被前端的某个默认值覆盖。
-    expect(updateSettings.mock.calls[0][0].claude_code_mimicry_profile).toBeUndefined();
-  });
-
   it("submits Antigravity user agent version gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

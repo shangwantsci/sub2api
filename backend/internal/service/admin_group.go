@@ -43,6 +43,43 @@ func (s *adminServiceImpl) GetAllGroupsIncludingInactive(ctx context.Context) ([
 	return groups, err
 }
 
+func (s *adminServiceImpl) SetGroupAccounts(ctx context.Context, id int64, accountIDs []int64) error {
+	if _, err := s.groupRepo.GetByID(ctx, id); err != nil {
+		return err
+	}
+	if len(accountIDs) > 0 {
+		if s.accountRepo == nil {
+			return errors.New("account repository is not configured")
+		}
+		accounts, err := s.accountRepo.GetByIDs(ctx, accountIDs)
+		if err != nil {
+			return err
+		}
+		if len(accounts) != len(accountIDs) {
+			return errors.New("some accounts do not exist")
+		}
+	}
+	if replacer, ok := s.groupRepo.(interface {
+		ReplaceGroupAccounts(ctx context.Context, groupID int64, accountIDs []int64) error
+	}); ok {
+		return replacer.ReplaceGroupAccounts(ctx, id, accountIDs)
+	}
+	if _, err := s.groupRepo.DeleteAccountGroupsByGroupID(ctx, id); err != nil {
+		return err
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	return s.groupRepo.BindAccountsToGroup(ctx, id, accountIDs)
+}
+
+func (s *adminServiceImpl) ListGroupAccounts(ctx context.Context, id int64) ([]Account, error) {
+	if s.accountRepo == nil {
+		return nil, errors.New("account repository is not configured")
+	}
+	return s.accountRepo.ListByGroup(ctx, id)
+}
+
 func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, error) {
 	return s.groupRepo.GetByID(ctx, id)
 }
@@ -129,23 +166,17 @@ func defaultAllowImageGenerationForPlatform(platform string) bool {
 	return platform == PlatformGrok
 }
 
-func normalizeAnthropicGroupPolicies(platform, contentReviewPolicy, systemPromptPolicy string) (string, string, error) {
+func normalizeAnthropicGroupPolicy(platform, contentReviewPolicy string) (string, error) {
 	if platform != PlatformAnthropic {
-		return GroupPolicyInherit, GroupPolicyInherit, nil
+		return GroupPolicyInherit, nil
 	}
 	if strings.TrimSpace(contentReviewPolicy) == "" {
 		contentReviewPolicy = GroupPolicyInherit
 	}
-	if strings.TrimSpace(systemPromptPolicy) == "" {
-		systemPromptPolicy = GroupPolicyInherit
-	}
 	if !IsValidGroupPolicy(contentReviewPolicy) {
-		return "", "", errors.New("content_review_policy must be inherit, enabled, or disabled")
+		return "", errors.New("content_review_policy must be inherit, enabled, or disabled")
 	}
-	if !IsValidClaudeOAuthSystemPromptPolicy(systemPromptPolicy) {
-		return "", "", errors.New("claude_oauth_system_prompt_policy must be inherit, enabled, identity_only, or disabled")
-	}
-	return NormalizeGroupPolicy(contentReviewPolicy), NormalizeClaudeOAuthSystemPromptPolicy(systemPromptPolicy), nil
+	return NormalizeGroupPolicy(contentReviewPolicy), nil
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
@@ -161,24 +192,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	subscriptionType := input.SubscriptionType
 	if subscriptionType == "" {
 		subscriptionType = SubscriptionTypeStandard
-	}
-
-	mixedTypeEnabled, setupPoolWeight, apiKeyPoolWeight, err := normalizeAnthropicMixedTypeWeightConfig(
-		platform,
-		input.AnthropicMixedTypeWeightEnabled,
-		input.AnthropicSetupTokenPoolWeight,
-		input.AnthropicAPIKeyPoolWeight,
-	)
-	if err != nil {
-		return nil, err
-	}
-	contentReviewPolicy, systemPromptPolicy, err := normalizeAnthropicGroupPolicies(
-		platform,
-		input.ContentReviewPolicy,
-		input.ClaudeOAuthSystemPromptPolicy,
-	)
-	if err != nil {
-		return nil, err
 	}
 
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
@@ -238,23 +251,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, err
 	}
 
-	// 校验降级分组
-	if input.FallbackGroupID != nil {
-		if err := s.validateFallbackGroup(ctx, 0, *input.FallbackGroupID); err != nil {
-			return nil, err
-		}
-	}
-	fallbackOnInvalidRequest := input.FallbackGroupIDOnInvalidRequest
-	if fallbackOnInvalidRequest != nil && *fallbackOnInvalidRequest <= 0 {
-		fallbackOnInvalidRequest = nil
-	}
-	// 校验无效请求兜底分组
-	if fallbackOnInvalidRequest != nil {
-		if err := s.validateFallbackGroupOnInvalidRequest(ctx, 0, platform, subscriptionType, *fallbackOnInvalidRequest); err != nil {
-			return nil, err
-		}
-	}
-
 	// MCPXMLInject：默认为 true，仅当显式传入 false 时关闭
 	mcpXMLInject := true
 	if input.MCPXMLInject != nil {
@@ -296,79 +292,54 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		}
 	}
 
+	contentReviewPolicy, err := normalizeAnthropicGroupPolicy(platform, input.ContentReviewPolicy)
+	if err != nil {
+		return nil, err
+	}
+
 	group := &Group{
-		Name:                            input.Name,
-		Description:                     input.Description,
-		Platform:                        platform,
-		RateMultiplier:                  input.RateMultiplier,
-		IsExclusive:                     input.IsExclusive,
-		Status:                          StatusActive,
-		SubscriptionType:                subscriptionType,
-		DailyLimitUSD:                   dailyLimit,
-		WeeklyLimitUSD:                  weeklyLimit,
-		MonthlyLimitUSD:                 monthlyLimit,
-		AllowImageGeneration:            allowImageGeneration,
-		AllowBatchImageGeneration:       allowBatchImageGeneration,
-		ImageRateIndependent:            input.ImageRateIndependent,
-		ImageRateMultiplier:             imageRateMultiplier,
-		BatchImageDiscountMultiplier:    batchImageDiscountMultiplier,
-		BatchImageHoldMultiplier:        batchImageHoldMultiplier,
-		VideoRateIndependent:            input.VideoRateIndependent,
-		VideoRateMultiplier:             videoRateMultiplier,
-		PeakRateEnabled:                 peakRateEnabled,
-		PeakStart:                       peakStart,
-		PeakEnd:                         peakEnd,
-		PeakRateMultiplier:              peakRateMultiplier,
-		ImagePrice1K:                    imagePrice1K,
-		ImagePrice2K:                    imagePrice2K,
-		ImagePrice4K:                    imagePrice4K,
-		VideoPrice480P:                  videoPrice480P,
-		VideoPrice720P:                  videoPrice720P,
-		VideoPrice1080P:                 videoPrice1080P,
-		WebSearchPricePerCall:           webSearchPricePerCall,
-		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
-		FallbackGroupID:                 input.FallbackGroupID,
-		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
-		ModelRouting:                    input.ModelRouting,
-		MCPXMLInject:                    mcpXMLInject,
-		SupportedModelScopes:            input.SupportedModelScopes,
-		AllowMessagesDispatch:           input.AllowMessagesDispatch,
-		RequireOAuthOnly:                input.RequireOAuthOnly,
-		RequirePrivacySet:               input.RequirePrivacySet,
-		DefaultMappedModel:              input.DefaultMappedModel,
-		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
-		ModelsListConfig:                normalizeGroupModelsListConfig(input.ModelsListConfig),
-		RPMLimit:                        input.RPMLimit,
-		AnthropicMixedTypeWeightEnabled: mixedTypeEnabled,
-		AnthropicSetupTokenPoolWeight:   setupPoolWeight,
-		AnthropicAPIKeyPoolWeight:       apiKeyPoolWeight,
-		ContentReviewPolicy:             contentReviewPolicy,
-		ClaudeOAuthSystemPromptPolicy:   systemPromptPolicy,
+		Name:                         input.Name,
+		Description:                  input.Description,
+		Platform:                     platform,
+		RateMultiplier:               input.RateMultiplier,
+		IsExclusive:                  input.IsExclusive,
+		Status:                       StatusActive,
+		SubscriptionType:             subscriptionType,
+		DailyLimitUSD:                dailyLimit,
+		WeeklyLimitUSD:               weeklyLimit,
+		MonthlyLimitUSD:              monthlyLimit,
+		AllowImageGeneration:         allowImageGeneration,
+		AllowBatchImageGeneration:    allowBatchImageGeneration,
+		ImageRateIndependent:         input.ImageRateIndependent,
+		ImageRateMultiplier:          imageRateMultiplier,
+		BatchImageDiscountMultiplier: batchImageDiscountMultiplier,
+		BatchImageHoldMultiplier:     batchImageHoldMultiplier,
+		VideoRateIndependent:         input.VideoRateIndependent,
+		VideoRateMultiplier:          videoRateMultiplier,
+		PeakRateEnabled:              peakRateEnabled,
+		PeakStart:                    peakStart,
+		PeakEnd:                      peakEnd,
+		PeakRateMultiplier:           peakRateMultiplier,
+		ImagePrice1K:                 imagePrice1K,
+		ImagePrice2K:                 imagePrice2K,
+		ImagePrice4K:                 imagePrice4K,
+		VideoPrice480P:               videoPrice480P,
+		VideoPrice720P:               videoPrice720P,
+		VideoPrice1080P:              videoPrice1080P,
+		WebSearchPricePerCall:        webSearchPricePerCall,
+		ModelRouting:                 input.ModelRouting,
+		MCPXMLInject:                 mcpXMLInject,
+		SupportedModelScopes:         input.SupportedModelScopes,
+		AllowMessagesDispatch:        input.AllowMessagesDispatch,
+		DefaultMappedModel:           input.DefaultMappedModel,
+		MessagesDispatchModelConfig:  normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
+		ModelsListConfig:             normalizeGroupModelsListConfig(input.ModelsListConfig),
+		RPMLimit:                     input.RPMLimit,
+		ContentReviewPolicy:          contentReviewPolicy,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
-	}
-
-	// require_oauth_only: 过滤掉 apikey 类型账号
-	if group.RequireOAuthOnly && (group.Platform == PlatformOpenAI || group.Platform == PlatformAntigravity || group.Platform == PlatformAnthropic || group.Platform == PlatformGemini || group.Platform == PlatformGrok) && len(accountIDsToCopy) > 0 {
-		accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
-		}
-		oauthIDs := make(map[int64]struct{}, len(accounts))
-		for _, acc := range accounts {
-			if acc.Type != AccountTypeAPIKey {
-				oauthIDs[acc.ID] = struct{}{}
-			}
-		}
-		var filtered []int64
-		for _, aid := range accountIDsToCopy {
-			if _, ok := oauthIDs[aid]; ok {
-				filtered = append(filtered, aid)
-			}
-		}
-		accountIDsToCopy = filtered
 	}
 
 	// 如果有需要复制的账号，绑定到新分组
@@ -396,106 +367,6 @@ func normalizePrice(price *float64) *float64 {
 		return nil
 	}
 	return price
-}
-
-func normalizeAnthropicMixedTypeWeightConfig(platform string, enabled bool, setupWeight, apiKeyWeight *int) (bool, int, int, error) {
-	setup := 100
-	if setupWeight != nil {
-		setup = *setupWeight
-	}
-	apiKey := 0
-	if apiKeyWeight != nil {
-		apiKey = *apiKeyWeight
-	}
-	return validateAnthropicMixedTypeWeightConfig(platform, enabled, setup, apiKey)
-}
-
-func validateAnthropicMixedTypeWeightConfig(platform string, enabled bool, setupWeight, apiKeyWeight int) (bool, int, int, error) {
-	if platform != PlatformAnthropic {
-		return false, 100, 0, nil
-	}
-	if setupWeight < 0 {
-		return false, 0, 0, errors.New("anthropic_setup_token_pool_weight must be >= 0")
-	}
-	if apiKeyWeight < 0 {
-		return false, 0, 0, errors.New("anthropic_api_key_pool_weight must be >= 0")
-	}
-	if setupWeight == 0 && apiKeyWeight == 0 {
-		if enabled {
-			return false, 0, 0, errors.New("at least one anthropic mixed type pool weight must be > 0")
-		}
-		setupWeight = 100
-	}
-	return enabled, setupWeight, apiKeyWeight, nil
-}
-
-// validateFallbackGroup 校验降级分组的有效性
-// currentGroupID: 当前分组 ID（新建时为 0）
-// fallbackGroupID: 降级分组 ID
-func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGroupID, fallbackGroupID int64) error {
-	// 不能将自己设置为降级分组
-	if currentGroupID > 0 && currentGroupID == fallbackGroupID {
-		return fmt.Errorf("cannot set self as fallback group")
-	}
-
-	visited := map[int64]struct{}{}
-	nextID := fallbackGroupID
-	for {
-		if _, seen := visited[nextID]; seen {
-			return fmt.Errorf("fallback group cycle detected")
-		}
-		visited[nextID] = struct{}{}
-		if currentGroupID > 0 && nextID == currentGroupID {
-			return fmt.Errorf("fallback group cycle detected")
-		}
-
-		// 检查降级分组是否存在
-		fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, nextID)
-		if err != nil {
-			return fmt.Errorf("fallback group not found: %w", err)
-		}
-
-		// 降级分组不能启用 claude_code_only，否则会造成死循环
-		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
-			return fmt.Errorf("fallback group cannot have claude_code_only enabled")
-		}
-
-		if fallbackGroup.FallbackGroupID == nil {
-			return nil
-		}
-		nextID = *fallbackGroup.FallbackGroupID
-	}
-}
-
-// validateFallbackGroupOnInvalidRequest 校验无效请求兜底分组的有效性
-// currentGroupID: 当前分组 ID（新建时为 0）
-// platform/subscriptionType: 当前分组的有效平台/订阅类型
-// fallbackGroupID: 兜底分组 ID
-func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Context, currentGroupID int64, platform, subscriptionType string, fallbackGroupID int64) error {
-	if platform != PlatformAnthropic && platform != PlatformAntigravity {
-		return fmt.Errorf("invalid request fallback only supported for anthropic or antigravity groups")
-	}
-	if subscriptionType == SubscriptionTypeSubscription {
-		return fmt.Errorf("subscription groups cannot set invalid request fallback")
-	}
-	if currentGroupID > 0 && currentGroupID == fallbackGroupID {
-		return fmt.Errorf("cannot set self as invalid request fallback group")
-	}
-
-	fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, fallbackGroupID)
-	if err != nil {
-		return fmt.Errorf("fallback group not found: %w", err)
-	}
-	if fallbackGroup.Platform != PlatformAnthropic {
-		return fmt.Errorf("fallback group must be anthropic platform")
-	}
-	if fallbackGroup.SubscriptionType == SubscriptionTypeSubscription {
-		return fmt.Errorf("fallback group cannot be subscription type")
-	}
-	if fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
-		return fmt.Errorf("fallback group cannot have invalid request fallback configured")
-	}
-	return nil
 }
 
 func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error) {
@@ -530,49 +401,15 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.SubscriptionType != "" {
 		group.SubscriptionType = input.SubscriptionType
 	}
-	mixedTypeEnabled := group.AnthropicMixedTypeWeightEnabled
-	if input.AnthropicMixedTypeWeightEnabled != nil {
-		mixedTypeEnabled = *input.AnthropicMixedTypeWeightEnabled
-	}
-	setupPoolWeight := group.AnthropicSetupTokenPoolWeight
-	if input.AnthropicSetupTokenPoolWeight != nil {
-		setupPoolWeight = *input.AnthropicSetupTokenPoolWeight
-	}
-	apiKeyPoolWeight := group.AnthropicAPIKeyPoolWeight
-	if input.AnthropicAPIKeyPoolWeight != nil {
-		apiKeyPoolWeight = *input.AnthropicAPIKeyPoolWeight
-	}
-	var weightErr error
-	mixedTypeEnabled, setupPoolWeight, apiKeyPoolWeight, weightErr = validateAnthropicMixedTypeWeightConfig(
-		group.Platform,
-		mixedTypeEnabled,
-		setupPoolWeight,
-		apiKeyPoolWeight,
-	)
-	if weightErr != nil {
-		return nil, weightErr
-	}
-	group.AnthropicMixedTypeWeightEnabled = mixedTypeEnabled
-	group.AnthropicSetupTokenPoolWeight = setupPoolWeight
-	group.AnthropicAPIKeyPoolWeight = apiKeyPoolWeight
 	contentReviewPolicy := group.ContentReviewPolicy
 	if input.ContentReviewPolicy != nil {
 		contentReviewPolicy = *input.ContentReviewPolicy
 	}
-	systemPromptPolicy := group.ClaudeOAuthSystemPromptPolicy
-	if input.ClaudeOAuthSystemPromptPolicy != nil {
-		systemPromptPolicy = *input.ClaudeOAuthSystemPromptPolicy
-	}
-	contentReviewPolicy, systemPromptPolicy, policyErr := normalizeAnthropicGroupPolicies(
-		group.Platform,
-		contentReviewPolicy,
-		systemPromptPolicy,
-	)
+	contentReviewPolicy, policyErr := normalizeAnthropicGroupPolicy(group.Platform, contentReviewPolicy)
 	if policyErr != nil {
 		return nil, policyErr
 	}
 	group.ContentReviewPolicy = contentReviewPolicy
-	group.ClaudeOAuthSystemPromptPolicy = systemPromptPolicy
 
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
 	// 前端始终发送这三个字段，无需 nil 守卫
@@ -666,37 +503,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.WebSearchPricePerCall = normalizePrice(input.WebSearchPricePerCall)
 	}
 
-	// Claude Code 客户端限制
-	if input.ClaudeCodeOnly != nil {
-		group.ClaudeCodeOnly = *input.ClaudeCodeOnly
-	}
-	if input.FallbackGroupID != nil {
-		// 校验降级分组
-		if *input.FallbackGroupID > 0 {
-			if err := s.validateFallbackGroup(ctx, id, *input.FallbackGroupID); err != nil {
-				return nil, err
-			}
-			group.FallbackGroupID = input.FallbackGroupID
-		} else {
-			// 传入 0 或负数表示清除降级分组
-			group.FallbackGroupID = nil
-		}
-	}
-	fallbackOnInvalidRequest := group.FallbackGroupIDOnInvalidRequest
-	if input.FallbackGroupIDOnInvalidRequest != nil {
-		if *input.FallbackGroupIDOnInvalidRequest > 0 {
-			fallbackOnInvalidRequest = input.FallbackGroupIDOnInvalidRequest
-		} else {
-			fallbackOnInvalidRequest = nil
-		}
-	}
-	if fallbackOnInvalidRequest != nil {
-		if err := s.validateFallbackGroupOnInvalidRequest(ctx, id, group.Platform, group.SubscriptionType, *fallbackOnInvalidRequest); err != nil {
-			return nil, err
-		}
-	}
-	group.FallbackGroupIDOnInvalidRequest = fallbackOnInvalidRequest
-
 	// 模型路由配置
 	if input.ModelRouting != nil {
 		group.ModelRouting = input.ModelRouting
@@ -716,12 +522,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// OpenAI Messages 调度配置
 	if input.AllowMessagesDispatch != nil {
 		group.AllowMessagesDispatch = *input.AllowMessagesDispatch
-	}
-	if input.RequireOAuthOnly != nil {
-		group.RequireOAuthOnly = *input.RequireOAuthOnly
-	}
-	if input.RequirePrivacySet != nil {
-		group.RequirePrivacySet = *input.RequirePrivacySet
 	}
 	if input.DefaultMappedModel != nil {
 		group.DefaultMappedModel = *input.DefaultMappedModel
@@ -782,27 +582,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		// 先清空当前分组的所有账号绑定
 		if _, err := s.groupRepo.DeleteAccountGroupsByGroupID(ctx, id); err != nil {
 			return nil, fmt.Errorf("failed to clear existing account bindings: %w", err)
-		}
-
-		// require_oauth_only: 过滤掉 apikey 类型账号
-		if group.RequireOAuthOnly && (group.Platform == PlatformOpenAI || group.Platform == PlatformAntigravity || group.Platform == PlatformAnthropic || group.Platform == PlatformGemini || group.Platform == PlatformGrok) && len(accountIDsToCopy) > 0 {
-			accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
-			}
-			oauthIDs := make(map[int64]struct{}, len(accounts))
-			for _, acc := range accounts {
-				if acc.Type != AccountTypeAPIKey {
-					oauthIDs[acc.ID] = struct{}{}
-				}
-			}
-			var filtered []int64
-			for _, aid := range accountIDsToCopy {
-				if _, ok := oauthIDs[aid]; ok {
-					filtered = append(filtered, aid)
-				}
-			}
-			accountIDsToCopy = filtered
 		}
 
 		// 再绑定源分组的账号
@@ -1054,7 +833,6 @@ func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, k
 	return apiKey, nil
 }
 
-// ReplaceUserGroup 替换用户的专属分组
 func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (*ReplaceUserGroupResult, error) {
 	if oldGroupID == newGroupID {
 		return nil, infraerrors.BadRequest("SAME_GROUP", "old and new group must be different")

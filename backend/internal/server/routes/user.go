@@ -122,8 +122,8 @@ func RegisterUserRoutes(
 		// 渠道监控（用户只读）
 		monitors := authenticated.Group("/channel-monitors")
 		{
-		monitors.GET("", h.ChannelMonitor.List)
-		monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
+			monitors.GET("", h.ChannelMonitor.List)
+			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
 		}
 
 		monitorV2 := authenticated.Group("/channel-monitor-v2")

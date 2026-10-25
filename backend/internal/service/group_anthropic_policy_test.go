@@ -15,27 +15,3 @@ func TestResolveGroupPolicy(t *testing.T) {
 	require.False(t, ResolveGroupPolicy(true, GroupPolicyDisabled))
 	require.True(t, ResolveGroupPolicy(true, "unknown"))
 }
-
-func TestAnthropicGroupPoliciesIgnoreOtherPlatforms(t *testing.T) {
-	group := &Group{
-		Platform:                      PlatformOpenAI,
-		ContentReviewPolicy:           GroupPolicyDisabled,
-		ClaudeOAuthSystemPromptPolicy: GroupPolicyDisabled,
-	}
-
-	require.Equal(t, GroupPolicyInherit, group.AnthropicContentReviewPolicy())
-	require.Equal(t, GroupPolicyInherit, group.AnthropicClaudeOAuthSystemPromptPolicy())
-}
-
-func TestAnthropicGroupPoliciesNormalizeStoredValues(t *testing.T) {
-	group := &Group{
-		Platform:                      PlatformAnthropic,
-		ContentReviewPolicy:           " ENABLED ",
-		ClaudeOAuthSystemPromptPolicy: " IDENTITY_ONLY ",
-	}
-
-	require.Equal(t, GroupPolicyEnabled, group.AnthropicContentReviewPolicy())
-	require.Equal(t, GroupPolicyIdentityOnly, group.AnthropicClaudeOAuthSystemPromptPolicy())
-	require.True(t, IsValidClaudeOAuthSystemPromptPolicy(GroupPolicyIdentityOnly))
-	require.False(t, IsValidGroupPolicy(GroupPolicyIdentityOnly), "content-review policy must remain three-state")
-}

@@ -51,6 +51,27 @@ func (p *ClaudeTokenProvider) SetRefreshPolicy(policy ProviderRefreshPolicy) {
 	p.refreshPolicy = policy
 }
 
+// EnsureFresh refreshes the access token when it expires within window and
+// returns the latest account. CC transport uses a wider window than the Go
+// forwarding path (3 minutes) so a CC process does not rotate the refresh
+// token in the middle of a request.
+func (p *ClaudeTokenProvider) EnsureFresh(ctx context.Context, account *Account, window time.Duration) (*Account, error) {
+	if p == nil || account == nil || p.refreshAPI == nil || p.executor == nil {
+		return account, nil
+	}
+	if window <= 0 {
+		window = claudeTokenRefreshSkew
+	}
+	result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, window)
+	if err != nil {
+		return account, err
+	}
+	if result != nil && result.Account != nil {
+		return result.Account, nil
+	}
+	return account, nil
+}
+
 // GetAccessToken returns a valid access_token.
 func (p *ClaudeTokenProvider) GetAccessToken(ctx context.Context, account *Account) (string, error) {
 	if account == nil {

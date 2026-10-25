@@ -92,28 +92,25 @@ type CreateGroupRequest struct {
 	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
 	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
-	AllowImageGeneration            bool     `json:"allow_image_generation"`
-	AllowBatchImageGeneration       bool     `json:"allow_batch_image_generation"`
-	ImageRateIndependent            bool     `json:"image_rate_independent"`
-	ImageRateMultiplier             *float64 `json:"image_rate_multiplier"`
-	BatchImageDiscountMultiplier    *float64 `json:"batch_image_discount_multiplier"`
-	BatchImageHoldMultiplier        *float64 `json:"batch_image_hold_multiplier"`
-	VideoRateIndependent            bool     `json:"video_rate_independent"`
-	VideoRateMultiplier             *float64 `json:"video_rate_multiplier"`
-	PeakRateEnabled                 bool     `json:"peak_rate_enabled"`
-	PeakStart                       string   `json:"peak_start"`
-	PeakEnd                         string   `json:"peak_end"`
-	PeakRateMultiplier              *float64 `json:"peak_rate_multiplier"`
-	ImagePrice1K                    *float64 `json:"image_price_1k"`
-	ImagePrice2K                    *float64 `json:"image_price_2k"`
-	ImagePrice4K                    *float64 `json:"image_price_4k"`
-	VideoPrice480P                  *float64 `json:"video_price_480p"`
-	VideoPrice720P                  *float64 `json:"video_price_720p"`
-	VideoPrice1080P                 *float64 `json:"video_price_1080p"`
-	WebSearchPricePerCall           *float64 `json:"web_search_price_per_call"`
-	ClaudeCodeOnly                  bool     `json:"claude_code_only"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request"`
+	AllowImageGeneration         bool     `json:"allow_image_generation"`
+	AllowBatchImageGeneration    bool     `json:"allow_batch_image_generation"`
+	ImageRateIndependent         bool     `json:"image_rate_independent"`
+	ImageRateMultiplier          *float64 `json:"image_rate_multiplier"`
+	BatchImageDiscountMultiplier *float64 `json:"batch_image_discount_multiplier"`
+	BatchImageHoldMultiplier     *float64 `json:"batch_image_hold_multiplier"`
+	VideoRateIndependent         bool     `json:"video_rate_independent"`
+	VideoRateMultiplier          *float64 `json:"video_rate_multiplier"`
+	PeakRateEnabled              bool     `json:"peak_rate_enabled"`
+	PeakStart                    string   `json:"peak_start"`
+	PeakEnd                      string   `json:"peak_end"`
+	PeakRateMultiplier           *float64 `json:"peak_rate_multiplier"`
+	ImagePrice1K                 *float64 `json:"image_price_1k"`
+	ImagePrice2K                 *float64 `json:"image_price_2k"`
+	ImagePrice4K                 *float64 `json:"image_price_4k"`
+	VideoPrice480P               *float64 `json:"video_price_480p"`
+	VideoPrice720P               *float64 `json:"video_price_720p"`
+	VideoPrice1080P              *float64 `json:"video_price_1080p"`
+	WebSearchPricePerCall        *float64 `json:"web_search_price_per_call"`
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled bool               `json:"model_routing_enabled"`
@@ -122,19 +119,13 @@ type CreateGroupRequest struct {
 	SupportedModelScopes []string `json:"supported_model_scopes"`
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool                                      `json:"allow_messages_dispatch"`
-	RequireOAuthOnly            bool                                      `json:"require_oauth_only"`
-	RequirePrivacySet           bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          string                                    `json:"default_mapped_model"`
 	MessagesDispatchModelConfig service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            service.GroupModelsListConfig             `json:"models_list_config"`
 	// 分组 RPM 上限（0 = 不限制）
 	RPMLimit int `json:"rpm_limit"`
 	// Anthropic setup-token/api-key 混合类型权重调度配置
-	AnthropicMixedTypeWeightEnabled bool   `json:"anthropic_mixed_type_weight_enabled"`
-	AnthropicSetupTokenPoolWeight   *int   `json:"anthropic_setup_token_pool_weight"`
-	AnthropicAPIKeyPoolWeight       *int   `json:"anthropic_api_key_pool_weight"`
-	ContentReviewPolicy             string `json:"content_review_policy" binding:"omitempty,oneof=inherit enabled disabled"`
-	ClaudeOAuthSystemPromptPolicy   string `json:"claude_oauth_system_prompt_policy" binding:"omitempty,oneof=inherit enabled identity_only disabled"`
+	ContentReviewPolicy string `json:"content_review_policy" binding:"omitempty,oneof=inherit enabled disabled"`
 	// 从指定分组复制账号（创建后自动绑定）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -152,28 +143,25 @@ type UpdateGroupRequest struct {
 	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
 	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
-	AllowImageGeneration            *bool    `json:"allow_image_generation"`
-	AllowBatchImageGeneration       *bool    `json:"allow_batch_image_generation"`
-	ImageRateIndependent            *bool    `json:"image_rate_independent"`
-	ImageRateMultiplier             *float64 `json:"image_rate_multiplier"`
-	BatchImageDiscountMultiplier    *float64 `json:"batch_image_discount_multiplier"`
-	BatchImageHoldMultiplier        *float64 `json:"batch_image_hold_multiplier"`
-	VideoRateIndependent            *bool    `json:"video_rate_independent"`
-	VideoRateMultiplier             *float64 `json:"video_rate_multiplier"`
-	PeakRateEnabled                 *bool    `json:"peak_rate_enabled"`
-	PeakStart                       *string  `json:"peak_start"`
-	PeakEnd                         *string  `json:"peak_end"`
-	PeakRateMultiplier              *float64 `json:"peak_rate_multiplier"`
-	ImagePrice1K                    *float64 `json:"image_price_1k"`
-	ImagePrice2K                    *float64 `json:"image_price_2k"`
-	ImagePrice4K                    *float64 `json:"image_price_4k"`
-	VideoPrice480P                  *float64 `json:"video_price_480p"`
-	VideoPrice720P                  *float64 `json:"video_price_720p"`
-	VideoPrice1080P                 *float64 `json:"video_price_1080p"`
-	WebSearchPricePerCall           *float64 `json:"web_search_price_per_call"`
-	ClaudeCodeOnly                  *bool    `json:"claude_code_only"`
-	FallbackGroupID                 *int64   `json:"fallback_group_id"`
-	FallbackGroupIDOnInvalidRequest *int64   `json:"fallback_group_id_on_invalid_request"`
+	AllowImageGeneration         *bool    `json:"allow_image_generation"`
+	AllowBatchImageGeneration    *bool    `json:"allow_batch_image_generation"`
+	ImageRateIndependent         *bool    `json:"image_rate_independent"`
+	ImageRateMultiplier          *float64 `json:"image_rate_multiplier"`
+	BatchImageDiscountMultiplier *float64 `json:"batch_image_discount_multiplier"`
+	BatchImageHoldMultiplier     *float64 `json:"batch_image_hold_multiplier"`
+	VideoRateIndependent         *bool    `json:"video_rate_independent"`
+	VideoRateMultiplier          *float64 `json:"video_rate_multiplier"`
+	PeakRateEnabled              *bool    `json:"peak_rate_enabled"`
+	PeakStart                    *string  `json:"peak_start"`
+	PeakEnd                      *string  `json:"peak_end"`
+	PeakRateMultiplier           *float64 `json:"peak_rate_multiplier"`
+	ImagePrice1K                 *float64 `json:"image_price_1k"`
+	ImagePrice2K                 *float64 `json:"image_price_2k"`
+	ImagePrice4K                 *float64 `json:"image_price_4k"`
+	VideoPrice480P               *float64 `json:"video_price_480p"`
+	VideoPrice720P               *float64 `json:"video_price_720p"`
+	VideoPrice1080P              *float64 `json:"video_price_1080p"`
+	WebSearchPricePerCall        *float64 `json:"web_search_price_per_call"`
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64 `json:"model_routing"`
 	ModelRoutingEnabled *bool              `json:"model_routing_enabled"`
@@ -182,19 +170,13 @@ type UpdateGroupRequest struct {
 	SupportedModelScopes *[]string `json:"supported_model_scopes"`
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       *bool                                      `json:"allow_messages_dispatch"`
-	RequireOAuthOnly            *bool                                      `json:"require_oauth_only"`
-	RequirePrivacySet           *bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          *string                                    `json:"default_mapped_model"`
 	MessagesDispatchModelConfig *service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            *service.GroupModelsListConfig             `json:"models_list_config"`
 	// 分组 RPM 上限（0 = 不限制）；nil 表示未提供不改动
 	RPMLimit *int `json:"rpm_limit"`
 	// Anthropic setup-token/api-key 混合类型权重调度配置
-	AnthropicMixedTypeWeightEnabled *bool   `json:"anthropic_mixed_type_weight_enabled"`
-	AnthropicSetupTokenPoolWeight   *int    `json:"anthropic_setup_token_pool_weight"`
-	AnthropicAPIKeyPoolWeight       *int    `json:"anthropic_api_key_pool_weight"`
-	ContentReviewPolicy             *string `json:"content_review_policy" binding:"omitempty,oneof=inherit enabled disabled"`
-	ClaudeOAuthSystemPromptPolicy   *string `json:"claude_oauth_system_prompt_policy" binding:"omitempty,oneof=inherit enabled identity_only disabled"`
+	ContentReviewPolicy *string `json:"content_review_policy" binding:"omitempty,oneof=inherit enabled disabled"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
@@ -304,6 +286,48 @@ func (h *GroupHandler) GetByID(c *gin.Context) {
 	response.Success(c, dto.GroupFromServiceAdmin(group))
 }
 
+// ListAccounts handles GET /admin/groups/:id/accounts.
+// 客户导向：分组就是可用账号集合，直接返回绑定账号。
+func (h *GroupHandler) ListAccounts(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	accounts, err := h.adminService.ListGroupAccounts(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	out := make([]*dto.Account, 0, len(accounts))
+	for i := range accounts {
+		out = append(out, dto.AccountFromService(&accounts[i]))
+	}
+	response.Success(c, out)
+}
+
+// SetAccounts handles PUT /admin/groups/:id/accounts.
+// 客户导向：整体替换该分组的账号集合。
+func (h *GroupHandler) SetAccounts(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	var req struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if err := h.adminService.SetGroupAccounts(c.Request.Context(), groupID, req.AccountIDs); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID, "account_count": len(req.AccountIDs)})
+}
+
 // GetModelsListCandidates handles getting candidate model IDs for custom /v1/models list.
 // GET /api/v1/admin/groups/:id/models-list-candidates
 func (h *GroupHandler) GetModelsListCandidates(c *gin.Context) {
@@ -341,54 +365,45 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	}
 
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
-		Name:                            req.Name,
-		Description:                     req.Description,
-		Platform:                        req.Platform,
-		RateMultiplier:                  req.RateMultiplier,
-		IsExclusive:                     req.IsExclusive,
-		SubscriptionType:                req.SubscriptionType,
-		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
-		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
-		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
-		AllowImageGeneration:            req.AllowImageGeneration,
-		AllowBatchImageGeneration:       req.AllowBatchImageGeneration,
-		ImageRateIndependent:            req.ImageRateIndependent,
-		ImageRateMultiplier:             req.ImageRateMultiplier,
-		BatchImageDiscountMultiplier:    req.BatchImageDiscountMultiplier,
-		BatchImageHoldMultiplier:        req.BatchImageHoldMultiplier,
-		VideoRateIndependent:            req.VideoRateIndependent,
-		VideoRateMultiplier:             req.VideoRateMultiplier,
-		PeakRateEnabled:                 req.PeakRateEnabled,
-		PeakStart:                       req.PeakStart,
-		PeakEnd:                         req.PeakEnd,
-		PeakRateMultiplier:              req.PeakRateMultiplier,
-		ImagePrice1K:                    req.ImagePrice1K,
-		ImagePrice2K:                    req.ImagePrice2K,
-		ImagePrice4K:                    req.ImagePrice4K,
-		VideoPrice480P:                  req.VideoPrice480P,
-		VideoPrice720P:                  req.VideoPrice720P,
-		VideoPrice1080P:                 req.VideoPrice1080P,
-		WebSearchPricePerCall:           req.WebSearchPricePerCall,
-		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
-		FallbackGroupID:                 req.FallbackGroupID,
-		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
-		ModelRouting:                    req.ModelRouting,
-		ModelRoutingEnabled:             req.ModelRoutingEnabled,
-		MCPXMLInject:                    req.MCPXMLInject,
-		SupportedModelScopes:            req.SupportedModelScopes,
-		AllowMessagesDispatch:           req.AllowMessagesDispatch,
-		RequireOAuthOnly:                req.RequireOAuthOnly,
-		RequirePrivacySet:               req.RequirePrivacySet,
-		DefaultMappedModel:              req.DefaultMappedModel,
-		MessagesDispatchModelConfig:     req.MessagesDispatchModelConfig,
-		ModelsListConfig:                req.ModelsListConfig,
-		RPMLimit:                        req.RPMLimit,
-		AnthropicMixedTypeWeightEnabled: req.AnthropicMixedTypeWeightEnabled,
-		AnthropicSetupTokenPoolWeight:   req.AnthropicSetupTokenPoolWeight,
-		AnthropicAPIKeyPoolWeight:       req.AnthropicAPIKeyPoolWeight,
-		ContentReviewPolicy:             req.ContentReviewPolicy,
-		ClaudeOAuthSystemPromptPolicy:   req.ClaudeOAuthSystemPromptPolicy,
-		CopyAccountsFromGroupIDs:        req.CopyAccountsFromGroupIDs,
+		Name:                         req.Name,
+		Description:                  req.Description,
+		Platform:                     req.Platform,
+		RateMultiplier:               req.RateMultiplier,
+		IsExclusive:                  req.IsExclusive,
+		SubscriptionType:             req.SubscriptionType,
+		DailyLimitUSD:                req.DailyLimitUSD.ToServiceInput(),
+		WeeklyLimitUSD:               req.WeeklyLimitUSD.ToServiceInput(),
+		MonthlyLimitUSD:              req.MonthlyLimitUSD.ToServiceInput(),
+		AllowImageGeneration:         req.AllowImageGeneration,
+		AllowBatchImageGeneration:    req.AllowBatchImageGeneration,
+		ImageRateIndependent:         req.ImageRateIndependent,
+		ImageRateMultiplier:          req.ImageRateMultiplier,
+		BatchImageDiscountMultiplier: req.BatchImageDiscountMultiplier,
+		BatchImageHoldMultiplier:     req.BatchImageHoldMultiplier,
+		VideoRateIndependent:         req.VideoRateIndependent,
+		VideoRateMultiplier:          req.VideoRateMultiplier,
+		PeakRateEnabled:              req.PeakRateEnabled,
+		PeakStart:                    req.PeakStart,
+		PeakEnd:                      req.PeakEnd,
+		PeakRateMultiplier:           req.PeakRateMultiplier,
+		ImagePrice1K:                 req.ImagePrice1K,
+		ImagePrice2K:                 req.ImagePrice2K,
+		ImagePrice4K:                 req.ImagePrice4K,
+		VideoPrice480P:               req.VideoPrice480P,
+		VideoPrice720P:               req.VideoPrice720P,
+		VideoPrice1080P:              req.VideoPrice1080P,
+		WebSearchPricePerCall:        req.WebSearchPricePerCall,
+		ModelRouting:                 req.ModelRouting,
+		ModelRoutingEnabled:          req.ModelRoutingEnabled,
+		MCPXMLInject:                 req.MCPXMLInject,
+		SupportedModelScopes:         req.SupportedModelScopes,
+		AllowMessagesDispatch:        req.AllowMessagesDispatch,
+		DefaultMappedModel:           req.DefaultMappedModel,
+		MessagesDispatchModelConfig:  req.MessagesDispatchModelConfig,
+		ModelsListConfig:             req.ModelsListConfig,
+		RPMLimit:                     req.RPMLimit,
+		ContentReviewPolicy:          req.ContentReviewPolicy,
+		CopyAccountsFromGroupIDs:     req.CopyAccountsFromGroupIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -414,55 +429,46 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	}
 
 	group, err := h.adminService.UpdateGroup(c.Request.Context(), groupID, &service.UpdateGroupInput{
-		Name:                            req.Name,
-		Description:                     req.Description,
-		Platform:                        req.Platform,
-		RateMultiplier:                  req.RateMultiplier,
-		IsExclusive:                     req.IsExclusive,
-		Status:                          req.Status,
-		SubscriptionType:                req.SubscriptionType,
-		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
-		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
-		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
-		AllowImageGeneration:            req.AllowImageGeneration,
-		AllowBatchImageGeneration:       req.AllowBatchImageGeneration,
-		ImageRateIndependent:            req.ImageRateIndependent,
-		ImageRateMultiplier:             req.ImageRateMultiplier,
-		BatchImageDiscountMultiplier:    req.BatchImageDiscountMultiplier,
-		BatchImageHoldMultiplier:        req.BatchImageHoldMultiplier,
-		VideoRateIndependent:            req.VideoRateIndependent,
-		VideoRateMultiplier:             req.VideoRateMultiplier,
-		PeakRateEnabled:                 req.PeakRateEnabled,
-		PeakStart:                       req.PeakStart,
-		PeakEnd:                         req.PeakEnd,
-		PeakRateMultiplier:              req.PeakRateMultiplier,
-		ImagePrice1K:                    req.ImagePrice1K,
-		ImagePrice2K:                    req.ImagePrice2K,
-		ImagePrice4K:                    req.ImagePrice4K,
-		VideoPrice480P:                  req.VideoPrice480P,
-		VideoPrice720P:                  req.VideoPrice720P,
-		VideoPrice1080P:                 req.VideoPrice1080P,
-		WebSearchPricePerCall:           req.WebSearchPricePerCall,
-		ClaudeCodeOnly:                  req.ClaudeCodeOnly,
-		FallbackGroupID:                 req.FallbackGroupID,
-		FallbackGroupIDOnInvalidRequest: req.FallbackGroupIDOnInvalidRequest,
-		ModelRouting:                    req.ModelRouting,
-		ModelRoutingEnabled:             req.ModelRoutingEnabled,
-		MCPXMLInject:                    req.MCPXMLInject,
-		SupportedModelScopes:            req.SupportedModelScopes,
-		AllowMessagesDispatch:           req.AllowMessagesDispatch,
-		RequireOAuthOnly:                req.RequireOAuthOnly,
-		RequirePrivacySet:               req.RequirePrivacySet,
-		DefaultMappedModel:              req.DefaultMappedModel,
-		MessagesDispatchModelConfig:     req.MessagesDispatchModelConfig,
-		ModelsListConfig:                req.ModelsListConfig,
-		RPMLimit:                        req.RPMLimit,
-		AnthropicMixedTypeWeightEnabled: req.AnthropicMixedTypeWeightEnabled,
-		AnthropicSetupTokenPoolWeight:   req.AnthropicSetupTokenPoolWeight,
-		AnthropicAPIKeyPoolWeight:       req.AnthropicAPIKeyPoolWeight,
-		ContentReviewPolicy:             req.ContentReviewPolicy,
-		ClaudeOAuthSystemPromptPolicy:   req.ClaudeOAuthSystemPromptPolicy,
-		CopyAccountsFromGroupIDs:        req.CopyAccountsFromGroupIDs,
+		Name:                         req.Name,
+		Description:                  req.Description,
+		Platform:                     req.Platform,
+		RateMultiplier:               req.RateMultiplier,
+		IsExclusive:                  req.IsExclusive,
+		Status:                       req.Status,
+		SubscriptionType:             req.SubscriptionType,
+		DailyLimitUSD:                req.DailyLimitUSD.ToServiceInput(),
+		WeeklyLimitUSD:               req.WeeklyLimitUSD.ToServiceInput(),
+		MonthlyLimitUSD:              req.MonthlyLimitUSD.ToServiceInput(),
+		AllowImageGeneration:         req.AllowImageGeneration,
+		AllowBatchImageGeneration:    req.AllowBatchImageGeneration,
+		ImageRateIndependent:         req.ImageRateIndependent,
+		ImageRateMultiplier:          req.ImageRateMultiplier,
+		BatchImageDiscountMultiplier: req.BatchImageDiscountMultiplier,
+		BatchImageHoldMultiplier:     req.BatchImageHoldMultiplier,
+		VideoRateIndependent:         req.VideoRateIndependent,
+		VideoRateMultiplier:          req.VideoRateMultiplier,
+		PeakRateEnabled:              req.PeakRateEnabled,
+		PeakStart:                    req.PeakStart,
+		PeakEnd:                      req.PeakEnd,
+		PeakRateMultiplier:           req.PeakRateMultiplier,
+		ImagePrice1K:                 req.ImagePrice1K,
+		ImagePrice2K:                 req.ImagePrice2K,
+		ImagePrice4K:                 req.ImagePrice4K,
+		VideoPrice480P:               req.VideoPrice480P,
+		VideoPrice720P:               req.VideoPrice720P,
+		VideoPrice1080P:              req.VideoPrice1080P,
+		WebSearchPricePerCall:        req.WebSearchPricePerCall,
+		ModelRouting:                 req.ModelRouting,
+		ModelRoutingEnabled:          req.ModelRoutingEnabled,
+		MCPXMLInject:                 req.MCPXMLInject,
+		SupportedModelScopes:         req.SupportedModelScopes,
+		AllowMessagesDispatch:        req.AllowMessagesDispatch,
+		DefaultMappedModel:           req.DefaultMappedModel,
+		MessagesDispatchModelConfig:  req.MessagesDispatchModelConfig,
+		ModelsListConfig:             req.ModelsListConfig,
+		RPMLimit:                     req.RPMLimit,
+		ContentReviewPolicy:          req.ContentReviewPolicy,
+		CopyAccountsFromGroupIDs:     req.CopyAccountsFromGroupIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

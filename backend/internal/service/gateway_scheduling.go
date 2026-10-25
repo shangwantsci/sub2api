@@ -102,6 +102,29 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 	ctx = s.withGroupContext(ctx, group)
 
+	// CC 已持有槽的 session 直接亲和回原账号，避免再次抢槽/换号。
+	if sessionHash != "" && groupID != nil {
+		if runtime := s.ClaudeCodeRuntime(); runtime != nil {
+			if accountID, ok := runtime.LookupSessionAccount(sessionHash); ok {
+				if _, excluded := excludedIDs[accountID]; !excluded {
+					if account, err := s.accountRepo.GetByID(ctx, accountID); err == nil && account != nil &&
+						account.Transport() == TransportClaudeCode && account.IsSchedulable() {
+						inGroup := containsInt64(account.GroupIDs, *groupID)
+						for _, ag := range account.AccountGroups {
+							if ag.GroupID == *groupID {
+								inGroup = true
+								break
+							}
+						}
+						if inGroup {
+							return s.newAcquiredSelectionResult(ctx, account, func() {})
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Claude Code 限制可能已将 groupID 解析为 fallback group，
 	// 渠道限制预检查必须使用解析后的分组。
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
@@ -109,6 +132,27 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			"group_id", derefGroupID(groupID),
 			"model", requestedModel)
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+	}
+
+	// CC 账号粘性绝对上限 2h；优先用 Redis 跨实例，缺失时回退运行时内存。
+	if sessionHash != "" {
+		allowed := true
+		if cache, ok := s.cache.(interface {
+			GetClaudeCodeStickyFirst(context.Context, int64, string) (time.Time, error)
+			SetClaudeCodeStickyFirst(context.Context, int64, string) error
+		}); ok {
+			first, err := cache.GetClaudeCodeStickyFirst(ctx, derefGroupID(groupID), sessionHash)
+			if err == nil && !first.IsZero() && time.Since(first) >= 2*time.Hour {
+				allowed = false
+			} else if err == nil && first.IsZero() {
+				_ = cache.SetClaudeCodeStickyFirst(ctx, derefGroupID(groupID), sessionHash)
+			}
+		} else if runtime := s.ClaudeCodeRuntime(); runtime != nil {
+			allowed = runtime.StickySessionAllowed(sessionHash)
+		}
+		if !allowed && s.cache != nil {
+			_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+		}
 	}
 
 	var stickyAccountID int64
@@ -157,7 +201,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				return nil, err
 			}
 
-			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.EffectiveConcurrency())
+			result, err := s.tryAcquireAccountSlotFor(ctx, account)
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -365,7 +409,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						rpmPass := gatePass && s.isAccountSchedulableForRPM(ctx, stickyAccount, true)
 
 						if rpmPass { // 粘性会话窗口费用+RPM 检查
-							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.EffectiveConcurrency())
+							result, err := s.tryAcquireAccountSlotFor(ctx, stickyAccount)
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
@@ -492,7 +536,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
-					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.EffectiveConcurrency())
+					result, err := s.tryAcquireAccountSlotFor(ctx, item.account)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
@@ -500,7 +544,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							continue
 						}
 						if sessionHash != "" && s.cache != nil {
-							_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, item.account.ID, stickySessionTTL)
+							_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, item.account.ID, s.stickyTTLForAccount(item.account))
 						}
 						if s.debugModelRoutingEnabled() {
 							logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
@@ -581,7 +625,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				)
 
 				if !clearSticky && platformOK && modelSupported && modelSchedulable && quotaOK && windowCostOK && rpmOK && schedulable {
-					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.EffectiveConcurrency())
+					result, err := s.tryAcquireAccountSlotFor(ctx, account)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
@@ -598,7 +642,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								"result", "slot_acquired",
 							)
 							if s.cache != nil {
-								_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
+								_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, s.stickyTTLForAccount(account))
 							}
 							return s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 						}
@@ -703,11 +747,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		candidates = append(candidates, acc)
 	}
 
-	mixedTypePolicyEnabled := shouldUseAnthropicMixedTypeWeightScheduling(group, platform)
-	if mixedTypePolicyEnabled {
-		candidates = filterCandidatesForMixedTypePolicy(candidates, group)
-	}
-
 	if len(candidates) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
@@ -744,36 +783,28 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
-		if mixedTypePolicyEnabled {
-			if result, ok, err := s.tryAcquireMixedTypeWeighted(ctx, available, groupID, sessionHash, requestedModel, group, preferOAuth, cfg.PreferSoonestReset); err != nil {
-				return nil, err
-			} else if ok {
-				return result, nil
+		// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
+		for len(available) > 0 {
+			selected := selectDefaultLoadAwareCandidate(available, requestedModel, preferOAuth, cfg.PreferSoonestReset)
+			if selected == nil {
+				break
 			}
-		} else {
-			// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
-			for len(available) > 0 {
-				selected := selectDefaultLoadAwareCandidate(available, requestedModel, preferOAuth, cfg.PreferSoonestReset)
-				if selected == nil {
-					break
-				}
 
-				result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.EffectiveConcurrency())
-				if err == nil && result.Acquired {
-					// 会话数量限制检查
-					if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
-						result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
-					} else {
-						if sessionHash != "" && s.cache != nil {
-							_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
-						}
-						return s.newAcquiredSelectionResult(ctx, selected.account, result.ReleaseFunc)
+			result, err := s.tryAcquireAccountSlotFor(ctx, selected.account)
+			if err == nil && result.Acquired {
+				// 会话数量限制检查
+				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
+					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
+				} else {
+					if sessionHash != "" && s.cache != nil {
+						_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, s.stickyTTLForAccount(selected.account))
 					}
+					return s.newAcquiredSelectionResult(ctx, selected.account, result.ReleaseFunc)
 				}
-
-				// 移除已尝试的账号，重新进行分层过滤
-				available = removeAccountWithLoadByID(available, selected.account.ID)
 			}
+
+			// 移除已尝试的账号，重新进行分层过滤
+			available = removeAccountWithLoadByID(available, selected.account.ID)
 		}
 	}
 
@@ -794,112 +825,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	return nil, ErrNoAvailableAccounts
 }
 
-func (s *GatewayService) tryAcquireMixedTypeWeighted(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, requestedModel string, group *Group, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
-	available = filterAvailableForMixedTypePolicy(available, group)
-	if len(available) == 0 {
-		return nil, false, nil
-	}
-
-	poolOrder := mixedTypePoolAttemptOrder(available, group)
-	for _, pool := range poolOrder {
-		result, ok, err := s.tryAcquireMixedTypePool(ctx, available, groupID, sessionHash, requestedModel, pool, preferOAuth, preferSoonestReset)
-		if err != nil || ok {
-			return result, ok, err
-		}
-	}
-	return nil, false, nil
-}
-
-func mixedTypePoolAttemptOrder(available []accountWithLoad, group *Group) []string {
-	if group == nil {
-		return nil
-	}
-	first := selectMixedTypePool(group.AnthropicSetupTokenPoolWeight, group.AnthropicAPIKeyPoolWeight)
-	order := make([]string, 0, 2)
-	if first != "" && mixedTypePoolHasCandidate(available, first) {
-		order = append(order, first)
-	}
-	for _, pool := range []string{mixedTypePoolSetupToken, mixedTypePoolAPIKey} {
-		if pool == first || !mixedTypePoolHasCandidate(available, pool) {
-			continue
-		}
-		switch pool {
-		case mixedTypePoolSetupToken:
-			if group.AnthropicSetupTokenPoolWeight <= 0 {
-				continue
-			}
-		case mixedTypePoolAPIKey:
-			if group.AnthropicAPIKeyPoolWeight <= 0 {
-				continue
-			}
-		}
-		order = append(order, pool)
-	}
-	return order
-}
-
-func mixedTypePoolHasCandidate(available []accountWithLoad, pool string) bool {
-	for _, item := range available {
-		if item.account != nil && mixedTypePoolForAccount(item.account) == pool {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *GatewayService) tryAcquireMixedTypePool(ctx context.Context, available []accountWithLoad, groupID *int64, sessionHash string, requestedModel string, pool string, preferOAuth bool, preferSoonestReset bool) (*AccountSelectionResult, bool, error) {
-	candidates := filterAvailableByMixedTypePool(available, pool)
-	for len(candidates) > 0 {
-		var selected *accountWithLoad
-		if pool == mixedTypePoolAPIKey {
-			selected = selectWeightedAPIKeyCandidate(candidates)
-		} else {
-			selected = selectDefaultLoadAwareCandidate(candidates, requestedModel, preferOAuth, preferSoonestReset)
-		}
-		if selected == nil || selected.account == nil {
-			break
-		}
-
-		result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.EffectiveConcurrency())
-		if err == nil && result.Acquired {
-			if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
-				result.ReleaseFunc()
-			} else {
-				if sessionHash != "" && s.cache != nil {
-					_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
-				}
-				selection, err := s.newAcquiredSelectionResult(ctx, selected.account, result.ReleaseFunc)
-				if err != nil {
-					return nil, false, err
-				}
-				return selection, true, nil
-			}
-		}
-
-		candidates = removeAccountWithLoadByID(candidates, selected.account.ID)
-	}
-	return nil, false, nil
-}
-
-func filterAvailableByMixedTypePool(available []accountWithLoad, pool string) []accountWithLoad {
-	if len(available) == 0 {
-		return available
-	}
-	result := make([]accountWithLoad, 0, len(available))
-	for _, item := range available {
-		if item.account != nil && mixedTypePoolForAccount(item.account) == pool {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
 func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
 	ordered := append([]*Account(nil), candidates...)
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
 
 	for _, acc := range ordered {
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.EffectiveConcurrency())
+		result, err := s.tryAcquireAccountSlotFor(ctx, acc)
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -907,7 +838,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 				continue
 			}
 			if sessionHash != "" && s.cache != nil {
-				_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, acc.ID, stickySessionTTL)
+				_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, acc.ID, s.stickyTTLForAccount(acc))
 			}
 			selection, err := s.newAcquiredSelectionResult(ctx, acc, result.ReleaseFunc)
 			if err != nil {
@@ -996,29 +927,11 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 	if groupID == nil {
 		return nil, nil, nil
 	}
-
-	currentID := *groupID
-	visited := map[int64]struct{}{}
-	for {
-		if _, seen := visited[currentID]; seen {
-			return nil, nil, fmt.Errorf("fallback group cycle detected")
-		}
-		visited[currentID] = struct{}{}
-
-		group, err := s.resolveGroupByID(ctx, currentID)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
-			return group, &currentID, nil
-		}
-
-		if group.FallbackGroupID == nil {
-			return nil, nil, ErrClaudeCodeOnly
-		}
-		currentID = *group.FallbackGroupID
+	group, err := s.resolveGroupByID(ctx, *groupID)
+	if err != nil {
+		return nil, nil, err
 	}
+	return group, groupID, nil
 }
 
 // checkClaudeCodeRestriction 检查分组的 Claude Code 客户端限制
@@ -1225,6 +1138,48 @@ func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID in
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
 	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+}
+
+// ClaudeCodeRuntime 返回 CC 运行时（可能为 nil）。
+func (s *GatewayService) ClaudeCodeRuntime() *ClaudeCodeRuntime {
+	if s == nil {
+		return nil
+	}
+	return s.claudeCodeRuntime
+}
+
+// isClaudeCodeTransportAccount 报告账号是否应走 CC 运输。运行时未启用时返回 false，
+// 调度与网关都会继续走原来的 Go 路径，保证开关默认关时行为不变。
+func (s *GatewayService) isClaudeCodeTransportAccount(account *Account) bool {
+	if s == nil || account == nil || account.Transport() != TransportClaudeCode {
+		return false
+	}
+	return s.claudeCodeRuntime != nil && s.claudeCodeRuntime.Enabled()
+}
+
+// stickyTTLForAccount 返回会话绑定 TTL：CC 账号默认 30 分钟 idle，
+// 其它账号沿用历史 1 小时。绝对上限由后续 RunManager 维护。
+func (s *GatewayService) stickyTTLForAccount(account *Account) time.Duration {
+	if account != nil && account.Transport() == TransportClaudeCode {
+		return claudeCodeStickySessionTTL
+	}
+	return stickySessionTTL
+}
+
+// tryAcquireAccountSlotFor 是选号阶段的统一入口：cc 账号不占 Redis 账号槽，
+// 并发完全由 ClaudeCodePool 的账号级/全局信号量控制。
+func (s *GatewayService) tryAcquireAccountSlotFor(ctx context.Context, account *Account) (*AcquireResult, error) {
+	if s.isClaudeCodeTransportAccount(account) {
+		if runtime := s.ClaudeCodeRuntime(); runtime != nil && runtime.Pool() != nil {
+			release, ok := runtime.Pool().TryAcquire(account.ID)
+			if !ok {
+				return &AcquireResult{Acquired: false}, nil
+			}
+			return &AcquireResult{Acquired: true, ReleaseFunc: release}, nil
+		}
+		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
+	}
+	return s.tryAcquireAccountSlot(ctx, account.ID, account.EffectiveConcurrency())
 }
 
 type usageLogWindowStatsBatchProvider interface {
@@ -1508,6 +1463,10 @@ func (s *GatewayService) IncrementAccountRPM(ctx context.Context, accountID int6
 // sessionID: 会话标识符（使用粘性会话的 hash）
 // 返回 true 表示允许（在限制内或会话已存在），false 表示拒绝（超出限制且是新会话）
 func (s *GatewayService) checkAndRegisterSession(ctx context.Context, account *Account, sessionID string) bool {
+	// cc 运输没有“会话”概念（一请求一进程），会话限制由池的并发信号量替代。
+	if s.isClaudeCodeTransportAccount(account) {
+		return true
+	}
 	// 只检查 Anthropic OAuth/SetupToken 账号
 	if !account.IsAnthropicOAuthOrSetupToken() {
 		return true
@@ -1612,90 +1571,6 @@ func filterByMinLoadRate(accounts []accountWithLoad) []accountWithLoad {
 		}
 	}
 	return result
-}
-
-func shouldUseAnthropicMixedTypeWeightScheduling(group *Group, platform string) bool {
-	return group != nil &&
-		platform == PlatformAnthropic &&
-		group.Platform == PlatformAnthropic &&
-		group.AnthropicMixedTypeWeightEnabled
-}
-
-func filterCandidatesForMixedTypePolicy(candidates []*Account, group *Group) []*Account {
-	if len(candidates) == 0 {
-		return candidates
-	}
-	result := make([]*Account, 0, len(candidates))
-	for _, account := range candidates {
-		if accountAllowedByMixedTypePolicy(account, group) {
-			result = append(result, account)
-		}
-	}
-	return result
-}
-
-func filterAvailableForMixedTypePolicy(available []accountWithLoad, group *Group) []accountWithLoad {
-	if len(available) == 0 {
-		return available
-	}
-	result := make([]accountWithLoad, 0, len(available))
-	for _, item := range available {
-		if accountAllowedByMixedTypePolicy(item.account, group) {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
-func accountAllowedByMixedTypePolicy(account *Account, group *Group) bool {
-	if account == nil || group == nil {
-		return false
-	}
-	switch mixedTypePoolForAccount(account) {
-	case mixedTypePoolAPIKey:
-		return group.AnthropicAPIKeyPoolWeight > 0 && account.EffectivePoolWeight() > 0
-	case mixedTypePoolSetupToken:
-		return group.AnthropicSetupTokenPoolWeight > 0
-	default:
-		return false
-	}
-}
-
-func mixedTypePoolForAccount(account *Account) string {
-	if account != nil && account.Type == AccountTypeAPIKey {
-		return mixedTypePoolAPIKey
-	}
-	return mixedTypePoolSetupToken
-}
-
-func selectMixedTypePool(setupWeight, apiKeyWeight int) string {
-	setupWeight = positiveWeight(setupWeight)
-	apiKeyWeight = positiveWeight(apiKeyWeight)
-	total := setupWeight + apiKeyWeight
-	if total <= 0 {
-		return ""
-	}
-	return selectMixedTypePoolByDraw(setupWeight, apiKeyWeight, mathrand.Intn(total))
-}
-
-func selectMixedTypePoolByDraw(setupWeight, apiKeyWeight, draw int) string {
-	setupWeight = positiveWeight(setupWeight)
-	apiKeyWeight = positiveWeight(apiKeyWeight)
-	total := setupWeight + apiKeyWeight
-	if total <= 0 {
-		return ""
-	}
-	if draw < 0 {
-		draw = 0
-	}
-	draw %= total
-	if setupWeight > 0 && draw < setupWeight {
-		return mixedTypePoolSetupToken
-	}
-	if apiKeyWeight > 0 {
-		return mixedTypePoolAPIKey
-	}
-	return mixedTypePoolSetupToken
 }
 
 func positiveWeight(weight int) int {
@@ -2051,12 +1926,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	preferOAuth := platform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, platform)
 
-	// require_privacy_set: 获取分组信息
-	var schedGroup *Group
-	if groupID != nil && s.groupRepo != nil {
-		schedGroup, _ = s.groupRepo.GetByID(ctx, *groupID)
-	}
-
 	var accounts []Account
 	accountsLoaded := false
 
@@ -2128,12 +1997,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForSelection(acc) {
 				continue
 			}
-			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-			if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-				_ = s.accountRepo.SetError(ctx, acc.ID,
-					fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
-				continue
-			}
 			if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
 				continue
 			}
@@ -2175,7 +2038,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 
 		if selected != nil {
 			if sessionHash != "" && s.cache != nil {
-				if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
+				if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, s.stickyTTLForAccount(selected)); err != nil {
 					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 				}
 			}
@@ -2239,12 +2102,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if !s.isAccountSchedulableForSelection(acc) {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-			_ = s.accountRepo.SetError(ctx, acc.ID,
-				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
-			continue
-		}
 		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
 			continue
 		}
@@ -2297,7 +2154,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 
 	// 4. 建立粘性绑定
 	if sessionHash != "" && s.cache != nil {
-		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
+		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, s.stickyTTLForAccount(selected)); err != nil {
 			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 		}
 	}
@@ -2310,12 +2167,6 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, nativePlatform string) (*Account, error) {
 	preferOAuth := nativePlatform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, nativePlatform)
-
-	// require_privacy_set: 获取分组信息
-	var schedGroup *Group
-	if groupID != nil && s.groupRepo != nil {
-		schedGroup, _ = s.groupRepo.GetByID(ctx, *groupID)
-	}
 
 	var accounts []Account
 	accountsLoaded := false
@@ -2384,12 +2235,6 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if !s.isAccountSchedulableForSelection(acc) {
 				continue
 			}
-			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-			if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-				_ = s.accountRepo.SetError(ctx, acc.ID,
-					fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
-				continue
-			}
 			// 过滤：原生平台直接通过，antigravity 需要启用混合调度
 			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
 				continue
@@ -2435,7 +2280,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 
 		if selected != nil {
 			if sessionHash != "" && s.cache != nil {
-				if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
+				if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, s.stickyTTLForAccount(selected)); err != nil {
 					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 				}
 			}
@@ -2496,12 +2341,6 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		if !s.isAccountSchedulableForSelection(acc) {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
-			_ = s.accountRepo.SetError(ctx, acc.ID,
-				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
-			continue
-		}
 		// 过滤：原生平台直接通过，antigravity 需要启用混合调度
 		if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
 			continue
@@ -2558,7 +2397,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 
 	// 4. 建立粘性绑定
 	if sessionHash != "" && s.cache != nil {
-		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, stickySessionTTL); err != nil {
+		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.ID, s.stickyTTLForAccount(selected)); err != nil {
 			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 		}
 	}

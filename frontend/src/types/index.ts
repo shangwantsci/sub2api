@@ -499,7 +499,6 @@ export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 
 
 export type SubscriptionType = 'standard' | 'subscription'
 export type GroupPolicy = 'inherit' | 'enabled' | 'disabled'
-export type ClaudeOAuthSystemPromptPolicy = GroupPolicy | 'identity_only'
 
 export interface OpenAIMessagesDispatchModelConfig {
   opus_mapped_model?: string
@@ -544,18 +543,10 @@ export interface Group {
   peak_end: string
   peak_rate_multiplier: number
   // Claude Code 客户端限制
-  claude_code_only: boolean
-  fallback_group_id: number | null
-  fallback_group_id_on_invalid_request: number | null
   // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
   allow_messages_dispatch?: boolean
   default_mapped_model?: string
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
-  require_oauth_only: boolean
-  require_privacy_set: boolean
-  anthropic_mixed_type_weight_enabled: boolean
-  anthropic_setup_token_pool_weight: number
-  anthropic_api_key_pool_weight: number
   created_at: string
   updated_at: string
 }
@@ -565,7 +556,6 @@ export interface AdminGroup extends Group {
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
   content_review_policy: GroupPolicy
-  claude_oauth_system_prompt_policy: ClaudeOAuthSystemPromptPolicy
 
   // MCP XML 协议注入（仅 antigravity 平台使用）
   mcp_xml_inject: boolean
@@ -681,9 +671,6 @@ export interface CreateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
-  claude_code_only?: boolean
-  fallback_group_id?: number | null
-  fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   models_list_config?: ModelsListConfig
@@ -693,13 +680,7 @@ export interface CreateGroupRequest {
   model_routing?: Record<string, number[]> | null
   model_routing_enabled?: boolean
   rpm_limit?: number
-  require_oauth_only?: boolean
-  require_privacy_set?: boolean
-  anthropic_mixed_type_weight_enabled?: boolean
-  anthropic_setup_token_pool_weight?: number
-  anthropic_api_key_pool_weight?: number
   content_review_policy?: GroupPolicy
-  claude_oauth_system_prompt_policy?: ClaudeOAuthSystemPromptPolicy
   // 从指定分组复制账号
   copy_accounts_from_group_ids?: number[]
 }
@@ -734,9 +715,6 @@ export interface UpdateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
-  claude_code_only?: boolean
-  fallback_group_id?: number | null
-  fallback_group_id_on_invalid_request?: number | null
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   models_list_config?: ModelsListConfig
@@ -746,13 +724,7 @@ export interface UpdateGroupRequest {
   model_routing?: Record<string, number[]> | null
   model_routing_enabled?: boolean
   rpm_limit?: number
-  require_oauth_only?: boolean
-  require_privacy_set?: boolean
-  anthropic_mixed_type_weight_enabled?: boolean
-  anthropic_setup_token_pool_weight?: number
-  anthropic_api_key_pool_weight?: number
   content_review_policy?: GroupPolicy
-  claude_oauth_system_prompt_policy?: ClaudeOAuthSystemPromptPolicy
   copy_accounts_from_group_ids?: number[]
 }
 

@@ -26,6 +26,7 @@ type sqlExecutor interface {
 type groupRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
+	db     *sql.DB
 }
 
 func NewGroupRepository(client *dbent.Client, sqlDB *sql.DB) service.GroupRepository {
@@ -33,12 +34,12 @@ func NewGroupRepository(client *dbent.Client, sqlDB *sql.DB) service.GroupReposi
 }
 
 func newGroupRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *groupRepository {
-	return &groupRepository{client: client, sql: sqlq}
+	db, _ := sqlq.(*sql.DB)
+	return &groupRepository{client: client, sql: sqlq, db: db}
 }
 
 func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) error {
 	groupIn.ContentReviewPolicy = service.NormalizeGroupPolicy(groupIn.ContentReviewPolicy)
-	groupIn.ClaudeOAuthSystemPromptPolicy = service.NormalizeClaudeOAuthSystemPromptPolicy(groupIn.ClaudeOAuthSystemPromptPolicy)
 	builder := r.client.Group.Create().
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -67,23 +68,14 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetNillableVideoPrice1080p(groupIn.VideoPrice1080P).
 		SetNillableWebSearchPricePerCall(groupIn.WebSearchPricePerCall).
 		SetDefaultValidityDays(groupIn.DefaultValidityDays).
-		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
-		SetNillableFallbackGroupID(groupIn.FallbackGroupID).
-		SetNillableFallbackGroupIDOnInvalidRequest(groupIn.FallbackGroupIDOnInvalidRequest).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
-		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
-		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
-		SetAnthropicMixedTypeWeightEnabled(groupIn.AnthropicMixedTypeWeightEnabled).
-		SetAnthropicSetupTokenPoolWeight(groupIn.AnthropicSetupTokenPoolWeight).
-		SetAnthropicAPIKeyPoolWeight(groupIn.AnthropicAPIKeyPoolWeight).
 		SetContentReviewPolicy(groupIn.ContentReviewPolicy).
-		SetClaudeOauthSystemPromptPolicy(groupIn.ClaudeOAuthSystemPromptPolicy).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
@@ -137,7 +129,6 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
 	groupIn.ContentReviewPolicy = service.NormalizeGroupPolicy(groupIn.ContentReviewPolicy)
-	groupIn.ClaudeOAuthSystemPromptPolicy = service.NormalizeClaudeOAuthSystemPromptPolicy(groupIn.ClaudeOAuthSystemPromptPolicy)
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -164,21 +155,14 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetNillableVideoPrice720p(groupIn.VideoPrice720P).
 		SetNillableVideoPrice1080p(groupIn.VideoPrice1080P).
 		SetDefaultValidityDays(groupIn.DefaultValidityDays).
-		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
-		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
-		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
-		SetAnthropicMixedTypeWeightEnabled(groupIn.AnthropicMixedTypeWeightEnabled).
-		SetAnthropicSetupTokenPoolWeight(groupIn.AnthropicSetupTokenPoolWeight).
-		SetAnthropicAPIKeyPoolWeight(groupIn.AnthropicAPIKeyPoolWeight).
 		SetContentReviewPolicy(groupIn.ContentReviewPolicy).
-		SetClaudeOauthSystemPromptPolicy(groupIn.ClaudeOAuthSystemPromptPolicy).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
@@ -234,19 +218,6 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		builder = builder.SetWebSearchPricePerCall(*groupIn.WebSearchPricePerCall)
 	} else {
 		builder = builder.ClearWebSearchPricePerCall()
-	}
-
-	// 处理 FallbackGroupID：nil 时清除，否则设置
-	if groupIn.FallbackGroupID != nil {
-		builder = builder.SetFallbackGroupID(*groupIn.FallbackGroupID)
-	} else {
-		builder = builder.ClearFallbackGroupID()
-	}
-	// 处理 FallbackGroupIDOnInvalidRequest：nil 时清除，否则设置
-	if groupIn.FallbackGroupIDOnInvalidRequest != nil {
-		builder = builder.SetFallbackGroupIDOnInvalidRequest(*groupIn.FallbackGroupIDOnInvalidRequest)
-	} else {
-		builder = builder.ClearFallbackGroupIDOnInvalidRequest()
 	}
 
 	// 处理 ModelRouting：nil 时清除，否则设置
@@ -895,6 +866,38 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 	}
 
 	return nil
+}
+
+// ReplaceGroupAccounts 原子替换分组账号集合：DELETE + INSERT + outbox 同一事务。
+func (r *groupRepository) ReplaceGroupAccounts(ctx context.Context, groupID int64, accountIDs []int64) error {
+	if r.db == nil {
+		if _, err := r.DeleteAccountGroupsByGroupID(ctx, groupID); err != nil {
+			return err
+		}
+		return r.BindAccountsToGroup(ctx, groupID, accountIDs)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID); err != nil {
+		return err
+	}
+	if len(accountIDs) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO account_groups (account_id, group_id, priority, created_at)
+			 SELECT unnest($1::bigint[]), $2, 50, NOW()
+			 ON CONFLICT (account_id, group_id) DO NOTHING`,
+			pq.Array(accountIDs), groupID); err != nil {
+			return err
+		}
+	}
+	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue replace group accounts failed: group=%d err=%v", groupID, err)
+	}
+	return tx.Commit()
 }
 
 // UpdateSortOrders 批量更新分组排序

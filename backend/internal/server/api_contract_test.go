@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	adminhandler "github.com/Wei-Shaw/sub2api/internal/handler/admin"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -319,19 +318,16 @@ func TestAPIContracts(t *testing.T) {
 				// 普通用户可见的分组列表不应包含内部字段（如 model_routing/account_count）。
 				deps.groupRepo.SetActive([]service.Group{
 					{
-						ID:                              10,
-						Name:                            "Group One",
-						Description:                     "desc",
-						Platform:                        service.PlatformAnthropic,
-						RateMultiplier:                  1.5,
-						PeakRateMultiplier:              1.0,
-						IsExclusive:                     false,
-						Status:                          service.StatusActive,
-						SubscriptionType:                service.SubscriptionTypeStandard,
-						AnthropicMixedTypeWeightEnabled: false,
-						AnthropicSetupTokenPoolWeight:   100,
-						AnthropicAPIKeyPoolWeight:       0,
-						ModelRoutingEnabled:             true,
+						ID:                  10,
+						Name:                "Group One",
+						Description:         "desc",
+						Platform:            service.PlatformAnthropic,
+						RateMultiplier:      1.5,
+						PeakRateMultiplier:  1.0,
+						IsExclusive:         false,
+						Status:              service.StatusActive,
+						SubscriptionType:    service.SubscriptionTypeStandard,
+						ModelRoutingEnabled: true,
 						ModelRouting: map[string][]int64{
 							"claude-3-*": []int64{101, 102},
 						},
@@ -380,16 +376,8 @@ func TestAPIContracts(t *testing.T) {
 						"image_rate_multiplier": 0,
 						"video_rate_independent": false,
 						"video_rate_multiplier": 0,
-						"claude_code_only": false,
 						"allow_messages_dispatch": false,
-						"fallback_group_id": null,
-						"fallback_group_id_on_invalid_request": null,
-						"require_oauth_only": false,
-						"require_privacy_set": false,
 						"rpm_limit": 0,
-						"anthropic_mixed_type_weight_enabled": false,
-						"anthropic_setup_token_pool_weight": 100,
-						"anthropic_api_key_pool_weight": 0,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
 					}
@@ -695,8 +683,6 @@ func TestAPIContracts(t *testing.T) {
 					"openai_advanced_scheduler_enabled":                                  "true",
 					service.SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled:       "false",
 					service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled: "false",
-					service.SettingKeyClaudeCodeMimicryProfile:                           claude.DefaultClaudeCodeMimicryProfileID,
-					service.SettingKeyClaudeMimicryGuardMode:                             "block",
 				})
 			},
 			method:     http.MethodGet,
@@ -874,13 +860,6 @@ func TestAPIContracts(t *testing.T) {
 					"allow_ungrouped_key_scheduling": false,
 					"backend_mode_enabled": false,
 					"enable_cch_signing": false,
-					"claude_code_mimicry_profile": "cc-2.1.211-sdk-cli-linux-x64",
-					"claude_mimicry_guard_mode": "block",
-					"enable_claude_oauth_system_prompt_injection": true,
-					"enable_claude_oauth_billable_input_tokens": false,
-					"claude_oauth_billable_input_tokens_override": 0,
-					"claude_oauth_system_prompt": "",
-					"claude_oauth_system_prompt_blocks": "",
 					"enable_anthropic_cache_ttl_1h_injection": false,
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
@@ -1151,13 +1130,6 @@ func TestAPIContracts(t *testing.T) {
 					"enable_fingerprint_unification": true,
 					"enable_metadata_passthrough": false,
 					"enable_cch_signing": false,
-					"claude_code_mimicry_profile": "cc-2.1.211-sdk-cli-linux-x64",
-					"claude_mimicry_guard_mode": "warn",
-					"enable_claude_oauth_system_prompt_injection": true,
-					"enable_claude_oauth_billable_input_tokens": false,
-					"claude_oauth_billable_input_tokens_override": 0,
-					"claude_oauth_system_prompt": "",
-					"claude_oauth_system_prompt_blocks": "",
 					"enable_anthropic_cache_ttl_1h_injection": false,
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,

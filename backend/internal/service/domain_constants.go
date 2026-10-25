@@ -529,32 +529,6 @@ const (
 	// 网关随之不再注入/签名 cch（见 buildBillingAttributionText）。保留该 key 仅为向后兼容，
 	// 开关不再产生任何效果。
 	SettingKeyEnableCCHSigning = "enable_cch_signing"
-	// SettingKeyClaudeCodeMimicryProfile Claude Code 伪装 profile ID（缺省取 claude.DefaultClaudeCodeMimicryProfileID）
-	SettingKeyClaudeCodeMimicryProfile = "claude_code_mimicry_profile"
-	// SettingKeyClaudeMimicryGuardMode Claude Code 伪装审计模式：off/warn/block（默认 warn）
-	SettingKeyClaudeMimicryGuardMode = "claude_mimicry_guard_mode"
-	// SettingKeyClaudeCodeCalibratedProfile 存放 tools/cc-calibrate 对真身 Claude Code CLI
-	// 抓包标定所得的机器可读 profile JSON（headers 模板 + 分档 anthropic-beta + cc_version +
-	// 指纹守卫结果）。网关热加载它覆盖 constants.go 里的硬编码出站字节；空值/无效/守卫未过
-	// 时回退到编译内置常量。见 backend/internal/pkg/claude/calibrated_profile.go。
-	SettingKeyClaudeCodeCalibratedProfile = "claude_code_calibrated_profile"
-	// SettingKeyEnableClaudeOAuthSystemPromptInjection 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
-	SettingKeyEnableClaudeOAuthSystemPromptInjection = "enable_claude_oauth_system_prompt_injection"
-	// SettingKeyClaudeOAuthSystemPrompt Claude OAuth mimic 路径注入的通用扩展 system prompt（空值使用内置默认）
-	SettingKeyClaudeOAuthSystemPrompt = "claude_oauth_system_prompt"
-	// SettingKeyClaudeOAuthSystemPromptBlocks Claude OAuth mimic 路径注入的 system blocks JSON 配置（空值使用内置默认）
-	SettingKeyClaudeOAuthSystemPromptBlocks = "claude_oauth_system_prompt_blocks"
-	// SettingKeyEnableClaudeOAuthBillableInputTokens 是否从回给客户端的 usage.input_tokens
-	// 中扣除网关注入的 Claude Code 身份 blocks（默认 false）。
-	// 仅扣不带 cache_control 的注入块——带 cache_control 的落在 cache_creation/cache_read
-	// 维度，本就不在 input_tokens 里。只改展示值，计费与审计始终用上游原始 usage。
-	// 见 claude_billable_input_tokens.go。
-	SettingKeyEnableClaudeOAuthBillableInputTokens = "enable_claude_oauth_billable_input_tokens"
-	// SettingKeyClaudeOAuthBillableInputTokensOverride 用实测值覆盖注入量的本地估算（0 = 用估算）。
-	// 本地用 o200k 分词，与 Anthropic 口径存在系统性偏差（线上实测：结构化的
-	// billing header 被 o200k 拆得更碎，两块估 42 而官方只计 28）。注入内容形态固定，
-	// 因此一次标定即可长期生效：填 (上游 input_tokens - 客户内容真值)。
-	SettingKeyClaudeOAuthBillableInputTokensOverride = "claude_oauth_billable_input_tokens_override"
 	// SettingKeyEnableAnthropicCacheTTL1hInjection 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
 	SettingKeyEnableAnthropicCacheTTL1hInjection = "enable_anthropic_cache_ttl_1h_injection"
 	// SettingKeyEnableClientDatelineNormalization 是否对 Anthropic OAuth/SetupToken 账号

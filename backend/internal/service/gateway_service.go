@@ -45,10 +45,11 @@ var claudeCodeSystemPromptExpansion string
 var claudeCodeFableSystemPromptExpansion string
 
 const (
-	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
-	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
-	stickySessionTTL        = time.Hour // 粘性会话TTL
-	defaultMaxLineSize      = 500 * 1024 * 1024
+	claudeAPIURL               = "https://api.anthropic.com/v1/messages?beta=true"
+	claudeAPICountTokensURL    = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
+	stickySessionTTL           = time.Hour        // 粘性会话TTL
+	claudeCodeStickySessionTTL = 30 * time.Minute // CC 账号会话绑定 idle TTL
+	defaultMaxLineSize         = 500 * 1024 * 1024
 	// Canonical Claude Agent SDK identity block from Claude Code CLI 2.1.206.
 	// Keep it EXACT (no trailing whitespace/newlines) to match captured traffic.
 	claudeCodeSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
@@ -406,9 +407,6 @@ var (
 // ErrNoAvailableAccounts 表示没有可用的账号
 var ErrNoAvailableAccounts = errors.New("no available accounts")
 
-// ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
-var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
-
 // allowedHeaders 白名单headers（参考CRS项目）
 var allowedHeaders = map[string]bool{
 	"accept":                                    true,
@@ -680,8 +678,8 @@ type GatewayService struct {
 	billingService        *BillingService
 	rateLimitService      *RateLimitService
 	billingCacheService   *BillingCacheService
-	identityService       *IdentityService
 	httpUpstream          HTTPUpstream
+	claudeCodeRuntime     *ClaudeCodeRuntime
 	deferredService       *DeferredService
 	concurrencyService    *ConcurrencyService
 	claudeTokenProvider   *ClaudeTokenProvider
@@ -723,7 +721,6 @@ func NewGatewayService(
 	billingService *BillingService,
 	rateLimitService *RateLimitService,
 	billingCacheService *BillingCacheService,
-	identityService *IdentityService,
 	httpUpstream HTTPUpstream,
 	deferredService *DeferredService,
 	claudeTokenProvider *ClaudeTokenProvider,
@@ -736,6 +733,7 @@ func NewGatewayService(
 	resolver *ModelPricingResolver,
 	balanceNotifyService *BalanceNotifyService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	claudeCodeRuntime *ClaudeCodeRuntime,
 ) *GatewayService {
 	userGroupRateTTL := resolveUserGroupRateCacheTTL(cfg)
 	modelsListTTL := resolveModelsListCacheTTL(cfg)
@@ -756,7 +754,6 @@ func NewGatewayService(
 		billingService:        billingService,
 		rateLimitService:      rateLimitService,
 		billingCacheService:   billingCacheService,
-		identityService:       identityService,
 		httpUpstream:          httpUpstream,
 		deferredService:       deferredService,
 		claudeTokenProvider:   claudeTokenProvider,
@@ -772,6 +769,7 @@ func NewGatewayService(
 		resolver:              resolver,
 		balanceNotifyService:  balanceNotifyService,
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
+		claudeCodeRuntime:     claudeCodeRuntime,
 	}
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		userGroupRateRepo,
@@ -873,6 +871,14 @@ func (s *GatewayService) ClearStickySession(ctx context.Context, groupID *int64,
 
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.
 // Returns 0 if no binding exists or on error.
+// GetAccountByID 读取完整账号（工具续轮/计费需要）。
+func (s *GatewayService) GetAccountByID(ctx context.Context, id int64) (*Account, error) {
+	if s == nil || s.accountRepo == nil {
+		return nil, errors.New("account repository is not configured")
+	}
+	return s.accountRepo.GetByID(ctx, id)
+}
+
 func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
 	if sessionHash == "" || s.cache == nil {
 		return 0, nil

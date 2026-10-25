@@ -37,6 +37,8 @@ type AdminService interface {
 	// ordered by sort_order then id. Used by the API Key group filter dropdown.
 	GetAllGroupsIncludingInactive(ctx context.Context) ([]Group, error)
 	GetGroup(ctx context.Context, id int64) (*Group, error)
+	ListGroupAccounts(ctx context.Context, id int64) ([]Account, error)
+	SetGroupAccounts(ctx context.Context, id int64, accountIDs []int64) error
 	GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error)
 	CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error)
 	UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error)
@@ -246,10 +248,7 @@ type CreateGroupInput struct {
 	VideoPrice1080P    *float64
 	// Codex alpha/search 网页搜索单次价格（USD/次，仅 openai 平台使用）；nil/负数按默认价 0.01 处理
 	WebSearchPricePerCall *float64
-	ClaudeCodeOnly        bool   // 仅允许 Claude Code 客户端
-	FallbackGroupID       *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
-	FallbackGroupIDOnInvalidRequest *int64
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool // 是否启用模型路由
@@ -259,18 +258,12 @@ type CreateGroupInput struct {
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool
 	DefaultMappedModel          string
-	RequireOAuthOnly            bool
-	RequirePrivacySet           bool
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
 	ModelsListConfig            GroupModelsListConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制）
 	RPMLimit int
 	// Anthropic setup-token/api-key 混合类型权重调度配置
-	AnthropicMixedTypeWeightEnabled bool
-	AnthropicSetupTokenPoolWeight   *int
-	AnthropicAPIKeyPoolWeight       *int
-	ContentReviewPolicy             string
-	ClaudeOAuthSystemPromptPolicy   string
+	ContentReviewPolicy string
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -308,10 +301,7 @@ type UpdateGroupInput struct {
 	VideoPrice1080P    *float64
 	// Codex alpha/search 网页搜索单次价格（USD/次）；nil 表示不修改，负数表示清除回默认价 0.01
 	WebSearchPricePerCall *float64
-	ClaudeCodeOnly        *bool  // 仅允许 Claude Code 客户端
-	FallbackGroupID       *int64 // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
-	FallbackGroupIDOnInvalidRequest *int64
 	// 模型路由配置（仅 anthropic 平台使用）
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled *bool // 是否启用模型路由
@@ -321,18 +311,12 @@ type UpdateGroupInput struct {
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       *bool
 	DefaultMappedModel          *string
-	RequireOAuthOnly            *bool
-	RequirePrivacySet           *bool
 	MessagesDispatchModelConfig *OpenAIMessagesDispatchModelConfig
 	ModelsListConfig            *GroupModelsListConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制），nil 表示未提供不改动。
 	RPMLimit *int
 	// Anthropic setup-token/api-key 混合类型权重调度配置
-	AnthropicMixedTypeWeightEnabled *bool
-	AnthropicSetupTokenPoolWeight   *int
-	AnthropicAPIKeyPoolWeight       *int
-	ContentReviewPolicy             *string
-	ClaudeOAuthSystemPromptPolicy   *string
+	ContentReviewPolicy *string
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64
 }

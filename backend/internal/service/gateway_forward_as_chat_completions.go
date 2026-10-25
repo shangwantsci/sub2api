@@ -90,18 +90,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
-	// 6. Apply Claude Code mimicry for OAuth accounts.
-	// Chat Completions 协议进来的请求永远不是 Claude Code 客户端，所以对 OAuth 账号
-	// 必须完整执行 /v1/messages 主路径上的伪装链路（system 重写 + normalize + metadata 注入），
-	// 否则会被 Anthropic 判为第三方应用并扣 extra usage。
-	// 见 applyClaudeCodeOAuthMimicryToBody 的 godoc。
-	isClaudeCode := false
-	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
-
-	if shouldMimicClaudeCode {
-		anthropicBody = s.applyClaudeCodeOAuthMimicryToBody(ctx, c, account, anthropicBody, anthropicReq.System, mappedModel)
-	}
-
 	// 7. Enforce cache_control block limit
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
@@ -119,14 +107,14 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// 10. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	upstreamReq, _, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
+	upstreamReq, _, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
 	// 11. Send request
-	tlsProfile := s.tlsFPProfileService.ResolveTLSProfileForClaudeMimic(account, shouldMimicClaudeCode)
+	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
