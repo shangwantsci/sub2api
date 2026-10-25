@@ -36,6 +36,15 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h)
 
+		// Claude 订阅号池
+		admin.GET("/pool/overview", h.Admin.Pool.Overview)
+		admin.GET("/pool/accounts", h.Admin.Pool.Accounts)
+		admin.POST("/pool/usage", h.Admin.Pool.Usage)
+		admin.GET("/pool/runs", h.Admin.Pool.Runs)
+		admin.DELETE("/pool/runs/:session", h.Admin.Pool.ReleaseRun)
+		admin.GET("/pool/events", h.Admin.Pool.Events)
+		admin.GET("/pool/health", h.Admin.Pool.Health)
+
 		// 供号商对账与设置
 		registerProviderAdminRoutes(admin, h)
 
