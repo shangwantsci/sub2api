@@ -82,7 +82,6 @@
                 <option value="rate_limited">{{ t('admin.pool.rateLimited') }}</option>
                 <option value="error">{{ t('admin.pool.error') }}</option>
               </select>
-              <RouterLink to="/admin/accounts" class="text-xs text-primary-600 hover:underline dark:text-primary-400">{{ t('admin.pool.allAccounts') }}</RouterLink>
             </div>
           </div>
           <div class="overflow-x-auto">
@@ -93,7 +92,7 @@
                   <th class="px-4 py-2">{{ t('admin.pool.status') }}</th>
                   <th class="px-4 py-2">{{ t('admin.pool.type') }}</th>
                   <th class="px-4 py-2">{{ t('admin.pool.capacity') }}</th>
-                  <th class="px-4 py-2">5h reset / 7d</th>
+                  <th class="px-4 py-2">{{ t('admin.pool.usageWindow') }}</th>
                 </tr>
               </thead>
               <tbody>

@@ -90,7 +90,9 @@ watch(
     if (!props.show || !props.account) return
     loadingUsage.value = true
     try {
-      usage.value = await adminAPI.accounts.getUsage(props.account.id)
+      usage.value = await adminAPI.accounts.getUsage(props.account.id, 'passive')
+    } catch {
+      usage.value = null
     } finally {
       loadingUsage.value = false
     }
